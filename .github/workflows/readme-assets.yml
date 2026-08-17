@@ -9,6 +9,7 @@ on:
       - "frontend/**"
       - "lingjing_harness/**"
       - "scripts/capture_readme_assets.py"
+      - "docs/readme-assets/architecture.svg"
       - ".github/workflows/readme-assets.yml"
 
 permissions:
