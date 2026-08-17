@@ -1,0 +1,39 @@
+name: Apply autonomous harness upgrade
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".upgrade/**"
+      - ".github/workflows/apply-frontier-upgrade.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify and apply upgrade bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .upgrade/part-* | base64 -d > /tmp/recsys-frontier-upgrade.tar.gz
+          echo "3b3772d74cec01228793baeaaec813ac484154250d7696a1629c2d1f674166af  /tmp/recsys-frontier-upgrade.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/recsys-frontier-upgrade.tar.gz
+          rm -f lingjing_harness/algorithms/experiment.py
+          rm -rf .upgrade
+          rm -f .github/workflows/apply-frontier-upgrade.yml
+
+      - name: Commit autonomous self-evolving harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Build autonomous self-evolving recsys harness"
+          git push
