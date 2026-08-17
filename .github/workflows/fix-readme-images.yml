@@ -1,0 +1,63 @@
+name: Fix README image rendering
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/fix-readme-images.yml"
+      - "README.md"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Replace broken README image URLs
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('README.md')
+          text = p.read_text(encoding='utf-8')
+          replacements = {
+              '](/docs/readme-assets/overview.png)': '](https://github.com/jiaweine/recsys-harness/blob/main/docs/readme-assets/overview.png?raw=1)',
+              '](/docs/readme-assets/workbench.png)': '](https://github.com/jiaweine/recsys-harness/blob/main/docs/readme-assets/workbench.png?raw=1)',
+              '](/docs/readme-assets/evidence.png)': '](https://github.com/jiaweine/recsys-harness/blob/main/docs/readme-assets/evidence.png?raw=1)',
+              '](/docs/readme-assets/mobile.png)': '](https://github.com/jiaweine/recsys-harness/blob/main/docs/readme-assets/mobile.png?raw=1)',
+              '](/docs/readme-assets/architecture.svg)': '](https://github.com/jiaweine/recsys-harness/blob/main/docs/readme-assets/architecture.svg?raw=1)',
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f'missing expected README image reference: {old}')
+              text = text.replace(old, new)
+          p.write_text(text if text.endswith('\n') else text + '\n', encoding='utf-8')
+          PY
+      - name: Verify README image targets
+        run: |
+          for name in overview.png workbench.png evidence.png mobile.png architecture.svg; do
+            test -s "docs/readme-assets/$name"
+            curl -fsSL --retry 3 "https://github.com/jiaweine/recsys-harness/blob/main/docs/readme-assets/$name?raw=1" -o "/tmp/$name"
+            test -s "/tmp/$name"
+          done
+          python - <<'PY'
+          from pathlib import Path
+          for name in ('overview.png','workbench.png','evidence.png','mobile.png'):
+              data = Path('/tmp', name).read_bytes()
+              assert data.startswith(b'\x89PNG\r\n\x1a\n'), name
+          svg = Path('/tmp/architecture.svg').read_text(encoding='utf-8')
+          assert '<svg' in svg
+          PY
+      - name: Commit README fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          if git diff --cached --quiet; then
+            echo "README image references already fixed."
+            exit 0
+          fi
+          git commit -m "Fix README image URLs"
+          git push
