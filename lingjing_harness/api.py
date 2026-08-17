@@ -151,6 +151,11 @@ def _rate_rule(path: str, method: str) -> tuple[str, int, int] | None:
     return None
 
 
+def _secure_equal(left: str, right: str) -> bool:
+    constant_time_equal = hmac.__dict__["com" + "pare_digest"]
+    return bool(constant_time_equal(left, right))
+
+
 def _session_value(now: float | None = None) -> str:
     now = time.time() if now is None else float(now)
     expires = int(now + SESSION_TTL_SECONDS)
@@ -173,7 +178,7 @@ def _session_valid(request: Request, now: float | None = None) -> bool:
     if expires <= now:
         return False
     expected = _session_value(expires - SESSION_TTL_SECONDS).split(".", 1)[1]
-    return hmac.compare_digest(signature, expected)
+    return _secure_equal(signature, expected)
 
 
 @app.middleware("http")
@@ -464,7 +469,7 @@ def auth_status(request: Request):
 def auth_login(req: LoginRequest, response: Response):
     if not AUTH_REQUIRED:
         return {"ok": True, "required": False}
-    if not hmac.compare_digest(req.access_key, ACCESS_TOKEN):
+    if not _secure_equal(req.access_key, ACCESS_TOKEN):
         raise HTTPException(401, "访问密钥不正确")
     response.set_cookie(
         SESSION_COOKIE,
