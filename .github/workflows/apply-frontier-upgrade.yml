@@ -77,9 +77,17 @@ jobs:
               status_response = client.get('/api/status')
               assert status_response.status_code == 200, status_response.text
               status = status_response.json()
-              assert status['agent']['dynamic_replan'] is True
-              assert status['agent']['self_evolving'] is True
-              assert status['agent']['checkpoint_resume'] is True
+              assert status['autonomous_decision'] is True
+              assert status['self_evolving'] is True
+              assert status['runtime']['dynamic_replan'] is True
+              assert status['runtime']['checkpoint_resume'] is True
+              assert status['runtime']['automatic_rollback'] is True
+              capabilities = client.get('/api/capabilities')
+              assert capabilities.status_code == 200, capabilities.text
+              caps = capabilities.json()
+              assert caps['autonomy']['self_evolution'] is True
+              assert caps['autonomy']['holdout_validation'] is True
+              assert caps['autonomy']['idempotent_adaptation'] is True
           PY
 
       - name: Validate real Chromium product flow
