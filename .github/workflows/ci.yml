@@ -40,6 +40,9 @@ jobs:
           assert 'backdrop-filter' not in css_lower, 'glass blur styling detected'
           sizes = [int(value) for value in re.findall(r'font-size:\s*(\d+)px', css)]
           assert not [value for value in sizes if value < 10], 'font size below 10px detected'
+          declarations = re.findall(r'font-size:\s*([^;}\n]+)', css)
+          type_values = [int(value) for declaration in declarations for value in re.findall(r'(\d+)px', declaration)]
+          assert not [value for value in type_values if value > 42], 'product type scale exceeds 42px'
 
           control_files = [
               Path('lingjing_harness/api.py'),
@@ -53,7 +56,6 @@ jobs:
           legacy_hits = [term for term in legacy_terms if term in control.lower()]
           assert not legacy_hits, f'legacy decision-path terminology detected: {legacy_hits}'
 
-          tracked = set(Path('.').glob('*'))
           import subprocess
           names = subprocess.check_output(['git', 'ls-files'], text=True).splitlines()
           generated = [name for name in names if name.startswith(('build/', 'dist/')) or '.egg-info/' in name]
