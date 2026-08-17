@@ -18,21 +18,21 @@
 
 ## 真实产品
 
-![Recsys Harness 真实运行界面](/docs/readme-assets/overview.png)
+![Recsys Harness 真实运行界面](docs/readme-assets/overview.png)
 
 > 上图不是设计稿。仓库会启动当前应用，用真实浏览器执行产品任务，并自动刷新 README 截图。
 
 ### 工作台
 
-![Recsys Harness 工作台](/docs/readme-assets/workbench.png)
+![Recsys Harness 工作台](docs/readme-assets/workbench.png)
 
 ### 执行轨迹与判断依据
 
-![Recsys Harness 证据面板](/docs/readme-assets/evidence.png)
+![Recsys Harness 证据面板](docs/readme-assets/evidence.png)
 
 ### 移动端
 
-![Recsys Harness 移动端](/docs/readme-assets/mobile.png)
+![Recsys Harness 移动端](docs/readme-assets/mobile.png)
 
 产品界面只呈现业务语言：搜索体验、推荐体验、自主优化、全局体检、执行轨迹、判断依据、图片感知和联网研究。内部算法与可选后端不会暴露在客户界面。
 
@@ -323,7 +323,7 @@ SQLite 也承担共享运行协调：
 
 ## 系统架构
 
-![Recsys Harness system architecture](/docs/readme-assets/architecture.svg)
+![Recsys Harness system architecture](docs/readme-assets/architecture.svg)
 
 | 层 | 职责 |
 |---|---|
