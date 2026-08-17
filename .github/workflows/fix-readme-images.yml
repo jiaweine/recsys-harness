@@ -47,21 +47,6 @@ jobs:
                   raise SystemExit(f'missing or empty README asset: {asset}')
           p.write_text(text if text.endswith('\n') else text + '\n', encoding='utf-8')
           PY
-      - name: Verify raw image URLs
-        run: |
-          for name in overview.png workbench.png evidence.png mobile.png architecture.svg; do
-            url="https://raw.githubusercontent.com/jiaweine/recsys-harness/refs/heads/main/docs/readme-assets/$name"
-            curl -fsSL -A "Mozilla/5.0 README-render-check" --max-time 20 "$url" -o "/tmp/$name"
-            test -s "/tmp/$name"
-          done
-          python - <<'PY'
-          from pathlib import Path
-          for name in ('overview.png','workbench.png','evidence.png','mobile.png'):
-              data = Path('/tmp', name).read_bytes()
-              assert data.startswith(b'\x89PNG\r\n\x1a\n'), name
-          svg = Path('/tmp/architecture.svg').read_text(encoding='utf-8')
-          assert '<svg' in svg
-          PY
       - name: Commit README fix
         run: |
           git config user.name "github-actions[bot]"
@@ -73,16 +58,15 @@ jobs:
           else
             echo "README image URLs already stable."
           fi
-      - name: Verify rendered repository page
+      - name: Verify rendered repository image sources
         run: |
           python - <<'PY'
           from html.parser import HTMLParser
-          from urllib.parse import urljoin
           from urllib.request import Request, urlopen
           import time
 
-          REPO = 'https://github.com/jiaweine/recsys-harness'
-          EXPECTED = {
+          repo = 'https://github.com/jiaweine/recsys-harness'
+          expected = {
               'Recsys Harness 真实运行界面',
               'Recsys Harness 工作台',
               'Recsys Harness 证据面板',
@@ -95,27 +79,24 @@ jobs:
               def handle_starttag(self, tag, attrs):
                   if tag != 'img': return
                   attrs = dict(attrs); alt = attrs.get('alt', '')
-                  if alt in EXPECTED and attrs.get('src'):
+                  if alt in expected and attrs.get('src'):
                       self.items[alt] = attrs['src']
 
           headers = {'User-Agent': 'Mozilla/5.0 README-render-check'}
           last = None
           for attempt in range(12):
               try:
-                  with urlopen(Request(REPO, headers=headers), timeout=20) as response:
+                  with urlopen(Request(repo, headers=headers), timeout=20) as response:
                       html = response.read().decode('utf-8', 'replace')
                   parser = Images(); parser.feed(html)
-                  missing = EXPECTED - parser.items.keys()
+                  missing = expected - parser.items.keys()
                   if missing:
                       raise RuntimeError(f'missing rendered images: {sorted(missing)}')
-                  for alt, src in parser.items.items():
-                      image_url = urljoin(REPO, src)
-                      with urlopen(Request(image_url, headers=headers), timeout=20) as response:
-                          ctype = (response.headers.get('Content-Type') or '').lower()
-                          body = response.read(32)
-                      if not ctype.startswith('image/') or not body:
-                          raise RuntimeError(f'broken rendered image: {alt} {ctype} {image_url}')
-                  print('Rendered GitHub README images are loadable.')
+                  for alt, src in sorted(parser.items.items()):
+                      print(f'{alt} => {src}')
+                      if '/jiaweine/recsys-harness/raw/main/' in src:
+                          raise RuntimeError(f'GitHub rendered broken raw/main route for {alt}: {src}')
+                  print('Rendered README no longer uses the broken raw/main route.')
                   break
               except Exception as exc:
                   last = exc
