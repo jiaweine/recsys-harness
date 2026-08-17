@@ -20,8 +20,9 @@
 
 ## 真实产品
 
+<p align="center"><sub>DESKTOP · FULL WORKSPACE</sub></p>
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@27b2d3977d451b4093687f5d728d89d3942e890a/docs/readme-assets/overview.png" alt="Recsys Harness 真实运行界面" width="100%">
+  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@27b2d3977d451b4093687f5d728d89d3942e890a/docs/readme-assets/overview.png" alt="Recsys Harness 真实运行界面" width="96%">
 </p>
 <p align="center">
   <sub>完整任务视图 · 对话、运行状态与检查面板在同一工作区。</sub>
@@ -31,24 +32,44 @@
 
 <table>
   <tr>
-    <td width="50%" valign="top">
-      <p><strong>工作台</strong><br><sub>任务输入、附件和运行入口集中在主工作区。</sub></p>
+    <td width="50%" valign="top" align="center">
+      <strong>任务工作台</strong><br>
+      <sub>输入、附件和执行入口保持在同一操作面。</sub><br><br>
       <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@27b2d3977d451b4093687f5d728d89d3942e890a/docs/readme-assets/workbench.png" alt="Recsys Harness 工作台" width="100%">
     </td>
-    <td width="50%" valign="top">
-      <p><strong>执行轨迹与判断依据</strong><br><sub>证据、轨迹和结论保持在同一检查视图。</sub></p>
+    <td width="50%" valign="top" align="center">
+      <strong>证据与判断</strong><br>
+      <sub>轨迹、证据和结论集中在独立检查视图。</sub><br><br>
       <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@27b2d3977d451b4093687f5d728d89d3942e890a/docs/readme-assets/evidence.png" alt="Recsys Harness 证据面板" width="100%">
     </td>
   </tr>
 </table>
 
 <p align="center">
-  <strong>移动端</strong><br>
-  <sub>窄屏保留主流程，并把检查区收束为更适合触控的面板。</sub>
+  <sub>MOBILE · THREE REAL STATES</sub><br>
+  <strong>移动端不是一张缩小版桌面图，而是一套完整的任务体验。</strong><br>
+  <sub>主任务、执行轨迹和判断依据分别保留自己的阅读层级。</sub>
 </p>
-<p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@27b2d3977d451b4093687f5d728d89d3942e890a/docs/readme-assets/mobile.png" alt="Recsys Harness 移动端" width="280">
-</p>
+
+<table>
+  <tr>
+    <td width="33%" valign="top" align="center">
+      <strong>01 · 主任务</strong><br>
+      <sub>对话、结论与执行入口</sub><br><br>
+      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@27b2d3977d451b4093687f5d728d89d3942e890a/docs/readme-assets/mobile-workspace.png" alt="Recsys Harness 移动端主任务" width="92%">
+    </td>
+    <td width="33%" valign="top" align="center">
+      <strong>02 · 执行轨迹</strong><br>
+      <sub>任务状态与实际动作</sub><br><br>
+      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@27b2d3977d451b4093687f5d728d89d3942e890a/docs/readme-assets/mobile-progress.png" alt="Recsys Harness 移动端执行轨迹" width="92%">
+    </td>
+    <td width="33%" valign="top" align="center">
+      <strong>03 · 判断依据</strong><br>
+      <sub>可复核证据与结论来源</sub><br><br>
+      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@27b2d3977d451b4093687f5d728d89d3942e890a/docs/readme-assets/mobile-evidence.png" alt="Recsys Harness 移动端判断依据" width="92%">
+    </td>
+  </tr>
+</table>
 
 产品界面只呈现业务语言：搜索体验、推荐体验、自主优化、全局体检、执行轨迹、判断依据、图片感知和联网研究。内部算法与可选后端不会暴露在客户界面。
 
@@ -58,7 +79,7 @@
 
 搜索和推荐系统的问题通常不是“算一个分数”，而是一个持续产生新证据、持续做取舍的工程闭环。
 
-> **一句话理解：** Recsys Harness 把“复现问题 → 找证据 → 试方案 → 独立验证 → 决定是否学习 → 保存全过程”变成一个**有状态、有证据、有边界**的 agent run。
+> **一句话理解：** Recsys Harness 把问题复现、证据补全、候选探索、独立验证、学习决策和全过程留痕统一成一个**有状态、有证据、有边界**的 agent run。
 
 当业务方说：
 
@@ -87,25 +108,28 @@
 “露营灯”的搜索结果不准，先检查，不要改当前策略。
 ```
 
-一次真实 run 可能演化成：
-
-```text
-Observe
-  ↓
-复现真实搜索 → 判断证据缺口 → 插入必要诊断
-  ↓
-生成候选改进 → 独立 holdout → full regression
-  ↓
-记录可信经验 / 激活策略 / 停止
-```
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <strong>01 · Observe</strong><br>
+      <sub>复现真实结果，读取工作区状态，确认当前问题是否存在。</sub>
+    </td>
+    <td width="33%" valign="top">
+      <strong>02 · Decide & Explore</strong><br>
+      <sub>根据证据缺口选择诊断或候选探索，而不是执行固定脚本。</sub>
+    </td>
+    <td width="33%" valign="top">
+      <strong>03 · Verify & Close</strong><br>
+      <sub>独立验证、全量回归，并决定记录经验、激活策略或停止。</sub>
+    </td>
+  </tr>
+</table>
 
 真正关键的是：**路径不是预先写死的。**
 
 每一次工具返回新 observation 后，控制器都会重新判断下一步。复现正常，就不会为了“流程完整”机械诊断；证据出现冲突、冷启动或覆盖不足，后续动作会重新规划。
 
-<p align="center">
-  <code>Observe → Decide → Execute → Checkpoint → Replan → Verify → Learn / Stop</code>
-</p>
+> **控制循环：** Observe · Decide · Execute · Checkpoint · Replan · Verify · Learn / Stop
 
 ---
 
@@ -220,16 +244,15 @@ pytest -q
 <details>
 <summary><strong>03 · 证据门控学习</strong></summary>
 
-这里的“学习”不是 Agent 任意修改自己的源代码，而是对候选策略进行受控探索：
+这里的“学习”不是 Agent 任意修改自己的源代码，而是让候选策略逐级通过验证门槛：
 
-```text
-候选探索
-→ discovery competition
-→ 独立 holdout
-→ full regression
-→ robustness gate
-→ trusted strategy memory
-```
+| Gate | 必须回答的问题 |
+|---|---|
+| **Discovery competition** | 多个候选里是否真的存在更优方向 |
+| **Independent holdout** | 优势能否在独立样本上成立 |
+| **Full regression** | 局部收益是否伤害整体质量 |
+| **Robustness gate** | 改进是否足够稳定，而不是偶然波动 |
+| **Trusted strategy memory** | 是否有资格进入可信策略记忆 |
 
 没有独立 holdout，只允许探索，**不能变成 trusted / active 策略**。
 
