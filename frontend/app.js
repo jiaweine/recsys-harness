@@ -39,7 +39,7 @@ function autoSize(){const el=$('input');el.style.height='auto';el.style.height=M
 function scrollBottom(){requestAnimationFrame(()=>{$('scrollArea').scrollTop=$('scrollArea').scrollHeight})}
 function currentBusy(){return !!(state.conversation?.id&&state.activeRuns.has(state.conversation.id))}
 function updateSendState(){const busy=currentBusy();$('sendBtn').disabled=busy||state.uploading>0;$('runStopBtn').disabled=!busy;$('taskState').textContent=busy?'正在自主执行':state.conversation?'可继续追问':'等待输入'}
-function updateSceneNav(){document.querySelectorAll('.scene').forEach(x=>x.classList.toggle('active',x.dataset.scene===state.scene))}
+function updateSceneNav(){document.querySelectorAll('.scene').forEach(x=>{const active=x.dataset.scene===state.scene;x.classList.toggle('active',active);x.setAttribute('aria-pressed',String(active))})}
 function updateNetworkButton(){const b=$('networkBtn');b.disabled=!state.networkAvailable;b.setAttribute('aria-pressed',String(state.network&&state.networkAvailable));b.title=state.networkAvailable?'允许本次任务检索公开网络资料':'当前没有配置联网研究服务'}
 
 async function loadStatus(){
@@ -57,7 +57,7 @@ async function loadStatus(){
 
 async function loadHistory(){
   const rows=await api('/api/conversations');
-  $('historyList').innerHTML=rows.length?rows.map(x=>`<div class="history-item ${(x.active||state.activeRuns.has(x.id))?'running':''}" data-id="${esc(x.id)}"><b>${esc(x.title)}</b><small>${new Date(x.updated_at*1000).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</small></div>`).join(''):'<div class="empty">还没有历史任务。</div>';
+  $('historyList').innerHTML=rows.length?rows.map(x=>`<button type="button" class="history-item ${(x.active||state.activeRuns.has(x.id))?'running':''}" data-id="${esc(x.id)}"><b>${esc(x.title)}</b><small>${new Date(x.updated_at*1000).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</small></button>`).join(''):'<div class="empty">还没有历史任务。</div>';
   document.querySelectorAll('.history-item').forEach(x=>x.onclick=()=>{void openConversation(x.dataset.id).catch(e=>toast(e.message))});
   return rows;
 }
@@ -114,25 +114,36 @@ function renderResult(r){
 }
 
 async function pollRun(id,conversationId){
-  try{
-    for(let i=0;i<600;i++){
-      const r=await api(`/api/runs/${id}`),isCurrent=state.conversation?.id===conversationId;
-      if(isCurrent)renderRunning(r.events||[]);
-      if(r.status==='completed'){
-        state.activeRuns.delete(conversationId);if(isCurrent){appendAssistant(r.message);renderResult(r.result)}await loadHistory();updateSendState();return;
-      }
-      if(r.status==='cancel_requested'){if(isCurrent){$('runStopBtn').disabled=true;$('runStopBtn').textContent='停止中';$('runDetail').textContent='正在安全结束当前动作…'} }
-      if(r.status==='cancelled'){
-        state.activeRuns.delete(conversationId);if(isCurrent){$('running').hidden=true;$('stateText').textContent='已停止';$('taskState').textContent='已停止';toast('本次执行已停止')}await loadHistory();updateSendState();return;
-      }
-      if(r.status==='failed'){
-        state.activeRuns.delete(conversationId);if(isCurrent){$('running').hidden=true;$('stateText').textContent='执行失败';$('taskState').textContent='需要处理';toast('执行失败：'+(r.error||'未知错误'))}await loadHistory();updateSendState();return;
-      }
-      await new Promise(res=>setTimeout(res,500));
+  let failures=0;
+  let reconnectNotified=false;
+  while(state.activeRuns.get(conversationId)===id){
+    let r;
+    try{
+      r=await api(`/api/runs/${id}`);failures=0;reconnectNotified=false;
+    }catch(e){
+      failures+=1;const isCurrent=state.conversation?.id===conversationId;
+      if(isCurrent){$('taskState').textContent='连接中断 · 正在重连';$('runDetail').textContent='任务仍在后台执行，正在重新连接…'}
+      if(!reconnectNotified){toast('连接暂时中断，任务仍在后台执行');reconnectNotified=true}
+      const delay=Math.min(5000,400*Math.pow(1.7,Math.min(failures,5)));
+      await new Promise(res=>setTimeout(res,delay));
+      continue;
     }
-    state.activeRuns.delete(conversationId);if(state.conversation?.id===conversationId){$('running').hidden=true;toast('执行等待时间过长，可从历史任务继续查看')}updateSendState();
-  }catch(e){state.activeRuns.delete(conversationId);if(state.conversation?.id===conversationId)toast(e.message);updateSendState()}
+    const isCurrent=state.conversation?.id===conversationId;
+    if(isCurrent)renderRunning(r.events||[]);
+    if(r.status==='completed'){
+      state.activeRuns.delete(conversationId);if(isCurrent){appendAssistant(r.message);renderResult(r.result)}await loadHistory();updateSendState();return;
+    }
+    if(r.status==='cancel_requested'){if(isCurrent){$('runStopBtn').disabled=true;$('runStopBtn').textContent='停止中';$('runDetail').textContent='正在安全结束当前动作…'}}
+    if(r.status==='cancelled'){
+      state.activeRuns.delete(conversationId);if(isCurrent){$('running').hidden=true;$('stateText').textContent='已停止';$('taskState').textContent='已停止';toast('本次执行已停止')}await loadHistory();updateSendState();return;
+    }
+    if(r.status==='failed'){
+      state.activeRuns.delete(conversationId);if(isCurrent){$('running').hidden=true;$('stateText').textContent='执行失败';$('taskState').textContent='需要处理';toast('执行失败：'+(r.error||'未知错误'))}await loadHistory();updateSendState();return;
+    }
+    await new Promise(res=>setTimeout(res,500));
+  }
 }
+
 
 
 async function cancelCurrentRun(){

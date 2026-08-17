@@ -55,6 +55,22 @@ def main() -> None:
         page.wait_for_timeout(650)
         page.screenshot(path=str(ASSET_DIR / "product-workbench.png"))
 
+        if page.locator(".history-item").count() and page.locator(".history-item").first.evaluate("el => el.tagName") != "BUTTON":
+            raise RuntimeError("History items must be keyboard-native buttons")
+
+        page.evaluate("""() => {
+          const original = window.fetch.bind(window);
+          let failed = false;
+          window.fetch = (input, init) => {
+            const url = typeof input === 'string' ? input : String(input?.url || '');
+            if (!failed && url.includes('/api/runs/')) {
+              failed = true;
+              return Promise.reject(new TypeError('simulated transient run polling failure'));
+            }
+            return original(input, init);
+          };
+        }""")
+
         page.locator("#input").fill(PROMPT)
         page.locator("#sendBtn").click()
         page.wait_for_function("document.getElementById('stateText').textContent === '已完成'", timeout=30_000)
@@ -74,12 +90,12 @@ def main() -> None:
         page.wait_for_timeout(150)
         page.screenshot(path=str(ASSET_DIR / "product-mobile.png"), full_page=False)
 
-        for selector in ("#sendBtn", "#attachBtn", "#networkBtn", "#newTaskBtn", "#inspectorToggle"):
+        for selector in ("#sendBtn", "#attachBtn", "#networkBtn", "#newTaskBtn", "#inspectorToggle", "#inspectorClose"):
             locator = page.locator(selector)
             if not locator.is_visible():
                 continue
             box = locator.bounding_box()
-            if not box or box["height"] < 40 or box["width"] < 40:
+            if not box or box["height"] < 44 or box["width"] < 44:
                 raise RuntimeError(f"Touch target too small: {selector} -> {box}")
 
         if browser_errors:
