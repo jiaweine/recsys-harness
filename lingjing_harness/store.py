@@ -112,3 +112,33 @@ class WorkspaceStore:
                 return message
         return None
 
+
+    def referenced_attachment_ids(self) -> set[str]:
+        def collect(value, out: set[str]) -> None:
+            if isinstance(value, dict):
+                attachment_id = value.get("id")
+                if isinstance(attachment_id, str) and attachment_id.startswith("att-"):
+                    out.add(attachment_id)
+                for child in value.values():
+                    collect(child, out)
+            elif isinstance(value, list):
+                for child in value:
+                    collect(child, out)
+            elif isinstance(value, str) and value.startswith("att-"):
+                out.add(value)
+
+        with self._connect() as c:
+            message_rows = c.execute("select payload from messages where payload like '%att-%'").fetchall()
+            run_rows = c.execute("select snapshot from runs where snapshot like '%att-%'").fetchall()
+        referenced: set[str] = set()
+        for row in message_rows:
+            try:
+                collect(json.loads(row["payload"] or "{}"), referenced)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        for row in run_rows:
+            try:
+                collect(json.loads(row["snapshot"] or "{}"), referenced)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        return referenced

@@ -3,8 +3,9 @@ from __future__ import annotations
 import base64
 import json
 import os
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.request import Request, urlopen
 
 
@@ -26,32 +27,46 @@ class PerceptionEngine:
         base_url: str | None = None,
         model: str | None = None,
         api_key: str | None = None,
-        timeout: float = 30.0,
+        timeout: float = 10.0,
+        max_seconds: float = 18.0,
     ) -> None:
         self.base_url = (base_url if base_url is not None else os.environ.get("LINGJING_VISION_BASE_URL", "")).strip().rstrip("/")
         self.model = (model if model is not None else os.environ.get("LINGJING_VISION_MODEL", DEFAULT_VISION_MODEL)).strip()
         self.api_key = api_key if api_key is not None else os.environ.get("LINGJING_VISION_API_KEY", "")
-        self.timeout = timeout
+        self.timeout = max(0.5, float(timeout))
+        self.max_seconds = max(1.0, float(max_seconds))
 
     @property
     def configured(self) -> bool:
         return bool(self.base_url and self.model)
 
-    def build_context(self, attachments: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
+    def build_context(
+        self,
+        attachments: list[dict[str, Any]],
+        *,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> tuple[str, list[dict[str, Any]]]:
         observations: list[dict[str, Any]] = []
         chunks: list[str] = []
+        started = time.monotonic()
         for meta in attachments[:8]:
+            if should_stop and should_stop():
+                raise InterruptedError("attachment perception cancelled")
             mime = str(meta.get("mime") or "application/octet-stream").lower()
             name = str(meta.get("name") or "附件")[:180]
             path = Path(str(meta.get("path") or ""))
             observation = ""
             status = "ready"
-            if mime.startswith(TEXT_MIME_PREFIXES) or mime in TEXT_MIMES:
+            remaining = self.max_seconds - (time.monotonic() - started)
+            if remaining <= 0:
+                status = "degraded"
+                observation = "附件已接收，但本次感知时间预算已用尽；不要猜测未完成解析的内容。"
+            elif mime.startswith(TEXT_MIME_PREFIXES) or mime in TEXT_MIMES:
                 observation = self._read_text(path)
             elif mime.startswith("image/"):
                 if self.configured:
                     try:
-                        observation = self._describe_image(path, mime)
+                        observation = self._describe_image(path, mime, timeout=min(self.timeout, max(0.5, remaining)))
                     except Exception as exc:
                         status = "degraded"
                         observation = f"图像已接收，但视觉感知调用失败：{type(exc).__name__}。不要猜测图像内容。"
@@ -61,6 +76,8 @@ class PerceptionEngine:
             else:
                 status = "stored"
                 observation = "附件已接收并保留；当前类型只提供文件元信息，不推测内部内容。"
+            if should_stop and should_stop():
+                raise InterruptedError("attachment perception cancelled")
             observation = observation.strip()[:5000]
             public = {
                 "id": meta.get("id"),
@@ -94,7 +111,7 @@ class PerceptionEngine:
         text = " ".join(text.split())
         return text[:7000] or "附件没有可读文本。"
 
-    def _describe_image(self, path: Path, mime: str) -> str:
+    def _describe_image(self, path: Path, mime: str, *, timeout: float | None = None) -> str:
         if not path.exists() or not path.is_file():
             raise FileNotFoundError(path)
         encoded = base64.b64encode(path.read_bytes()).decode("ascii")
@@ -129,7 +146,7 @@ class PerceptionEngine:
             headers=headers,
             method="POST",
         )
-        with urlopen(request, timeout=self.timeout) as response:
+        with urlopen(request, timeout=timeout or self.timeout) as response:
             payload = json.loads(response.read(4 * 1024 * 1024).decode("utf-8"))
         content = payload.get("choices", [{}])[0].get("message", {}).get("content", "")
         if isinstance(content, list):

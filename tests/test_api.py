@@ -231,3 +231,40 @@ def test_workspace_import_is_blocked_while_a_run_is_active():
     finally:
         with api_module.RUN_LOCK:
             api_module.RUNS.pop(run_id, None)
+
+
+def test_orphan_attachment_is_collected_after_ttl():
+    with TestClient(app) as c:
+        uploaded = c.post('/api/attachments', files={'file':('orphan.txt', b'orphan', 'text/plain')}).json()
+    meta_path = api_module._attachment_meta_path(uploaded['id'])
+    meta = api_module.json.loads(meta_path.read_text(encoding='utf-8'))
+    meta['created_at'] = time.time() - api_module.ATTACHMENT_ORPHAN_TTL_SECONDS - 2
+    target = api_module.ATTACHMENT_DIR / meta['stored_name']
+    meta_path.write_text(api_module.json.dumps(meta, ensure_ascii=False), encoding='utf-8')
+    stats = api_module._gc_attachments()
+    assert stats['removed'] >= 1
+    assert not meta_path.exists()
+    assert not target.exists()
+
+
+def test_stop_request_does_not_wait_for_slow_perception(monkeypatch):
+    def slow_perception(rows, **kwargs):
+        time.sleep(1.0)
+        return '', []
+
+    monkeypatch.setattr(api_module.perception, 'build_context', slow_perception)
+    with TestClient(app) as c:
+        uploaded = c.post('/api/attachments', files={'file':('slow.txt', b'context', 'text/plain')}).json()
+        conv = c.post('/api/conversations', json={'scene':'search','title':'perception stop'}).json()
+        accepted = c.post(
+            f"/api/conversations/{conv['id']}/messages",
+            json={'content':'检查附件并停止','attachments':[uploaded['id']]},
+        ).json()
+        c.post(f"/api/runs/{accepted['run_id']}/cancel", json={})
+        row = None
+        for _ in range(40):
+            row = c.get(f"/api/runs/{accepted['run_id']}").json()
+            if row['status'] == 'cancelled':
+                break
+            time.sleep(.02)
+        assert row and row['status'] == 'cancelled'

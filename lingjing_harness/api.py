@@ -60,9 +60,12 @@ WORKSPACE_LOCK = threading.RLock()
 CATALOG_REVISION = catalog_fingerprint(catalog)
 RUNS: dict[str, dict[str, Any]] = {}
 RUN_LOCK = threading.RLock()
+ATTACHMENT_LOCK = threading.RLock()
 MAX_RUNS = 200
 MAX_IMPORT_BYTES = 8 * 1024 * 1024
 MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024
+MAX_ATTACHMENT_STORAGE_BYTES = int(os.environ.get("LINGJING_ATTACHMENT_STORAGE_BYTES", str(512 * 1024 * 1024)))
+ATTACHMENT_ORPHAN_TTL_SECONDS = int(os.environ.get("LINGJING_ATTACHMENT_ORPHAN_TTL_SECONDS", "86400"))
 ACTIVE_RUN_STATUSES = {"running", "cancel_requested"}
 ATTACHMENT_ID = re.compile(r"^att-[a-f0-9]{12}$")
 ALLOWED_IMAGE_MIMES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
@@ -74,6 +77,7 @@ ALLOWED_DOCUMENT_MIMES = {
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    _gc_attachments()
     await _recover_on_startup()
     yield
 
@@ -200,6 +204,80 @@ def _resolve_attachments(ids: list[str], *, strict: bool = True) -> list[dict[st
     return rows
 
 
+def _attachment_storage_bytes() -> int:
+    total = 0
+    for path in ATTACHMENT_DIR.iterdir():
+        if not path.is_file() or path.name.endswith(".tmp"):
+            continue
+        try:
+            total += path.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def _gc_attachments(now: float | None = None) -> dict[str, int]:
+    now = time.time() if now is None else float(now)
+    referenced = store.referenced_attachment_ids()
+    removed = 0
+    records: list[tuple[float, str, Path, Path]] = []
+    with ATTACHMENT_LOCK:
+        for temp in ATTACHMENT_DIR.glob("*.tmp"):
+            try:
+                if now - temp.stat().st_mtime > 3600:
+                    temp.unlink(missing_ok=True)
+            except OSError:
+                continue
+        for meta_path in ATTACHMENT_DIR.glob("att-*.json"):
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                attachment_id = str(meta.get("id") or "")
+                stored_name = str(meta.get("stored_name") or "")
+                target = ATTACHMENT_DIR / stored_name
+                created_at = float(meta.get("created_at") or 0.0)
+                if not ATTACHMENT_ID.fullmatch(attachment_id) or target.parent != ATTACHMENT_DIR or target.name != stored_name:
+                    raise ValueError("invalid attachment metadata")
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                meta_path.unlink(missing_ok=True)
+                removed += 1
+                continue
+            if attachment_id not in referenced and now - created_at > ATTACHMENT_ORPHAN_TTL_SECONDS:
+                target.unlink(missing_ok=True)
+                meta_path.unlink(missing_ok=True)
+                removed += 1
+                continue
+            records.append((created_at, attachment_id, target, meta_path))
+
+        total = _attachment_storage_bytes()
+        if total > MAX_ATTACHMENT_STORAGE_BYTES:
+            for _, attachment_id, target, meta_path in sorted(records):
+                if attachment_id in referenced:
+                    continue
+                target.unlink(missing_ok=True)
+                meta_path.unlink(missing_ok=True)
+                removed += 1
+                total = _attachment_storage_bytes()
+                if total <= MAX_ATTACHMENT_STORAGE_BYTES:
+                    break
+        return {"bytes": _attachment_storage_bytes(), "removed": removed, "referenced": len(referenced)}
+
+
+async def _perceive_with_cancel(
+    rows: list[dict[str, Any]],
+    should_stop,
+) -> tuple[str, list[dict[str, Any]]]:
+    task = asyncio.create_task(asyncio.to_thread(perception.build_context, rows, should_stop=should_stop))
+    while not task.done():
+        if should_stop():
+            task.cancel()
+            return "", [_public_attachment(row, perception_status="cancelled") for row in rows]
+        await asyncio.sleep(0.1)
+    try:
+        return task.result()
+    except InterruptedError:
+        return "", [_public_attachment(row, perception_status="cancelled") for row in rows]
+
+
 @app.get("/")
 def index():
     return FileResponse(FRONTEND / "index.html")
@@ -278,9 +356,13 @@ async def upload_attachment(file: UploadFile = File(...)):
         suffix = ".bin"
     stored_name = f"{attachment_id}{suffix}"
     target = ATTACHMENT_DIR / stored_name
-    temp = target.with_suffix(target.suffix + ".tmp")
-    temp.write_bytes(raw)
-    temp.replace(target)
+    with ATTACHMENT_LOCK:
+        storage = _gc_attachments()
+        if storage["bytes"] + len(raw) > MAX_ATTACHMENT_STORAGE_BYTES:
+            raise HTTPException(507, "附件存储空间已达到上限，请清理未使用附件后再试")
+        temp = target.with_suffix(target.suffix + ".tmp")
+        temp.write_bytes(raw)
+        temp.replace(target)
     meta = {
         "id": attachment_id,
         "name": (Path(file.filename or "附件").name or "附件")[:180],
@@ -358,11 +440,16 @@ async def _execute(
                 _persist_run(row)
         return
 
+    def should_stop() -> bool:
+        with RUN_LOCK:
+            row = RUNS.get(run_id)
+            return bool(row and row.get("status") == "cancel_requested")
+
     attachment_rows = _resolve_attachments(list(attachment_ids or []), strict=False)
     context = ""
     observed_attachments: list[dict[str, Any]] = []
     if attachment_rows:
-        context, observed_attachments = await asyncio.to_thread(perception.build_context, attachment_rows)
+        context, observed_attachments = await _perceive_with_cancel(attachment_rows, should_stop)
         for row in observed_attachments:
             row["url"] = f"/api/attachments/{row['id']}"
         with RUN_LOCK:
@@ -391,11 +478,6 @@ async def _execute(
             row["events"] = payload.get("events", row["events"])
             row["updated_at"] = time.time()
             _persist_run(row)
-
-    def should_stop() -> bool:
-        with RUN_LOCK:
-            row = RUNS.get(run_id)
-            return bool(row and row.get("status") == "cancel_requested")
 
     try:
         result = await loop.run_in_executor(
