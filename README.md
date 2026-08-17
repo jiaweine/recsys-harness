@@ -17,7 +17,7 @@
 ![Evolution](https://img.shields.io/badge/Evolution-Eval--gated-d9ff59?labelColor=172019)
 ![Core](https://img.shields.io/badge/Core-Project--owned-d9ff59?labelColor=172019)
 
-[Product](#product) · [Autonomy](#owned-autonomy) · [Multimodal](#multimodal-input) · [Network](#permissioned-network-research) · [Evolution](#self-evolution) · [Run](#quick-start)
+[Product](#product) · [Autonomy](#owned-autonomy) · [Multimodal](#multimodal-input) · [Network](#permissioned-network-research) · [Evolution](#self-evolution) · [Durability](#durable-execution) · [Deploy](#protected-deployment)
 
 </div>
 
@@ -40,7 +40,7 @@
 <td width="25%" valign="top"><strong>Autonomous</strong><br><br>每轮重新决策。新的结果、异常和证据缺口会改变后续路径。</td>
 <td width="25%" valign="top"><strong>Multimodal</strong><br><br>文本、截图、JSON、CSV、Markdown、TXT 可以一起进入同一个任务。</td>
 <td width="25%" valign="top"><strong>Self-evolving</strong><br><br>自主产生多个候选，经过留出验证与全量回归后才允许成为长期策略经验。</td>
-<td width="25%" valign="top"><strong>Recoverable</strong><br><br>执行过程持续 checkpoint；服务中断后从已完成动作之后继续。</td>
+<td width="25%" valign="top"><strong>Recoverable</strong><br><br>checkpoint、worker lease 与 fenced recovery 让中断恢复不会重复执行或被旧 worker 覆盖。</td>
 </tr>
 </table>
 
@@ -134,7 +134,9 @@ Composer 不是“文本框旁边放一个附件图标”。附件真的进入�
 - PNG / JPEG / WebP / GIF；
 - JSON / CSV / Markdown / TXT；
 - 多附件任务，单次最多 8 个；
-- 单文件 12MB 上限。
+- 单文件 12MB 上限；
+- 感知阶段有独立时间预算和停止信号；
+- 附件存储有总容量门槛、未引用文件 TTL 回收与证据引用保护。
 
 文本类附件直接在本地解析。图片可以交给一个**可选的本地视觉感知服务**，转成受限 observation 后再进入 Harness。
 
@@ -241,7 +243,7 @@ export LINGJING_WEB_SEARCH_KEY=...
 <tr>
 <td valign="top"><strong>Discovery</strong><br><br>从当前策略附近、历史可信经验、定向扰动和确定性探索中生成多组候选。</td>
 <td valign="top"><strong>Competition</strong><br><br>候选在探索样本上竞争，保留 elite，再围绕胜出区域继续搜索。</td>
-<td valign="top"><strong>Holdout</strong><br><br>最终候选必须通过未参与选择的留出样本，降低“自己出题自己判卷”的过拟合。</td>
+<td valign="top"><strong>Holdout</strong><br><br>最终候选必须通过未参与选择的留出样本；没有独立 holdout 只能探索，不能 trusted / active。</td>
 </tr>
 <tr>
 <td valign="top"><strong>Full regression</strong><br><br>回到完整可复核样本检查整体质量、覆盖、最差样本和回退比例。</td>
@@ -294,11 +296,26 @@ export LINGJING_WEB_SEARCH_KEY=...
 
 `actions · observations · findings · evidence · decisions · cost · events`
 
-服务重启后从 checkpoint **精确 rehydrate RunState**，已完成的非重复工具不会重新执行。
+服务重启后从 checkpoint **精确 rehydrate RunState**，已完成的非重复工具不会重新执行。Adaptive action 使用稳定 invocation id；如果“策略记忆已经写入，但进程恰好在 checkpoint 前中断”，恢复时会复用第一次结果，而不是把一次学习重复记成多次胜利。
 
-Adaptive action 使用稳定 invocation id；如果“策略记忆已经写入，但进程恰好在 checkpoint 前中断”，恢复时会复用第一次结果，而不是把一次学习重复记成多次胜利。
+### Multi-worker coordination
 
-同一个 conversation 同时只允许一个 active run，保证消息顺序稳定；**不同 conversation 可以并行执行**。运行中的任务支持用户主动停止：当前动作安全结束后不再扩展新的工具调用，因此长任务既不会锁死整个工作台，也不会剥夺用户控制权。
+SQLite 不再只是消息存储，也承担 durable coordinator：
+
+- conversation 级原子 run reservation；
+- worker owner + lease + heartbeat；
+- lease 过期后只有一个新 worker 可以接管恢复；
+- stale worker 被 fencing，迟到的 completed / failed 不能覆盖新 owner；
+- stop 请求写入共享 run 状态，因此可以落到与执行任务不同的 worker；
+- `cancel_requested` 在进程重启后会被安全收敛为 cancelled，而不是遗留孤儿任务。
+
+同一个 conversation 同时只允许一个 active run，保证消息顺序稳定；**不同 conversation 可以并行执行**。
+
+### Workspace coherence
+
+Catalog 也有共享 revision。数据导入先获取分布式 workspace update lock；更新期间不接受新 run。revision 提交后，其他 worker 在下一次请求自动重载同一份 Catalog / Harness。旧 revision 的任务结果不会写进新工作区。
+
+运行中的任务支持用户主动停止：当前动作安全结束后不再扩展新的工具调用；附件感知阶段也会响应停止信号。
 
 ---
 
@@ -317,7 +334,9 @@ Adaptive action 使用稳定 invocation id；如果“策略记忆已经写入�
 | **Evolution Lab** | 多候选探索、holdout、full regression、robustness gate |
 | **Memory** | episodic / procedural / policy memory、召回、遗忘、retire |
 | **Trust** | 用户约束、Verifier、activation gate、drift detection、rollback |
-| **Durability** | checkpoint、rehydration、idempotency、persistent run |
+| **Durability** | checkpoint、worker lease、heartbeat、fenced recovery、idempotency |
+| **Workspace** | distributed revision、update lock、跨 worker Catalog/Harness 同步 |
+| **Access** | 可选同源会话、生产强制密钥、共享限流、安全响应头 |
 | **Owned Ranking Core** | 项目自有 search / recommendation / evaluation |
 
 ---
@@ -347,6 +366,20 @@ Open:
 http://127.0.0.1:8765
 ```
 
+### Protected deployment
+
+本地开发默认不要求登录。对外部署时启用 production boundary：
+
+```bash
+export LINGJING_ENV=production
+export LINGJING_ACCESS_TOKEN='<a-long-random-secret>'
+uvicorn lingjing_harness.api:app --host 0.0.0.0 --port 8765
+```
+
+`production` 模式没有至少 16 个字符的访问密钥会直接拒绝启动。Web UI 使用同源登录建立 **HttpOnly + SameSite** 的签名会话；密钥不会进入 URL 或 localStorage。登录、附件上传、任务提交和数据导入使用 SQLite 共享限流，因此多个 worker 看到同一套配额。
+
+如果在可信反向代理后读取 `X-Forwarded-For`，再显式设置 `LINGJING_TRUST_PROXY_IP=1`；否则默认使用直接连接地址，避免伪造转发头绕过限流。
+
 ### Quality gates
 
 ```bash
@@ -365,7 +398,10 @@ The repository CI additionally verifies:
 - frontend JavaScript syntax;
 - real Chromium product flow;
 - real attachment interaction;
-- mobile evidence drawer;
+- mobile evidence drawer + 44px primary touch targets;
+- transient run-polling failure + automatic reconnect;
+- protected session / shared rate-limit contracts;
+- multi-worker reservation / lease / fencing / workspace-revision tests;
 - browser page/console errors;
 - same-origin HTTP failures.
 
@@ -385,7 +421,8 @@ lingjing_harness/
     network.py                  permissioned web evidence adapter
     memory.py                   persistent agent memory
     verifier.py                 independent result verification
-  api.py                        async API, attachments, recovery and workspace runtime
+  api.py                        async API, auth boundary, attachments, recovery and workspace runtime
+  store.py                      durable runs, leases, workspace revision and shared limits
 tests/                          regression and resilience suite
 docs/                           architecture, design, data and acceptance notes
 scripts/capture_readme_assets.py real-browser product verification + screenshots
@@ -405,8 +442,8 @@ The UI follows an **editorial signal lab** direction rather than a generic AI da
 - no card-inside-card wall;
 - no decorative icon-tile grid;
 - typography carries hierarchy before color;
-- acid highlight means current / passed / actionable;
-- signal orange means activity / external evidence / attention;
+- mineral slate-teal marks current / selected / actionable states;
+- restrained warm brown is reserved for stop / risk / attention;
 - mobile keeps evidence access instead of deleting the inspector;
 - motion communicates state, not decoration;
 - reduced motion, keyboard focus and Chinese IME behavior are first-class checks.
@@ -419,6 +456,6 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design DNA and audit checkli
 
 ### Search and recommendation are the capabilities. The autonomous harness is the product.
 
-<sub>Owned decisions · real tools · multimodal context · optional network evidence · eval-gated learning · durable execution</sub>
+<sub>Owned decisions · real tools · multimodal context · permissioned network evidence · eval-gated learning · fenced durable execution</sub>
 
 </div>

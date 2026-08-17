@@ -63,7 +63,7 @@ TXT / Markdown / CSV / JSON 等文本型附件直接在本地读取，经过长�
 - 直接激活策略；
 - 把推测写成事实。
 
-因此即使不配置视觉模型，核心 Harness 仍可完整运行。
+因此即使不配置视觉模型，核心 Harness 仍可完整运行。感知层有独立总时间预算、单次视觉调用上限和 stop callback；用户停止任务时不会为了等待一组附件解析而继续扩展执行。附件文件还有总容量门槛、未引用 TTL 回收和已引用证据保护。
 
 ## Network evidence plane
 
@@ -143,7 +143,7 @@ TXT / Markdown / CSV / JSON 等文本型附件直接在本地读取，经过长�
 2. holdout set：未参与候选选择，检查泛化；
 3. full regression：完整可复核样本检查质量、覆盖、最差样本和回退比例。
 
-只有形成稳定优势时才 trusted。用户明确授权时才 active。
+只有形成稳定优势并存在独立 holdout 时才 trusted。没有独立留出样本时允许探索，但不能 trusted / active。用户明确授权时才 active。
 
 这里保留“当前策略作为安全参考”是自进化验证的一部分，不存在独立的旧版比较产品路径，也没有编号版本算法文件。
 
@@ -164,15 +164,33 @@ API 会把 run snapshot 写入 `WorkspaceStore.runs`：
 - cost；
 - events。
 
-服务重启后，recoverable run 会调用 checkpoint rehydration，从已完成 action 之后继续。
+服务重启后，recoverable run 会调用 checkpoint rehydration，从已完成 action 之后继续。Adaptive action 使用稳定 invocation id。已完成的策略学习结果与 invocation 绑定；重放同一动作时复用第一次结果，避免重复副作用。
 
-Adaptive action 使用稳定 invocation id。已完成的策略学习结果与 invocation 绑定；重放同一动作时复用第一次结果，避免重复副作用。
+### Worker leases and fencing
+
+`WorkspaceStore` 对 active run 保存 `owner_id + lease_until`。worker 持续 heartbeat；只有 owner 或 lease 已过期后的新 claimant 可以接管恢复。新 owner 接管后，旧 worker 即使迟到完成，也会被 fencing 阻止写入终态。
+
+Stop 请求直接写共享 SQLite 状态，因此请求可以落到任意 worker；执行 owner 在动作边界和感知阶段都读取共享 stop 状态。`cancel_requested` 在重启时不会被重新执行，而是收敛为 cancelled。
 
 ## Conversation concurrency
 
-同一个 conversation 同时只允许一个 active run，以保证消息顺序和 checkpoint 语义稳定。
+同一个 conversation 的 active run 通过 SQLite `BEGIN IMMEDIATE` 原子 reservation，而不是只检查当前进程内存；多个 worker 同时接到请求时只能有一个成功。
 
 不同 conversation 可以并行执行。前端不再用全局 busy 锁，因此一个长任务运行时，用户可以切到另一任务继续工作。
+
+## Distributed workspace revision
+
+`workspace_state` 保存共享 `catalog_revision` 与 workspace update lease。数据导入必须先进入分布式 critical section，并确认没有 active run；更新锁期间所有 worker 停止接受新任务。
+
+Catalog 文件落盘、Harness 构建完成并提交新 revision 后，其他 worker 在后续请求自动检测 revision 变化并重载相同 Catalog / Harness。run 创建时绑定 revision，旧 revision 的结果不能写入已经切换的数据工作区。
+
+## Production access boundary
+
+本地模式默认无认证，方便单机开发。`LINGJING_ENV=production` 时必须配置至少 16 个字符的 `LINGJING_ACCESS_TOKEN`，否则 lifespan 拒绝启动。
+
+浏览器登录后获得由服务端密钥签名的 HttpOnly / SameSite session cookie；凭据不放 URL 或 localStorage。关键写入口使用 SQLite 共享限流，因此多 worker 共用计数。生产响应增加 CSP、frame deny、nosniff 和 same-origin referrer policy。
+
+只有明确配置 `LINGJING_TRUST_PROXY_IP=1` 时才读取转发 IP，避免默认信任可伪造的代理头。
 
 ## Search core
 

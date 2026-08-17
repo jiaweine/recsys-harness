@@ -1,19 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1040" viewBox="0 0 1600 1040" role="img" aria-labelledby="title desc">
 <title id="title">Recsys Harness autonomous multimodal system map</title>
-<desc id="desc">Detailed system map showing multimodal input, owned autonomous control, permissioned network evidence, tool execution, self-evolution, memory, trust and durability planes.</desc>
+<desc id="desc">Detailed system map showing multimodal input, owned autonomous control, permissioned network evidence, tool execution, self-evolution, memory, protected access, workspace coherence and fenced durability.</desc>
 <style>
-  .bg{fill:#f5f1e8}.ink{fill:#172019}.night{fill:#14231e}.paper{fill:#fffdf7}.paper2{fill:#eae5da}.signal{fill:#d9ff59}.hot{fill:#f36b4b}.line{stroke:#a9ad9f;stroke-width:1.3}.strong{stroke:#172019;stroke-width:1.8}.dash{stroke:#7b8279;stroke-width:1.2;stroke-dasharray:7 7}.t{font-family:"Avenir Next",system-ui,-apple-system,"Segoe UI",sans-serif;fill:#172019}.white{fill:#f7f4eb}.cap{font-size:13px;font-weight:700;letter-spacing:2.2px}.h1{font-family:Georgia,"Times New Roman",serif;font-size:34px;font-weight:700}.h2{font-size:18px;font-weight:750}.body{font-size:13px}.small{font-size:11px;fill:#5e675f}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px}.node{fill:#fffdf7;stroke:#a9ad9f;stroke-width:1.2}.nodeStrong{fill:#fffdf7;stroke:#172019;stroke-width:1.6}.tag{fill:#e5e0d4}.arrow{fill:none;stroke:#172019;stroke-width:1.5;marker-end:url(#arrow)}.arrowSoft{fill:none;stroke:#6f786f;stroke-width:1.2;marker-end:url(#arrowSoft)}
+  .bg{fill:#f4f3ef}.ink{fill:#1d2421}.night{fill:#1d2421}.paper{fill:#fcfbf8}.paper2{fill:#edf0ed}.signal{fill:#dce8e9}.hot{fill:#f1e4dc}.line{stroke:#b8c0ba;stroke-width:1.3}.strong{stroke:#1d2421;stroke-width:1.8}.dash{stroke:#7d8881;stroke-width:1.2;stroke-dasharray:7 7}.t{font-family:"Avenir Next",system-ui,-apple-system,"Segoe UI",sans-serif;fill:#1d2421}.white{fill:#f7f4eb}.cap{font-size:13px;font-weight:700;letter-spacing:2.2px}.h1{font-family:Georgia,"Times New Roman",serif;font-size:34px;font-weight:700}.h2{font-size:18px;font-weight:750}.body{font-size:13px}.small{font-size:11px;fill:#657069}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px}.node{fill:#fffdf7;stroke:#a9ad9f;stroke-width:1.2}.nodeStrong{fill:#fffdf7;stroke:#1d2421;stroke-width:1.6}.tag{fill:#e2e6e2}.arrow{fill:none;stroke:#1d2421;stroke-width:1.5;marker-end:url(#arrow)}.arrowSoft{fill:none;stroke:#657069;stroke-width:1.2;marker-end:url(#arrowSoft)}
 </style>
 <defs>
-  <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#172019"/></marker>
-  <marker id="arrowSoft" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#6f786f"/></marker>
+  <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#1d2421"/></marker>
+  <marker id="arrowSoft" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#657069"/></marker>
 </defs>
 <rect class="bg" width="1600" height="1040"/>
 <rect class="night" x="0" y="0" width="1600" height="114"/>
 <text class="t white cap" x="54" y="42">SYSTEM MAP / AUTONOMOUS EXPERIENCE HARNESS</text>
 <text class="t white h1" x="54" y="82">Evidence moves forward. Permission never does.</text>
-<text class="t white body" x="1124" y="47">MULTIMODAL · NETWORK · MEMORY</text>
-<text class="t white body" x="1124" y="72">EVOLUTION · RECOVERY · OWNED CONTROL</text>
+<text class="t white body" x="1124" y="47">MULTIMODAL · NETWORK · MEMORY · AUTH</text>
+<text class="t white body" x="1124" y="72">EVOLUTION · LEASES · WORKSPACE · OWNED CONTROL</text>
 
 <!-- left input plane -->
 <text class="t cap" x="54" y="154">01 · EXPERIENCE INPUT</text>
@@ -29,8 +29,8 @@
 <rect class="node" x="54" y="394" width="292" height="126" rx="2"/>
 <text class="t h2" x="82" y="430">Perception boundary</text>
 <text class="t body" x="82" y="458">Local text parsing</text>
-<text class="t body" x="82" y="484">Optional image perception service</text>
-<text class="t small" x="82" y="506">No tool choice · no strategy promotion</text>
+<text class="t body" x="82" y="484">Bounded optional image perception</text>
+<text class="t small" x="82" y="506">Cancellable · no tool choice · no promotion</text>
 
 <!-- central control -->
 <text class="t cap" x="398" y="154">02 · OWNED AUTONOMOUS CONTROL</text>
@@ -59,7 +59,7 @@
 
 <rect class="node" x="426" y="402" width="226" height="88" rx="2"/>
 <text class="t h2" x="445" y="431">Hard boundaries</text>
-<text class="t small" x="445" y="454">time · tool count · cost</text>
+<text class="t small" x="445" y="454">time · tool count · cost · access</text>
 <text class="t small" x="445" y="473">adaptation · network permission</text>
 
 <rect class="node" x="670" y="402" width="238" height="88" rx="2"/>
@@ -126,14 +126,14 @@
 <text class="t small" x="1293" y="855">retire on regression</text>
 <path class="arrow" d="M1395 766 V784"/><path class="arrowSoft" d="M1274 833 H1258"/>
 
-<text class="t cap" x="54" y="810">06 · MEMORY + DURABILITY</text>
+<text class="t cap" x="54" y="810">06 · MEMORY + FENCED DURABILITY</text>
 <rect class="nodeStrong" x="54" y="834" width="910" height="160" rx="2"/>
 <rect class="node" x="82" y="866" width="190" height="92" rx="2"/><text class="t h2" x="100" y="896">Episodic</text><text class="t small" x="100" y="921">goal · actions · reward</text><text class="t small" x="100" y="941">bounded recall + forgetting</text>
 <rect class="node" x="290" y="866" width="190" height="92" rx="2"/><text class="t h2" x="308" y="896">Procedural</text><text class="t small" x="308" y="921">trusted · active · retired</text><text class="t small" x="308" y="941">strategy fingerprints</text>
 <rect class="node" x="498" y="866" width="190" height="92" rx="2"/><text class="t h2" x="516" y="896">Policy utility</text><text class="t small" x="516" y="921">action trials · reward</text><text class="t small" x="516" y="941">bounded learned bonus</text>
-<rect class="node" x="706" y="866" width="230" height="92" rx="2"/><text class="t h2" x="724" y="896">Durable run state</text><text class="t small" x="724" y="921">checkpoint · rehydrate</text><text class="t small" x="724" y="941">idempotent adaptive replay</text>
+<rect class="node" x="706" y="866" width="230" height="92" rx="2"/><text class="t h2" x="724" y="896">Durable run state</text><text class="t small" x="724" y="921">checkpoint · worker lease</text><text class="t small" x="724" y="941">fenced recovery · idempotent replay</text>
 <path class="arrowSoft" d="M510 754 V834"/>
 <path class="arrowSoft" d="M964 898 H1016"/>
 
-<text class="t small" x="54" y="1022">Owned ranking core remains the source of search/recommend execution and evaluation. Optional perception and network services provide observations, never control.</text>
+<text class="t small" x="54" y="1022">Owned ranking remains the execution core. Access, worker leases and workspace revision protect the runtime; perception and network services provide observations, never control.</text>
 </svg>
