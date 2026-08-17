@@ -268,3 +268,25 @@ def test_stop_request_does_not_wait_for_slow_perception(monkeypatch):
                 break
             time.sleep(.02)
         assert row and row['status'] == 'cancelled'
+
+
+def test_cancel_can_land_on_a_different_worker():
+    with TestClient(app) as c:
+        conv = c.post('/api/conversations', json={"scene":"search","title":"remote cancel"}).json()
+        run_id = "job-remote-cancel"
+        now = time.time()
+        snapshot = {
+            "run_id": run_id, "conversation_id": conv["id"], "goal": "remote",
+            "status": "running", "events": [], "created_at": now, "updated_at": now,
+        }
+        assert api_module.store.reserve_run(
+            run_id, conv["id"], "remote", snapshot, owner_id="other-worker", lease_seconds=30
+        )
+        with api_module.RUN_LOCK:
+            api_module.RUNS.pop(run_id, None)
+        response = c.post(f'/api/runs/{run_id}/cancel', json={})
+        assert response.status_code == 200
+        assert response.json()['status'] == 'cancel_requested'
+        assert api_module.store.run_status(run_id) == 'cancel_requested'
+        final = {**snapshot, "status":"cancelled", "updated_at":time.time()}
+        api_module.store.save_run(run_id, conv["id"], "remote", "cancelled", final)

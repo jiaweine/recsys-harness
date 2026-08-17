@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 import json
 import mimetypes
 import os
@@ -61,12 +61,14 @@ CATALOG_REVISION = catalog_fingerprint(catalog)
 RUNS: dict[str, dict[str, Any]] = {}
 RUN_LOCK = threading.RLock()
 ATTACHMENT_LOCK = threading.RLock()
+WORKER_ID = os.environ.get("LINGJING_WORKER_ID") or f"worker-{uuid.uuid4().hex[:10]}"
+RUN_LEASE_SECONDS = max(6.0, float(os.environ.get("LINGJING_RUN_LEASE_SECONDS", "30")))
 MAX_RUNS = 200
 MAX_IMPORT_BYTES = 8 * 1024 * 1024
 MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024
 MAX_ATTACHMENT_STORAGE_BYTES = int(os.environ.get("LINGJING_ATTACHMENT_STORAGE_BYTES", str(512 * 1024 * 1024)))
 ATTACHMENT_ORPHAN_TTL_SECONDS = int(os.environ.get("LINGJING_ATTACHMENT_ORPHAN_TTL_SECONDS", "86400"))
-ACTIVE_RUN_STATUSES = {"running", "cancel_requested"}
+ACTIVE_RUN_STATUSES = {"running", "interrupted", "cancel_requested"}
 ATTACHMENT_ID = re.compile(r"^att-[a-f0-9]{12}$")
 ALLOWED_IMAGE_MIMES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 ALLOWED_DOCUMENT_MIMES = {
@@ -75,11 +77,30 @@ ALLOWED_DOCUMENT_MIMES = {
 }
 
 
+async def _lease_heartbeat_loop() -> None:
+    interval = max(1.0, RUN_LEASE_SECONDS / 3.0)
+    while True:
+        await asyncio.sleep(interval)
+        with RUN_LOCK:
+            active_ids = [
+                run_id for run_id, row in RUNS.items()
+                if row.get("status") in ACTIVE_RUN_STATUSES
+            ]
+        for run_id in active_ids:
+            store.renew_run_lease(run_id, WORKER_ID, RUN_LEASE_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     _gc_attachments()
     await _recover_on_startup()
-    yield
+    lease_task = asyncio.create_task(_lease_heartbeat_loop())
+    try:
+        yield
+    finally:
+        lease_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await lease_task
 
 
 app = FastAPI(
@@ -151,13 +172,17 @@ def _prune_runs_locked() -> None:
 
 
 def _persist_run(row: dict[str, Any]) -> None:
-    store.save_run(
+    persisted_status = store.save_run(
         row["run_id"],
         row["conversation_id"],
         row.get("goal", ""),
         row.get("status", "running"),
         copy.deepcopy(row),
+        owner_id=WORKER_ID,
+        lease_seconds=RUN_LEASE_SECONDS,
     )
+    if persisted_status != row.get("status"):
+        row["status"] = persisted_status
 
 
 def _attachment_meta_path(attachment_id: str) -> Path:
@@ -295,6 +320,7 @@ def status():
         "self_evolving": True,
         "memory": memory.stats(key),
         "runtime": {
+            "multi_worker_leases": True,
             "dynamic_replan": True,
             "evidence_utility_controller": True,
             "eval_gated_learning": True,
@@ -324,6 +350,7 @@ def capabilities():
     return {
         "tools": harness.tools.manifest(),
         "autonomy": {
+            "multi_worker_leases": True,
             "dynamic_replan": True,
             "evidence_utility_controller": True,
             "memory": True,
@@ -389,8 +416,7 @@ def get_attachment(attachment_id: str):
 @app.get("/api/conversations")
 def conversations():
     rows = store.list_conversations()
-    with RUN_LOCK:
-        active = {row.get("conversation_id") for row in RUNS.values() if row.get("status") in ACTIVE_RUN_STATUSES}
+    active = store.active_conversation_ids()
     return [{**row, "active": row["id"] in active} for row in rows]
 
 
@@ -405,11 +431,7 @@ def get_conversation(cid: str):
         conversation = store.get_conversation(cid)
     except KeyError as exc:
         raise HTTPException(404, "任务不存在") from exc
-    with RUN_LOCK:
-        active = next(
-            (copy.deepcopy(row) for row in RUNS.values() if row.get("conversation_id") == cid and row.get("status") in ACTIVE_RUN_STATUSES),
-            None,
-        )
+    active = store.active_run_for_conversation(cid)
     if active:
         conversation["active_run"] = {"run_id": active["run_id"], "status": active["status"], "events": active.get("events", [])}
     else:
@@ -443,7 +465,16 @@ async def _execute(
     def should_stop() -> bool:
         with RUN_LOCK:
             row = RUNS.get(run_id)
-            return bool(row and row.get("status") == "cancel_requested")
+            local_stop = bool(row and row.get("status") == "cancel_requested")
+        if local_stop:
+            return True
+        if store.run_status(run_id) == "cancel_requested":
+            with RUN_LOCK:
+                row = RUNS.get(run_id)
+                if row is not None:
+                    row["status"] = "cancel_requested"
+            return True
+        return False
 
     attachment_rows = _resolve_attachments(list(attachment_ids or []), strict=False)
     context = ""
@@ -531,7 +562,7 @@ async def _execute(
 
 
 async def _recover_on_startup() -> None:
-    for saved in store.recoverable_runs(limit=16):
+    for saved in store.claim_recoverable_runs(owner_id=WORKER_ID, lease_seconds=RUN_LEASE_SECONDS, limit=16):
         run_id = saved["run_id"]
         cid = saved["conversation_id"]
         text = saved["goal"]
@@ -604,18 +635,24 @@ async def add_message(cid: str, req: ChatRequest):
         "created_at": now,
         "updated_at": now,
     }
-    with RUN_LOCK:
-        if any(existing.get("conversation_id") == cid and existing.get("status") in ACTIVE_RUN_STATUSES for existing in RUNS.values()):
-            raise HTTPException(409, "当前任务仍在执行，请等待完成或切换到另一个任务")
+    if not store.reserve_run(
+        run_id, cid, req.content, row,
+        owner_id=WORKER_ID, lease_seconds=RUN_LEASE_SECONDS,
+    ):
+        raise HTTPException(409, "当前任务仍在执行，请等待完成或切换到另一个任务")
+    try:
         user = store.add_message(
             cid,
             "user",
             req.content,
             {"attachments": public_attachments, "allow_network": req.allow_network},
         )
+    except Exception:
+        store.delete_run(run_id, owner_id=WORKER_ID)
+        raise
+    with RUN_LOCK:
         _prune_runs_locked()
         RUNS[run_id] = row
-        _persist_run(row)
     asyncio.create_task(
         _execute(
             run_id,
@@ -632,26 +669,19 @@ async def add_message(cid: str, req: ChatRequest):
 
 @app.post("/api/runs/{run_id}/cancel")
 def cancel_run(run_id: str):
+    try:
+        status = store.request_cancel(run_id)
+    except KeyError as exc:
+        raise HTTPException(404, "执行任务不存在") from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, "该执行已经结束，无法停止") from exc
     with RUN_LOCK:
         row = RUNS.get(run_id)
-        if row is None:
-            try:
-                saved = store.get_run(run_id)
-            except KeyError as exc:
-                raise HTTPException(404, "执行任务不存在") from exc
-            status = saved.get("status")
-            if status == "cancelled":
-                return {"ok": True, "status": "cancelled"}
-            raise HTTPException(409, "该执行已经结束，无法停止")
-        status = row.get("status")
-        if status == "cancelled":
-            return {"ok": True, "status": "cancelled"}
-        if status not in ACTIVE_RUN_STATUSES:
-            raise HTTPException(409, "该执行已经结束，无法停止")
-        row["status"] = "cancel_requested"
-        row["updated_at"] = time.time()
-        _persist_run(row)
-    return {"ok": True, "status": "cancel_requested"}
+        if row is not None and status == "cancel_requested":
+            row["status"] = "cancel_requested"
+            row["updated_at"] = time.time()
+    return {"ok": True, "status": status}
+
 
 
 @app.get("/api/runs/{run_id}")
@@ -664,6 +694,10 @@ def get_run(run_id: str):
             snapshot = store.get_run(run_id)
         except KeyError as exc:
             raise HTTPException(404, "执行任务不存在") from exc
+    elif snapshot.get("status") in ACTIVE_RUN_STATUSES:
+        persisted_status = store.run_status(run_id)
+        if persisted_status:
+            snapshot["status"] = persisted_status
     return snapshot
 
 
@@ -675,7 +709,7 @@ def import_data(req: ImportPayload):
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     with WORKSPACE_LOCK, RUN_LOCK:
-        if any(row.get("status") in ACTIVE_RUN_STATUSES for row in RUNS.values()):
+        if any(row.get("status") in ACTIVE_RUN_STATUSES for row in RUNS.values()) or store.active_conversation_ids():
             raise HTTPException(409, "仍有任务在执行，请停止或等待完成后再更换工作区数据")
         _persist_catalog(new)
         catalog = new
@@ -699,7 +733,7 @@ async def import_file(file: UploadFile = File(...)):
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     with WORKSPACE_LOCK, RUN_LOCK:
-        if any(row.get("status") in ACTIVE_RUN_STATUSES for row in RUNS.values()):
+        if any(row.get("status") in ACTIVE_RUN_STATUSES for row in RUNS.values()) or store.active_conversation_ids():
             raise HTTPException(409, "仍有任务在执行，请停止或等待完成后再更换工作区数据")
         _persist_catalog(new)
         catalog = new
