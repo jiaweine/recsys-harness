@@ -6,7 +6,7 @@ import uuid
 from typing import Any, Callable
 
 from lingjing_harness.domain import Catalog
-from .contracts import RunBudget, RunState
+from .contracts import MissionGraph, RunBudget, RunState
 from .memory import AgentMemory, catalog_fingerprint
 from .policy import OwnedPolicy
 from .tools import ToolRegistry
@@ -19,7 +19,6 @@ StopSignal = Callable[[], bool]
 
 class RunCancelled(RuntimeError):
     """Raised between tool actions when a durable run receives a stop request."""
-
 
 
 @dataclass(slots=True)
@@ -43,7 +42,13 @@ class RunEvent:
 
 
 class AgentHarness:
-    """Autonomous search/recommendation harness with memory, recovery and eval-gated evolution."""
+    """Deliberative search/recommendation harness with bounded autonomous control.
+
+    A run is not a pre-written tool pipeline. The harness compiles a mission graph,
+    tracks evidence requirements and hypotheses, chooses one action at a time,
+    reflects on each observation, and asks an independent trajectory critic whether
+    the run is evidence-complete enough to close.
+    """
 
     def __init__(
         self,
@@ -148,6 +153,22 @@ class AgentHarness:
                     allow_adaptation=plan.allow_adaptation, allow_network=plan.allow_network,
                 )
 
+        mission = self.policy.initialize(plan, state)
+        active_requirements = [
+            req for req in mission.requirements.values() if req.status != "dormant" and not req.optional
+        ]
+        if not resume:
+            self._emit(
+                events,
+                sink,
+                "deliberate",
+                "建立任务证据图",
+                f"已把目标拆成 {len(active_requirements)} 个初始证据需求，并建立 {len(mission.hypotheses)} 个可更新假设",
+                12,
+                requirements=[req.key for req in active_requirements],
+                hypotheses=[hyp.key for hyp in mission.hypotheses.values()],
+            )
+
         while state.cycle < self.budget.max_tools:
             if should_stop and should_stop():
                 raise RunCancelled("本次执行已由用户停止")
@@ -161,6 +182,7 @@ class AgentHarness:
                 policy_bonus=lambda action_key: self.memory.policy_bonus(plan.mode, action_key),
             )
             if decision.step is None:
+                state.critic = self.policy.critique(plan, state)
                 break
             spec = self.tools.get(decision.step.tool)
             if state.spent_cost + spec.cost > self.budget.max_cost:
@@ -172,8 +194,11 @@ class AgentHarness:
             decision_record = {
                 "cycle": state.cycle,
                 "tool": decision.step.tool,
+                "requirement": decision.target_requirement,
                 "reason": decision.rationale,
                 "score": decision.score,
+                "utility": decision.utility,
+                "hypotheses": list(decision.hypotheses),
                 "learned_bonus": decision.learned_bonus,
                 "alternatives": decision.alternatives,
             }
@@ -197,6 +222,7 @@ class AgentHarness:
                 tool=spec.name,
                 risk=spec.risk,
                 cost=spec.cost,
+                requirement=decision.target_requirement,
             )
             invocation_id = f"{run_id}:{state.cycle}:{spec.name}"
             action = {
@@ -209,33 +235,62 @@ class AgentHarness:
                 "status": "completed",
             }
             try:
-                result = self.tools.execute(
+                tool_result = self.tools.execute(
                     spec.name,
                     decision.step.args,
                     allow_adaptation=plan.allow_adaptation,
                     allow_network=plan.allow_network,
                     invocation_id=invocation_id,
                 )
-                action["result"] = result
-                state.observations[spec.name] = result
+                action["result"] = tool_result
+                state.observations[spec.name] = tool_result
                 state.spent_cost += spec.cost
-                self._consume(spec.name, result, state)
+                self._consume(spec.name, tool_result, state)
             except Exception as exc:
                 action["status"] = "failed"
                 action["error"] = f"{type(exc).__name__}: {exc}"
                 action["result"] = {}
                 state.findings.append(f"{decision.step.title}执行失败，系统已停止依赖该结果：{type(exc).__name__}")
             state.actions.append(action)
+
+            reflection = self.policy.reflect(plan, state, action)
+            self._emit(
+                events,
+                sink,
+                "reflect",
+                "重估证据与假设",
+                reflection["summary"],
+                min(89, progress + 1),
+                requirements_changed=reflection["requirements_changed"],
+                hypotheses_changed=reflection["hypotheses_changed"],
+                next_gaps=reflection["next_gaps"],
+                critic=reflection["critic"],
+            )
             if checkpoint_sink:
                 checkpoint_sink(self._checkpoint(run_id, plan, state, events))
             if should_stop and should_stop():
                 raise RunCancelled("本次执行已由用户停止")
 
-        self._emit(events, sink, "verify", "独立核对结论", "检查证据完整性、执行异常、策略门槛和用户约束", 92)
+        critic = self.policy.critique(plan, state)
+        self._emit(
+            events,
+            sink,
+            "verify",
+            "独立核对结论",
+            "检查任务图覆盖、证据完整性、执行异常、策略门槛和用户约束",
+            92,
+            critic=critic,
+        )
         state.findings = list(dict.fromkeys(item for item in state.findings if item))
         if not state.findings:
             state.findings = ["本次执行未发现阻断性问题"]
-        verification = self.verifier.final(state.actions, state.findings, state.evidence, allow_adaptation=plan.allow_adaptation)
+        verification = self.verifier.final(
+            state.actions,
+            state.findings,
+            state.evidence,
+            allow_adaptation=plan.allow_adaptation,
+            critic=critic,
+        )
         learned = self._learned_events(state.actions)
         suggestions = self._suggestions(plan.mode, plan.explore, state.findings, learned)
         answer = self._answer(state.blocks, state.findings, suggestions, learned)
@@ -256,10 +311,11 @@ class AgentHarness:
             sink,
             "complete",
             "形成可执行结论",
-            "已完成自主决策、证据核对和经验更新",
+            "已完成任务图推理、动态工具执行、轨迹审查和经验更新",
             100,
             reward=round(reward, 4),
             learned=len(learned),
+            critic_confidence=critic.get("confidence", 0.0),
         )
         result = {
             "run_id": run_id,
@@ -280,9 +336,20 @@ class AgentHarness:
             "actions": state.actions,
             "decisions": state.decisions,
             "verification": verification,
+            "deliberation": {
+                "mission": state.mission.dict() if state.mission else None,
+                "critic": critic,
+                "reflections": state.reflections,
+                "contradictions": list(state.contradictions),
+                "stagnation": state.stagnation,
+            },
             "autonomy": {
                 "dynamic_replan": True,
                 "evidence_utility_controller": True,
+                "mission_graph": True,
+                "hypothesis_tracking": True,
+                "trajectory_critic": True,
+                "reflection_after_tool": True,
                 "cycles": state.cycle,
                 "spent_cost": round(state.spent_cost, 3),
                 "budget": {
@@ -303,6 +370,7 @@ class AgentHarness:
             "durability": {
                 "resumed": bool(resume),
                 "checkpoint_resume": True,
+                "deliberation_state_persisted": True,
                 "idempotent_adaptive_tools": True,
             },
             "multimodal": {"context_used": bool(context)},
@@ -429,12 +497,15 @@ class AgentHarness:
 
     @staticmethod
     def _reward(verification: dict[str, Any], state: RunState, learned: list[dict[str, Any]]) -> float:
-        reward = 0.48
+        reward = 0.44
         reward += 0.18 if verification.get("passed") else -0.20
-        reward += 0.12 if state.evidence else 0.02
-        reward += 0.12 if learned else 0.0
+        reward += 0.10 if state.evidence else 0.02
+        reward += 0.10 if learned else 0.0
         reward += 0.08 if state.cycle <= 8 else 0.02
+        reward += 0.10 if state.critic.get("ready") else -0.08
+        reward += 0.06 * float(state.critic.get("evidence_coverage", 0.0) or 0.0)
         reward -= 0.08 * sum(1 for row in state.actions if row.get("status") == "failed")
+        reward -= 0.04 * min(2, len(state.contradictions))
         return max(0.0, min(1.0, reward))
 
     @staticmethod
@@ -469,6 +540,8 @@ class AgentHarness:
         saved_plan = payload.get("plan") or {}
         if saved_plan.get("mode") and saved_plan.get("mode") != plan.mode:
             raise ValueError("checkpoint 与当前任务模式不一致，拒绝恢复")
+        mission_payload = payload.get("mission")
+        mission = MissionGraph.from_dict(mission_payload) if isinstance(mission_payload, dict) else None
         state = RunState(
             cycle=max(0, int(payload.get("cycle", 0) or 0)),
             spent_cost=max(0.0, float(payload.get("spent_cost", 0.0) or 0.0)),
@@ -478,6 +551,12 @@ class AgentHarness:
             evidence=list(payload.get("evidence") or []),
             blocks=list(payload.get("blocks") or []),
             decisions=list(payload.get("decisions") or []),
+            mission=mission,
+            reflections=list(payload.get("reflections") or []),
+            contradictions=list(payload.get("contradictions") or []),
+            stagnation=max(0, int(payload.get("stagnation", 0) or 0)),
+            last_progress_cycle=max(0, int(payload.get("last_progress_cycle", 0) or 0)),
+            critic=dict(payload.get("critic") or {}),
         )
         events = []
         for row in payload.get("events") or []:
@@ -517,6 +596,12 @@ class AgentHarness:
             "evidence": state.evidence,
             "blocks": state.blocks,
             "decisions": state.decisions,
+            "mission": state.mission.dict() if state.mission else None,
+            "reflections": state.reflections,
+            "contradictions": state.contradictions,
+            "stagnation": state.stagnation,
+            "last_progress_cycle": state.last_progress_cycle,
+            "critic": state.critic,
             "events": [event.dict() for event in events],
             "updated_at": time.time(),
         }
