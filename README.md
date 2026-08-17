@@ -10,9 +10,9 @@
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![Local-first](https://img.shields.io/badge/runtime-local--first-111827)
 
-**真实工具 · 动态决策 · 证据门控学习 · 多模态上下文 · 可控联网 · 可恢复执行**
+**AgentHarness runtime · 项目自有决策核 · 真实工具 · 独立验证 · 证据门控学习 · 可恢复执行**
 
-[真实产品](#真实产品) · [它解决什么](#它解决什么) · [一次任务如何运行](#一次任务如何运行) · [快速启动](#快速启动) · [核心能力](#核心能力) · [可靠性](#可靠性) · [系统架构](#系统架构) · [部署](#部署)
+[真实产品](#真实产品) · [它解决什么](#它解决什么) · [Agent Harness 方法](#agent-harness-方法) · [快速启动](#快速启动) · [核心能力](#核心能力) · [可靠性](#可靠性) · [系统架构](#系统架构) · [部署](#部署)
 
 </div>
 
@@ -58,27 +58,20 @@
 </table>
 
 <p align="center">
-  <sub>MOBILE · THREE REAL STATES</sub><br>
-  <strong>同一个真实任务的主工作区、执行轨迹与判断依据。</strong>
+  <sub>MOBILE · SAME 393 × 852 VIEWPORT · THREE REAL STATES</sub><br>
+  <strong>三张图使用完全一致的列宽和展示尺度。</strong>
 </p>
 
 <table>
   <tr>
-    <td width="38%" valign="top" align="center">
-      <strong>01 · 主任务</strong><br>
-      <sub>对话、结论与执行入口</sub><br><br>
-      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@f7f415f59581c69e7a0bec4f24d33c637af55691/docs/readme-assets/mobile-workspace.png" alt="Recsys Harness 移动端主任务" width="94%">
-    </td>
-    <td width="31%" valign="top" align="center">
-      <strong>02 · 执行轨迹</strong><br>
-      <sub>bottom sheet · 任务状态与真实动作</sub><br><br>
-      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@f7f415f59581c69e7a0bec4f24d33c637af55691/docs/readme-assets/mobile-progress.png" alt="Recsys Harness 移动端执行轨迹" width="92%">
-    </td>
-    <td width="31%" valign="top" align="center">
-      <strong>03 · 判断依据</strong><br>
-      <sub>bottom sheet · 可复核证据与来源</sub><br><br>
-      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@f7f415f59581c69e7a0bec4f24d33c637af55691/docs/readme-assets/mobile-evidence.png" alt="Recsys Harness 移动端判断依据" width="92%">
-    </td>
+    <td width="33%" valign="top" align="center"><strong>01 · 主任务</strong><br><sub>Workspace · 对话 / 结论 / 执行</sub></td>
+    <td width="33%" valign="top" align="center"><strong>02 · 执行轨迹</strong><br><sub>Bottom sheet · 状态 / 实际动作</sub></td>
+    <td width="33%" valign="top" align="center"><strong>03 · 判断依据</strong><br><sub>Bottom sheet · 证据 / 来源</sub></td>
+  </tr>
+  <tr>
+    <td width="33%" valign="top" align="center"><img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@f7f415f59581c69e7a0bec4f24d33c637af55691/docs/readme-assets/mobile-workspace.png" alt="Recsys Harness 移动端主任务" width="92%"></td>
+    <td width="33%" valign="top" align="center"><img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@f7f415f59581c69e7a0bec4f24d33c637af55691/docs/readme-assets/mobile-progress.png" alt="Recsys Harness 移动端执行轨迹" width="92%"></td>
+    <td width="33%" valign="top" align="center"><img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@f7f415f59581c69e7a0bec4f24d33c637af55691/docs/readme-assets/mobile-evidence.png" alt="Recsys Harness 移动端判断依据" width="92%"></td>
   </tr>
 </table>
 
@@ -107,32 +100,161 @@
 | 经验依赖个人记忆 | 有界的 episodic / procedural / policy memory |
 
 **它不是“聊天框 + 一次算法调用”，也不是把固定流水线换一个 Agent 名字。**  
-搜索和推荐是能力，Harness 才是产品主体。
+搜索和推荐是能力，**Agent Harness 才是运行这些能力、约束这些能力、验证这些能力并让它们可恢复地持续工作的系统主体。**
 
 ---
 
-## 一次任务如何运行
+## Agent Harness 方法
 
-用户只需要描述目标和边界：
+### Harness 是运行时，不是 Prompt Wrapper
 
-```text
-“露营灯”的搜索结果不准，先检查，不要改当前策略。
-```
+`AgentHarness` 不是一个把任务丢给模型、再让模型随意挑工具的壳。项目自己的运行时把 **目标理解、动作选择、工具执行、证据消费、独立验证、长期记忆和 durable recovery** 串成一个受边界约束的控制系统。
 
 <table>
   <tr>
-    <td width="25%" valign="top"><strong>01 · Observe</strong><br><sub>复现真实结果，读取工作区、附件和历史状态。</sub></td>
-    <td width="25%" valign="top"><strong>02 · Decide</strong><br><sub>根据证据缺口、信息增益、风险和预算选择下一步。</sub></td>
-    <td width="25%" valign="top"><strong>03 · Execute & Verify</strong><br><sub>运行真实工具，并用独立样本与全量回归验证。</sub></td>
-    <td width="25%" valign="top"><strong>04 · Learn / Stop</strong><br><sub>记录可信经验、受控激活，或在证据不足时停止。</sub></td>
+    <td width="33%" valign="top"><strong>OwnedPolicy</strong><br><sub>项目自有 evidence-utility controller；决定下一步做什么。</sub></td>
+    <td width="33%" valign="top"><strong>ToolRegistry</strong><br><sub>真实搜索 / 推荐 / 评估 / 演化能力，以及风险与成本契约。</sub></td>
+    <td width="33%" valign="top"><strong>ResultVerifier</strong><br><sub>独立核对结构、证据、权限与策略门槛。</sub></td>
+  </tr>
+  <tr>
+    <td width="33%" valign="top"><strong>AgentMemory</strong><br><sub>episodic / procedural / policy 三类有界长期记忆。</sub></td>
+    <td width="33%" valign="top"><strong>RunState + Budget</strong><br><sub>动作、observation、成本、时间、工具次数与停止条件。</sub></td>
+    <td width="33%" valign="top"><strong>Checkpoint / Resume</strong><br><sub>每个真实动作后持久化；中断后从已完成动作之后继续。</sub></td>
   </tr>
 </table>
 
-真正关键的是：**路径不是预先写死的。**
+对应实现：[`runtime/harness.py`](lingjing_harness/runtime/harness.py) · [`runtime/policy.py`](lingjing_harness/runtime/policy.py) · [`runtime/tools.py`](lingjing_harness/runtime/tools.py) · [`runtime/verifier.py`](lingjing_harness/runtime/verifier.py) · [`runtime/memory.py`](lingjing_harness/runtime/memory.py)
 
-每一次工具返回新 observation 后，控制器都会重新判断下一步。复现正常，就不会为了“流程完整”机械诊断；证据出现冲突、冷启动或覆盖不足，后续动作会重新规划。
+### 1 · Goal → constraints：先定义边界，再谈自主
 
-> **Control loop:** Observe → Decide → Execute → Checkpoint → Replan → Verify → Learn / Stop
+用户输入首先被解析成 `mode / goal / query / user / explore / allow_adaptation / allow_network / constraints`。
+
+这里有一个关键设计：**附件和网页内容可以成为 observation，但不能成为 authority。** 是否允许联网、是否允许改变当前策略，只来自用户明确授权；截图里的文字或外部网页不能替用户扩大权限。
+
+```text
+User goal
+  ↓
+mode + target + constraints
+  ↓
+allowed tools + allowed side effects
+```
+
+### 2 · Evidence-utility controller：每一轮重新算下一步
+
+核心不是一次性生成一个 Plan，而是每个 observation 返回后重新构造候选动作并排序。
+
+当前实现中的动作效用可以概括为：
+
+```text
+utility(action)
+  = base
+  + 0.22 × information_gain
+  + 0.18 × evidence_gap
+  + 0.12 × anomaly_pressure
+  - 0.07 × cost_pressure
+  + learned_policy_bonus
+```
+
+其中：
+
+| 信号 | 含义 |
+|---|---|
+| `information_gain` | 这个动作预计能补多少新信息 |
+| `evidence_gap` | 当前结论还缺多少关键证据 |
+| `anomaly_pressure` | 已观察到的异常是否值得继续深挖 |
+| `cost_pressure` | 工具成本相对于预算的压力 |
+| `learned_policy_bonus` | 相似上下文里这个动作过去真实带来的收益；被限制在小范围内，不会压过当前证据 |
+
+所以“下一步”不是来自固定 DAG，也不是来自一个不可审计的模型直觉，而是由**当前状态 + 明确信号 + 历史收益**共同决定，并记录候选 alternatives 与选择理由。
+
+### 3 · Observe → Decide → Execute → Checkpoint → Replan
+
+一次 run 的真实控制循环更接近下面这样：
+
+```text
+plan = understand(goal, constraints)
+memory = recall(similar episodes)
+
+while budget remains:
+    candidates = tools allowed by current state + permissions
+    decision = argmax evidence_utility(candidates)
+
+    if no action has enough marginal value:
+        break
+
+    result = execute(real_tool, risk_guarded=True)
+    consume(result → observations / findings / evidence)
+    checkpoint(run_state)
+    replan from the new observation
+
+verify the whole run
+record bounded learning
+return answer + evidence + trace
+```
+
+这就是 Harness 与普通“LLM tool calling”的分界：**工具返回不是流程终点，而是下一次决策的输入。**
+
+### 4 · Tool contract：能力可以真实执行，但不能越权
+
+每个工具都带显式 contract：
+
+```text
+risk · cost · side_effect · repeatable · input_schema
+```
+
+| Risk | Harness 允许什么 |
+|---|---|
+| `read` | 读取数据、真实复现搜索 / 推荐，不改变策略 |
+| `simulation` | 离线 audit / evaluation |
+| `adaptive` | 可以探索并写入可信策略记忆；激活仍受用户授权 |
+| `network` | 只有本次 run 明确允许联网时才可调用 |
+
+因此自主性被放在**有类型的执行面**上，而不是“Agent 想做什么就做什么”。
+
+### 5 · Verify before learn：结论和学习分两道门
+
+执行结束后，`ResultVerifier` 会独立检查：
+
+- 是否真的执行过工具；
+- 是否存在 failed tool；
+- 结论是否有 evidence 或 audit 支撑；
+- adaptation 是否遵守用户权限；
+- 是否出现重复内容、非有限分数等严重结构问题。
+
+策略探索还有更严格的一组 gate：
+
+```text
+Discovery competition
+→ Independent holdout
+→ Full regression
+→ Robustness gate
+→ Trusted strategy memory
+→ optional activation
+```
+
+**没有独立 holdout，就不能从“探索过”升级成 trusted / active。** 外部网络证据也不能进入策略晋升样本。
+
+### 6 · Memory 不是聊天记录，而是三种不同的学习对象
+
+| Memory | 学什么 | 如何影响未来 |
+|---|---|---|
+| **Episodic** | 某类目标做过什么、结果如何 | 相似任务启动时召回相关经验 |
+| **Procedural** | 通过验证的搜索 / 推荐策略 | trusted / active / retired 生命周期 |
+| **Policy** | 某种上下文下动作过去带来的 reward | 给下一次动作 utility 一个有界 bonus |
+
+Policy bonus 还会根据试验次数逐步增加置信度，并保持严格上限；历史经验只做**小幅先验**，不会覆盖本次新证据。
+
+### 7 · Recoverable autonomy：自主执行必须能安全中断和恢复
+
+每个完成的工具动作都会进入 checkpoint，保存：
+
+```text
+actions · observations · findings · evidence · decisions · cost · events
+```
+
+恢复时 Harness 会 rehydrate 已完成状态，从下一个未执行动作继续。Adaptive action 使用稳定 invocation id 做幂等保护，避免“策略记忆已经写入，但 checkpoint 尚未落盘”时重复学习。
+
+> **方法论核心：** Recsys Harness 不是让 Agent 获得更多自由，而是让它在**证据、预算、权限、验证与可恢复状态**共同构成的边界里拥有足够自主性。
 
 ---
 
@@ -197,6 +319,8 @@ pytest -q
 
 ## 核心能力
 
+方法讲的是 Harness 如何做决定；这里讲它手上到底有哪些能力。
+
 <table>
   <tr>
     <td width="33%" valign="top"><strong>01 · Autonomous Control</strong><br><sub>每次 observation 后重新决策，不依赖一次性 Plan。</sub></td>
@@ -210,23 +334,8 @@ pytest -q
   </tr>
 </table>
 
-<details open>
-<summary><strong>01 · 自主决策，而不是一次性 Plan</strong></summary>
-
-项目自己的决策控制器会在**每一次工具返回新 observation 后重新选择下一步**。动作效用综合：
-
-- 当前证据缺口与预期信息增益；
-- 异常与冲突信号；
-- 工具成本和剩余预算；
-- 相似历史任务中的真实收益；
-- 用户授予的联网与策略调整权限。
-
-因此 Agent 可以继续、插入诊断、切换检查路径、停止，或者进入受控的策略探索。
-
-</details>
-
 <details>
-<summary><strong>02 · 搜索与推荐是真实工具</strong></summary>
+<summary><strong>真实搜索与推荐能力</strong></summary>
 
 | 搜索 | 推荐 |
 |---|---|
@@ -239,37 +348,7 @@ pytest -q
 </details>
 
 <details>
-<summary><strong>03 · 证据门控学习</strong></summary>
-
-这里的“学习”不是 Agent 任意修改自己的源代码，而是让候选策略逐级通过验证门槛：
-
-| Gate | 必须回答的问题 |
-|---|---|
-| **Discovery competition** | 多个候选里是否真的存在更优方向 |
-| **Independent holdout** | 优势能否在独立样本上成立 |
-| **Full regression** | 局部收益是否伤害整体质量 |
-| **Robustness gate** | 改进是否足够稳定，而不是偶然波动 |
-| **Trusted strategy memory** | 是否有资格进入可信策略记忆 |
-
-没有独立 holdout，只允许探索，**不能变成 trusted / active 策略**。即使候选通过验证，是否激活仍受用户权限控制；未来验证出现明显漂移时，可以 retired 并回到稳健配置。
-
-</details>
-
-<details>
-<summary><strong>04 · 真正的长期记忆</strong></summary>
-
-| Memory | 保存什么 |
-|---|---|
-| **Episodic** | 过去类似任务发生了什么 |
-| **Procedural** | 通过证据门槛的搜索 / 推荐策略 |
-| **Policy** | 某类任务中不同动作过去带来的收益 |
-
-记忆不是无限堆积。系统保留近期经验和高价值经验，并淘汰低价值旧记录。
-
-</details>
-
-<details>
-<summary><strong>05 · 多模态输入</strong></summary>
+<summary><strong>多模态输入</strong></summary>
 
 同一个任务可以带自然语言、截图、PNG / JPEG / WebP / GIF、JSON / CSV / Markdown / TXT；最多 8 个附件，单文件上限 12MB。
 
@@ -280,7 +359,7 @@ pytest -q
 </details>
 
 <details>
-<summary><strong>06 · 可控联网</strong></summary>
+<summary><strong>可控联网</strong></summary>
 
 联网是显式能力，不是后台默认行为。只有当用户在任务里授权联网，并且服务端配置了搜索端点，网络研究工具才会进入本次可用工具集合。
 
@@ -336,12 +415,6 @@ risk · cost · side_effect · repeatable · input_schema
 <details>
 <summary><strong>Durable execution</strong></summary>
 
-每个 run 持续保存：
-
-```text
-actions · observations · findings · evidence · decisions · cost · events
-```
-
 服务重启后可以从 checkpoint 恢复。Adaptive action 使用稳定 invocation id，避免“已经写入策略记忆、但 checkpoint 还没保存”时把一次学习重复执行多次。
 
 </details>
@@ -366,27 +439,19 @@ SQLite 同时承担共享运行协调：conversation 级原子 run reservation�
 
 ## 系统架构
 
-<p align="center"><sub>CONTROL · EVIDENCE · TRUST · STATE</sub></p>
+<p align="center"><sub>AGENT HARNESS RUNTIME · CONTROL · EVIDENCE · TRUST · STATE</sub></p>
+<p align="center"><strong>AgentHarness = OwnedPolicy + ToolRegistry + ResultVerifier + AgentMemory + RunState / Checkpoint</strong></p>
 <p align="center">
   <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@f7f415f59581c69e7a0bec4f24d33c637af55691/docs/readme-assets/architecture.svg" alt="Recsys Harness system architecture" width="97%">
 </p>
 
-架构图刻意把系统分成三个面，而不是把组件堆成一张依赖关系图：
+图中央的 **Autonomous Control Core** 不是一个外部模型框，而是项目自己的 Agent Harness runtime。它持有决策权；感知、网络和工具只提供 observation / capability，不能偷偷扩大 authority。
 
 <table>
   <tr>
-    <td width="33%" valign="top">
-      <strong>Control plane</strong><br>
-      <sub>目标、observation、动作效用、预算、风险和 Replan 在项目自有控制核中闭环。</sub>
-    </td>
-    <td width="33%" valign="top">
-      <strong>Evidence plane</strong><br>
-      <sub>真实搜推工具、诊断结果、附件感知与可选网络研究只提供可追溯 evidence。</sub>
-    </td>
-    <td width="33%" valign="top">
-      <strong>Trust & state plane</strong><br>
-      <sub>holdout、回归、memory、checkpoint、lease、workspace revision 与 access 共同约束长期行为。</sub>
-    </td>
+    <td width="33%" valign="top"><strong>Control plane</strong><br><sub>OwnedPolicy 根据目标、observation、动作效用、预算、风险和历史收益动态 Replan。</sub></td>
+    <td width="33%" valign="top"><strong>Evidence plane</strong><br><sub>真实搜推工具、诊断、附件感知与网络研究产生可追溯 evidence，再交给 verifier。</sub></td>
+    <td width="33%" valign="top"><strong>Trust & state plane</strong><br><sub>holdout、memory、checkpoint、lease、workspace revision 与 access 约束长期行为和恢复。</sub></td>
   </tr>
 </table>
 
@@ -482,13 +547,13 @@ frontend/                         产品 UI
 lingjing_harness/
   algorithms/                     搜索、推荐、评估、策略探索
   runtime/
-    harness.py                    自主执行循环
-    policy.py                     项目自有决策控制器
-    tools.py                      能力注册与风险 guardrail
+    harness.py                    Agent Harness 自主执行循环
+    policy.py                     项目自有 evidence-utility controller
+    tools.py                      真实能力注册与风险 contract
+    verifier.py                   独立结果 / 权限 / 学习门槛验证
+    memory.py                     episodic / procedural / policy memory
     perception.py                 多模态 observation
     network.py                    可控网络 evidence
-    memory.py                     长期 Agent memory
-    verifier.py                   独立结果验证
   api.py                          API、认证、附件、恢复、工作区运行时
   store.py                        durable run、lease、revision、共享限流
 tests/                            回归与 resilience 测试
@@ -502,10 +567,10 @@ scripts/capture_readme_assets.py  真实浏览器 QA 与 README 截图
 
 <div align="center">
 
-### Search and recommendation are the capabilities. The harness is the product.
+### Search and recommendation are the capabilities. The Agent Harness is the product.
 
-**Observe · Decide · Execute · Verify · Learn · Recover**
+**Observe · Decide · Execute · Checkpoint · Replan · Verify · Learn · Recover**
 
-<sub>真实工具 · 动态决策 · 可验证学习 · 多模态上下文 · 可控联网 · 可恢复执行</sub>
+<sub>Owned control · Real tools · Evidence gates · Bounded memory · Durable execution</sub>
 
 </div>
