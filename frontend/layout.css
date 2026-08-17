@@ -91,21 +91,21 @@
 @media (max-width:720px){
   :root{--top:54px}
   body{background:#f5f6f3}
-  .shell{grid-template-rows:var(--top) 52px minmax(0,1fr);background:#f5f6f3}
+  .shell{grid-template-rows:var(--top) 56px minmax(0,1fr);background:#f5f6f3}
   .topbar{gap:8px;padding:0 13px;background:rgba(251,250,247,.96);border-bottom:1px solid rgba(213,217,212,.68);backdrop-filter:blur(18px)}
   .brand{width:auto;gap:7px}.brand-mark{font-size:18px}.brand-rule,.brand-sub,.top-status,.top-link{display:none}
   .top-actions{gap:8px}
-  .trace-toggle{display:inline-flex;align-items:center;gap:7px;min-height:36px;padding:0 11px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.8);font-size:10px;font-weight:760;color:var(--ink-soft)}
+  .trace-toggle{display:inline-flex;align-items:center;gap:7px;min-height:44px;padding:0 11px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.8);font-size:10px;font-weight:760;color:var(--ink-soft)}
   .trace-toggle:before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px rgba(47,95,107,.09)}
   .trace-toggle:after{display:none}
   .avatar{display:none}
 
-  .sidebar{height:52px;grid-template-columns:40px minmax(0,1fr);gap:7px;padding:6px 9px 7px;background:#fbfaf7;border-right:0;border-bottom:1px solid var(--line);overflow:hidden}
-  .new-task{min-height:38px;width:40px;padding:0;justify-content:center;border:1px solid var(--line);border-radius:11px;background:#fff;box-shadow:0 1px 2px rgba(29,36,33,.04)}
+  .sidebar{height:56px;grid-template-columns:44px minmax(0,1fr);gap:7px;padding:6px 9px;background:#fbfaf7;border-right:0;border-bottom:1px solid var(--line);overflow:hidden}
+  .new-task{min-height:44px;width:44px;padding:0;justify-content:center;border:1px solid var(--line);border-radius:12px;background:#fff;box-shadow:0 1px 2px rgba(29,36,33,.04)}
   .new-task span{display:none}.new-task b{font-size:17px}
-  .scene-nav{margin:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;padding:3px;border:1px solid rgba(213,217,212,.72);border-radius:12px;background:#eef1ed;min-width:0}
+  .scene-nav{margin:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;padding:0;border:1px solid rgba(213,217,212,.72);border-radius:12px;background:#eef1ed;min-width:0;overflow:hidden}
   .scene-nav .nav-label{display:none}
-  .scene{min-height:32px;display:grid;grid-template-columns:1fr;place-items:center;gap:0;padding:0 4px;border-radius:9px;text-align:center;color:var(--muted)}
+  .scene{min-height:44px;display:grid;grid-template-columns:1fr;place-items:center;gap:0;padding:0 4px;border-radius:10px;text-align:center;color:var(--muted)}
   .scene:before,.scene>span,.scene small{display:none}
   .scene b{font-size:10px;font-weight:720;white-space:nowrap}
   .scene:hover{background:transparent}
@@ -114,7 +114,7 @@
 
   .main{background:#fbfaf7}
   .main-head{display:none}
-  .scroll{padding-bottom:154px;scroll-padding-bottom:160px}
+  .scroll{padding-bottom:158px;scroll-padding-bottom:164px}
   .welcome{padding:27px 18px 24px}
   .hero-index{margin-bottom:11px;font-size:9px}
   .hero-copy h2{font-size:27px;line-height:1.12;letter-spacing:-.04em}
@@ -140,10 +140,10 @@
   .composer:focus-within{transform:none;box-shadow:0 0 0 3px rgba(47,95,107,.06),0 12px 34px rgba(29,36,33,.13)}
   .composer textarea{min-height:44px;max-height:110px;padding:11px 12px 4px;font-size:12px;line-height:1.5}
   .composer-foot{padding:4px 5px 5px;border-top:0}.composer-tools{gap:2px}.input-hint{display:none}
-  .tool-btn{min-height:42px;padding:0 8px;border-radius:11px}.network-btn{min-width:42px}
-  .send-btn{min-width:68px;min-height:42px;padding:0 10px;border-radius:12px}.send-btn span{font-size:10px}
+  .tool-btn{min-height:44px;padding:0 8px;border-radius:11px}.network-btn{min-width:44px}
+  .send-btn{min-width:68px;min-height:44px;padding:0 10px;border-radius:12px}.send-btn span{font-size:10px}
   .composer-wrap>p{display:none}
-  .attachment-tray{padding:7px 8px 0}.attachment-card{grid-template-columns:30px minmax(68px,98px) 42px;height:44px}.attachment-card img,.attachment-card .file-mark{width:30px;height:30px}
+  .attachment-tray{padding:7px 8px 0}.attachment-card{grid-template-columns:30px minmax(68px,98px) 44px;height:44px}.attachment-card img,.attachment-card .file-mark{width:30px;height:30px}
   .drop-hint{inset:5px 7px;border-radius:16px}
 
   /* Evidence becomes a bottom sheet. The task remains visible behind it. */
@@ -152,9 +152,9 @@
   .inspector-head{height:62px;padding:16px 14px 8px;background:#f6f7f4;border-bottom:0;position:relative}
   .inspector-head:before{content:"";position:absolute;top:7px;left:50%;width:34px;height:4px;border-radius:999px;background:#c3c9c3;transform:translateX(-50%)}
   .inspector-head div{gap:1px}.inspector-head span{font-size:9px}.inspector-head b{font-size:13px}
-  .inspector-head button{display:grid;place-items:center;width:38px;height:38px;border:1px solid var(--line);border-radius:50%;background:#fff;font-size:19px}
+  .inspector-head button{display:grid;place-items:center;width:44px;height:44px;border:1px solid var(--line);border-radius:50%;background:#fff;font-size:19px}
   .tabs{height:44px;margin:0 12px;padding:3px;border:0;border-radius:12px;background:#e8ece7;gap:2px}
-  .tab{min-height:36px;border:0;border-radius:9px;padding:0 4px;color:var(--muted);font-size:10px}
+  .tab{min-height:38px;border:0;border-radius:9px;padding:0 4px;color:var(--muted);font-size:10px}
   .tab.active{border:0;background:#fff;color:var(--accent-strong);box-shadow:0 1px 5px rgba(29,36,33,.08)}
   .inspector-body{padding:14px 15px calc(18px + env(safe-area-inset-bottom));background:#f6f7f4}
   .state-row{margin-bottom:12px;padding:7px 10px 10px;border:1px solid var(--line);border-radius:12px;background:#fff}.state-row b{font-size:13px}
@@ -166,6 +166,6 @@
 
 @media (max-width:430px){
   .hero-copy h2{font-size:26px}.scene b{font-size:9px}.trace-toggle{padding:0 10px}.copy-btn{min-width:52px}
-  .network-btn{font-size:0;width:42px;padding:0;justify-content:center}.network-light{width:8px;height:8px}
+  .network-btn{font-size:0;width:44px;padding:0;justify-content:center}.network-light{width:8px;height:8px}
   .tool-btn:not(.network-btn){font-size:10px}.send-btn{min-width:64px}
 }
