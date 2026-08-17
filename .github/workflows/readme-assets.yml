@@ -61,7 +61,7 @@ jobs:
             docs/readme-assets/mobile.png
           retention-days: 5
 
-      - name: Commit screenshots and pin README delivery
+      - name: Publish screenshots, prewarm CDN, and pin README
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -69,6 +69,8 @@ jobs:
           git add docs/readme-assets/workbench.png docs/readme-assets/overview.png docs/readme-assets/evidence.png docs/readme-assets/mobile.png
           if ! git diff --cached --quiet; then
             git commit -m "Refresh README product screenshots"
+            # The commit must exist remotely before an independent CDN can fetch it.
+            git push
           else
             echo "README screenshots are already current."
           fi
@@ -77,10 +79,10 @@ jobs:
           export ASSET_SHA="$asset_sha"
           cdn_base="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@${asset_sha}/docs/readme-assets"
 
-          # Prewarm the independent CDN before README points at it. This avoids
-          # exposing readers to GitHub Raw/Varnish outages such as HKG max_conn.
+          # Prewarm and validate the independent CDN before README points at it.
           for name in overview.png workbench.png evidence.png mobile.png architecture.svg; do
-            curl -fsSL --retry 4 --retry-all-errors --connect-timeout 10 --max-time 45 \
+            curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 \
+              --connect-timeout 10 --max-time 45 \
               -A "Mozilla/5.0 recsys-readme-assets" \
               "${cdn_base}/${name}" -o "/tmp/${name}"
             test -s "/tmp/${name}"
@@ -119,8 +121,7 @@ jobs:
           git add README.md
           if ! git diff --cached --quiet; then
             git commit -m "Pin README product assets to resilient CDN"
+            git push
           else
             echo "README asset URLs are already pinned."
           fi
-
-          git push
