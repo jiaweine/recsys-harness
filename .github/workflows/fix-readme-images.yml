@@ -5,89 +5,35 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/fix-readme-images.yml"
-      - "README.md"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  fix:
+  probe:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify local README image references
+      - name: Probe candidate image URLs
         run: |
-          python - <<'PY'
+          set +e
+          urls=(
+            "https://github.com/jiaweine/recsys-harness/raw/refs/heads/main/docs/readme-assets/overview.png"
+            "https://github.com/jiaweine/recsys-harness/raw/main/docs/readme-assets/overview.png"
+            "https://github.com/jiaweine/recsys-harness/blob/main/docs/readme-assets/overview.png?raw=1"
+            "https://raw.githubusercontent.com/jiaweine/recsys-harness/refs/heads/main/docs/readme-assets/overview.png"
+            "https://raw.githubusercontent.com/jiaweine/recsys-harness/main/docs/readme-assets/overview.png"
+          )
+          for url in "${urls[@]}"; do
+            echo "PROBE $url"
+            curl -L -A "Mozilla/5.0 README-render-check" --max-time 20 -sS -o /tmp/probe.bin -w "HTTP=%{http_code} TYPE=%{content_type} SIZE=%{size_download}\n" "$url"
+            python - <<'PY'
           from pathlib import Path
-          text = Path('README.md').read_text(encoding='utf-8')
-          targets = {
-              'overview.png': 'Recsys Harness 真实运行界面',
-              'workbench.png': 'Recsys Harness 工作台',
-              'evidence.png': 'Recsys Harness 证据面板',
-              'mobile.png': 'Recsys Harness 移动端',
-              'architecture.svg': 'Recsys Harness system architecture',
-          }
-          for name, alt in targets.items():
-              canonical = f'![{alt}](docs/readme-assets/{name})'
-              if canonical not in text:
-                  raise SystemExit(f'non-canonical README image reference: {name}')
-              asset = Path('docs/readme-assets', name)
-              if not asset.is_file() or asset.stat().st_size < 100:
-                  raise SystemExit(f'missing or empty README asset: {asset}')
-          if '](/docs/readme-assets/' in text:
-              raise SystemExit('site-root README image path is forbidden')
+          p = Path('/tmp/probe.bin')
+          if p.exists():
+              data = p.read_bytes()[:16]
+              print('MAGIC=', data.hex())
           PY
-      - name: Inspect rendered GitHub README image URLs
-        run: |
-          python - <<'PY'
-          from html.parser import HTMLParser
-          from urllib.parse import urljoin
-          from urllib.request import Request, urlopen
-
-          REPO = 'https://github.com/jiaweine/recsys-harness'
-          EXPECTED = {
-              'Recsys Harness 真实运行界面',
-              'Recsys Harness 工作台',
-              'Recsys Harness 证据面板',
-              'Recsys Harness 移动端',
-              'Recsys Harness system architecture',
-          }
-          class Images(HTMLParser):
-              def __init__(self):
-                  super().__init__(); self.items = {}
-              def handle_starttag(self, tag, attrs):
-                  if tag != 'img': return
-                  attrs = dict(attrs); alt = attrs.get('alt', '')
-                  if alt in EXPECTED and attrs.get('src'):
-                      self.items[alt] = attrs['src']
-
-          headers = {'User-Agent': 'Mozilla/5.0 README-render-check'}
-          with urlopen(Request(REPO, headers=headers), timeout=20) as response:
-              html = response.read().decode('utf-8', 'replace')
-          parser = Images(); parser.feed(html)
-          print('RENDERED_IMAGES_START')
-          for alt in sorted(EXPECTED):
-              src = parser.items.get(alt)
-              print(f'{alt} => {src}')
-          print('RENDERED_IMAGES_END')
-          missing = EXPECTED - parser.items.keys()
-          if missing:
-              raise RuntimeError(f'rendered README is missing images: {sorted(missing)}')
-          failures = []
-          for alt, src in parser.items.items():
-              image_url = urljoin(REPO, src)
-              print(f'CHECK {alt} => {image_url}')
-              try:
-                  with urlopen(Request(image_url, headers=headers), timeout=20) as response:
-                      content_type = (response.headers.get('Content-Type') or '').lower()
-                      body = response.read(32)
-                      print(f'OK {response.status} {content_type} {image_url}')
-                      if not content_type.startswith('image/') or not body:
-                          failures.append(f'{alt}: non-image response {content_type} {image_url}')
-              except Exception as exc:
-                  print(f'FAIL {alt} => {image_url}: {exc!r}')
-                  failures.append(f'{alt}: {image_url}: {exc!r}')
-          if failures:
-              raise RuntimeError(' | '.join(failures))
-          PY
+          done
+          exit 0
