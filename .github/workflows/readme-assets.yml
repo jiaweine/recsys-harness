@@ -1,4 +1,4 @@
-# Visual QA screenshots are captured from the real running product.
+# Visual QA screenshots are captured from the real running product after motion settles.
 name: Refresh README product assets
 
 on:

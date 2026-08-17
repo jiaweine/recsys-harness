@@ -42,7 +42,7 @@ jobs:
           assert not [value for value in sizes if value < 10], 'font size below 10px detected'
           declarations = re.findall(r'font-size:\s*([^;}\n]+)', css)
           type_values = [int(value) for declaration in declarations for value in re.findall(r'(\d+)px', declaration)]
-          assert not [value for value in type_values if value > 42], 'product type scale exceeds 42px'
+          assert not [value for value in type_values if value > 38], 'product type scale exceeds 38px'
 
           control_files = [
               Path('lingjing_harness/api.py'),
