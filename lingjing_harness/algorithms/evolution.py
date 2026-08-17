@@ -128,8 +128,8 @@ def _unique_configs(rows: Iterable[dict[str, float]]) -> list[dict[str, float]]:
     return out
 
 
-def _search_robustness(baseline: dict[str, Any], trial: dict[str, Any]) -> dict[str, float]:
-    base = {row["query"]: row for row in baseline.get("details", [])}
+def _search_robustness(reference: dict[str, Any], trial: dict[str, Any]) -> dict[str, float]:
+    base = {row["query"]: row for row in reference.get("details", [])}
     deltas = []
     for row in trial.get("details", []):
         if row["query"] in base:
@@ -143,8 +143,8 @@ def _search_robustness(baseline: dict[str, Any], trial: dict[str, Any]) -> dict[
     }
 
 
-def _recommend_robustness(baseline: dict[str, Any], trial: dict[str, Any]) -> dict[str, float]:
-    base = {row["user_id"]: row for row in baseline.get("details", [])}
+def _recommend_robustness(reference: dict[str, Any], trial: dict[str, Any]) -> dict[str, float]:
+    base = {row["user_id"]: row for row in reference.get("details", [])}
     deltas = []
     for row in trial.get("details", []):
         previous = base.get(row["user_id"])
@@ -280,17 +280,17 @@ def evolve_search(
     discovery_labels, holdout_labels = _stable_split(labels, lambda row: row.query)
     base_config = asdict(current.config)
     prepared = {label.query: current.prepare(label.query) for label in labels}
-    baseline = _audit_search_cached(catalog, current, labels, prepared, current.config)
-    baseline_discovery = _audit_search_cached(catalog, current, discovery_labels, prepared, current.config)
-    baseline_holdout = _audit_search_cached(catalog, current, holdout_labels, prepared, current.config) if holdout_labels else None
-    evidence = int(baseline.get("queries", 0))
+    reference = _audit_search_cached(catalog, current, labels, prepared, current.config)
+    reference_discovery = _audit_search_cached(catalog, current, discovery_labels, prepared, current.config)
+    reference_holdout = _audit_search_cached(catalog, current, holdout_labels, prepared, current.config) if holdout_labels else None
+    evidence = int(reference.get("queries", 0))
     if evidence < MIN_SEARCH_EVIDENCE:
-        return _not_ready_search(baseline, base_config)
+        return _not_ready_search(reference, base_config)
 
     def evaluate(config: dict[str, float]):
         cfg = SearchConfig(**config)
         report = _audit_search_cached(catalog, current, discovery_labels, prepared, cfg)
-        robust = _search_robustness(baseline_discovery, report)
+        robust = _search_robustness(reference_discovery, report)
         return report, robust, _search_objective(report, robust)
 
     rows = _evolution_loop(
@@ -303,23 +303,23 @@ def evolve_search(
         rng=Random(_seed(catalog, "search")),
     )
     if not rows:
-        return _not_ready_search(baseline, base_config)
+        return _not_ready_search(reference, base_config)
     best = rows[0]
     candidate_config = SearchConfig(**best["config"])
     trial = _audit_search_cached(catalog, current, labels, prepared, candidate_config)
-    robust = _search_robustness(baseline, trial)
+    robust = _search_robustness(reference, trial)
     holdout = _audit_search_cached(catalog, current, holdout_labels, prepared, candidate_config) if holdout_labels else None
-    holdout_robust = _search_robustness(baseline_holdout, holdout) if holdout and baseline_holdout else None
-    quality_delta = float(trial.get("quality", 0.0)) - float(baseline.get("quality", 0.0))
-    recall_delta = float(trial.get("recall", 0.0)) - float(baseline.get("recall", 0.0))
-    discovery_delta = float(best["objective"]) - _search_objective(baseline_discovery)
+    holdout_robust = _search_robustness(reference_holdout, holdout) if holdout and reference_holdout else None
+    quality_delta = float(trial.get("quality", 0.0)) - float(reference.get("quality", 0.0))
+    recall_delta = float(trial.get("recall", 0.0)) - float(reference.get("recall", 0.0))
+    discovery_delta = float(best["objective"]) - _search_objective(reference_discovery)
     holdout_quality_delta = (
-        float(holdout.get("quality", 0.0)) - float(baseline_holdout.get("quality", 0.0))
-        if holdout and baseline_holdout else 0.0
+        float(holdout.get("quality", 0.0)) - float(reference_holdout.get("quality", 0.0))
+        if holdout and reference_holdout else 0.0
     )
     holdout_recall_delta = (
-        float(holdout.get("recall", 0.0)) - float(baseline_holdout.get("recall", 0.0))
-        if holdout and baseline_holdout else 0.0
+        float(holdout.get("recall", 0.0)) - float(reference_holdout.get("recall", 0.0))
+        if holdout and reference_holdout else 0.0
     )
     safe = (
         trial.get("queries", 0) >= MIN_SEARCH_EVIDENCE
@@ -332,7 +332,7 @@ def evolve_search(
     )
     trusted = safe and discovery_delta >= 0.001 and (quality_delta > 0.0005 or recall_delta > 0.002)
     return {
-        "baseline": baseline,
+        "reference": reference,
         "candidate": trial,
         "delta": {"quality": round(quality_delta, 4), "recall": round(recall_delta, 4)},
         "evaluation_ready": True,
@@ -375,17 +375,17 @@ def evolve_recommend(
     discovery_users, holdout_users = _stable_split(users, lambda user: user)
     base_config = asdict(current.config)
     prepared = {user: current.prepare(user) for user in users}
-    baseline = _audit_recommend_cached(catalog, current, users, prepared, current.config)
-    baseline_discovery = _audit_recommend_cached(catalog, current, discovery_users, prepared, current.config)
-    baseline_holdout = _audit_recommend_cached(catalog, current, holdout_users, prepared, current.config) if holdout_users else None
-    evidence = int(baseline.get("users", 0))
+    reference = _audit_recommend_cached(catalog, current, users, prepared, current.config)
+    reference_discovery = _audit_recommend_cached(catalog, current, discovery_users, prepared, current.config)
+    reference_holdout = _audit_recommend_cached(catalog, current, holdout_users, prepared, current.config) if holdout_users else None
+    evidence = int(reference.get("users", 0))
     if evidence < MIN_RECOMMEND_EVIDENCE:
-        return _not_ready_recommend(baseline, base_config)
+        return _not_ready_recommend(reference, base_config)
 
     def evaluate(config: dict[str, float]):
         cfg = RecommendConfig(**config)
         report = _audit_recommend_cached(catalog, current, discovery_users, prepared, cfg)
-        robust = _recommend_robustness(baseline_discovery, report)
+        robust = _recommend_robustness(reference_discovery, report)
         return report, robust, _recommend_objective(report, robust)
 
     rows = _evolution_loop(
@@ -398,25 +398,25 @@ def evolve_recommend(
         rng=Random(_seed(catalog, "recommend")),
     )
     if not rows:
-        return _not_ready_recommend(baseline, base_config)
+        return _not_ready_recommend(reference, base_config)
     best = rows[0]
     candidate_config = RecommendConfig(**best["config"])
     trial = _audit_recommend_cached(catalog, current, users, prepared, candidate_config)
-    robust = _recommend_robustness(baseline, trial)
+    robust = _recommend_robustness(reference, trial)
     holdout = _audit_recommend_cached(catalog, current, holdout_users, prepared, candidate_config) if holdout_users else None
-    holdout_robust = _recommend_robustness(baseline_holdout, holdout) if holdout and baseline_holdout else None
-    q_delta = float(trial.get("quality", 0.0)) - float(baseline.get("quality", 0.0))
-    fresh_delta = float(trial.get("freshness", 0.0)) - float(baseline.get("freshness", 0.0))
-    cov_delta = float(trial.get("coverage", 0.0)) - float(baseline.get("coverage", 0.0))
-    div_delta = float(trial.get("diversity", 0.0)) - float(baseline.get("diversity", 0.0))
-    discovery_delta = float(best["objective"]) - _recommend_objective(baseline_discovery)
+    holdout_robust = _recommend_robustness(reference_holdout, holdout) if holdout and reference_holdout else None
+    q_delta = float(trial.get("quality", 0.0)) - float(reference.get("quality", 0.0))
+    fresh_delta = float(trial.get("freshness", 0.0)) - float(reference.get("freshness", 0.0))
+    cov_delta = float(trial.get("coverage", 0.0)) - float(reference.get("coverage", 0.0))
+    div_delta = float(trial.get("diversity", 0.0)) - float(reference.get("diversity", 0.0))
+    discovery_delta = float(best["objective"]) - _recommend_objective(reference_discovery)
     holdout_q_delta = (
-        float(holdout.get("quality", 0.0)) - float(baseline_holdout.get("quality", 0.0))
-        if holdout and baseline_holdout else 0.0
+        float(holdout.get("quality", 0.0)) - float(reference_holdout.get("quality", 0.0))
+        if holdout and reference_holdout else 0.0
     )
     holdout_cov_delta = (
-        float(holdout.get("coverage", 0.0)) - float(baseline_holdout.get("coverage", 0.0))
-        if holdout and baseline_holdout else 0.0
+        float(holdout.get("coverage", 0.0)) - float(reference_holdout.get("coverage", 0.0))
+        if holdout and reference_holdout else 0.0
     )
     safe = (
         trial.get("users", 0) >= MIN_RECOMMEND_EVIDENCE
@@ -430,7 +430,7 @@ def evolve_recommend(
     )
     trusted = safe and discovery_delta >= 0.001 and (q_delta > 0.0005 or fresh_delta > 0.002 or div_delta > 0.002)
     return {
-        "baseline": baseline,
+        "reference": reference,
         "candidate": trial,
         "delta": {
             "quality": round(q_delta, 4),
@@ -467,10 +467,10 @@ def evolve_recommend(
         ],
     }
 
-def _not_ready_search(baseline: dict[str, Any], base_config: dict[str, float]) -> dict[str, Any]:
+def _not_ready_search(reference: dict[str, Any], base_config: dict[str, float]) -> dict[str, Any]:
     return {
-        "baseline": baseline,
-        "candidate": baseline,
+        "reference": reference,
+        "candidate": reference,
         "delta": {"quality": 0.0, "recall": 0.0},
         "evaluation_ready": False,
         "safe_to_try": False,
@@ -484,10 +484,10 @@ def _not_ready_search(baseline: dict[str, Any], base_config: dict[str, float]) -
     }
 
 
-def _not_ready_recommend(baseline: dict[str, Any], base_config: dict[str, float]) -> dict[str, Any]:
+def _not_ready_recommend(reference: dict[str, Any], base_config: dict[str, float]) -> dict[str, Any]:
     return {
-        "baseline": baseline,
-        "candidate": baseline,
+        "reference": reference,
+        "candidate": reference,
         "delta": {"quality": 0.0, "freshness": 0.0, "coverage": 0.0, "diversity": 0.0},
         "evaluation_ready": False,
         "safe_to_try": False,

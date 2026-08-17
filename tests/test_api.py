@@ -1,7 +1,11 @@
 import os, tempfile
 os.environ["LINGJING_DATA_DIR"] = tempfile.mkdtemp(prefix="lingjing-recsys-api-")
 
+import asyncio
+import time
+
 from fastapi.testclient import TestClient
+import lingjing_harness.api as api_module
 from lingjing_harness.api import app
 
 
@@ -41,18 +45,18 @@ def test_import_rejects_catalog_with_no_valid_items():
 def test_conversation_contract_rejects_unknown_scene_and_huge_title():
     c=TestClient(app)
     assert c.post('/api/conversations',json={"scene":"weird","title":"x"}).status_code==422
+    assert c.post('/api/conversations',json={"scene":"evolve","title":"x"}).status_code==200
     assert c.post('/api/conversations',json={"scene":"search","title":"x"*121}).status_code==422
 
 
 def test_message_run_completes_and_persists_assistant_result():
-    import time
     with TestClient(app) as c:
         conv=c.post('/api/conversations',json={"scene":"search","title":"run"}).json()
         accepted=c.post(f"/api/conversations/{conv['id']}/messages",json={"content":"搜索‘露营灯’，帮我检查"})
         assert accepted.status_code==200
         run_id=accepted.json()["run_id"]
         row=None
-        for _ in range(100):
+        for _ in range(150):
             row=c.get(f"/api/runs/{run_id}").json()
             if row["status"] in {"completed","failed"}:
                 break
@@ -80,19 +84,78 @@ def test_file_import_rejects_non_object_json_and_oversized_payload():
     assert oversized.status_code==413
 
 
+def test_multimodal_attachment_is_persisted_and_enters_run_context():
+    with TestClient(app) as c:
+        uploaded=c.post('/api/attachments',files={'file':('context.json',b'{"query":"\xe9\x9c\xb2\xe8\x90\xa5\xe7\x81\xaf","note":"top result looks weak"}','application/json')})
+        assert uploaded.status_code==200
+        attachment=uploaded.json()
+        assert attachment['kind']=='document'
+        conv=c.post('/api/conversations',json={"scene":"search","title":"multi"}).json()
+        accepted=c.post(
+            f"/api/conversations/{conv['id']}/messages",
+            json={"content":"结合附件检查搜索‘露营灯’的体验","attachments":[attachment['id']]},
+        )
+        assert accepted.status_code==200
+        run_id=accepted.json()['run_id']
+        row=None
+        for _ in range(150):
+            row=c.get(f'/api/runs/{run_id}').json()
+            if row['status'] in {'completed','failed'}:
+                break
+            time.sleep(.02)
+        assert row and row['status']=='completed'
+        assert row['result']['multimodal']['context_used'] is True
+        assert row['result']['attachments'][0]['id']==attachment['id']
+        loaded=c.get(f"/api/conversations/{conv['id']}").json()
+        user=next(m for m in loaded['messages'] if m['role']=='user')
+        assert user['payload']['attachments'][0]['id']==attachment['id']
+
+
+def test_attachment_rejects_unsupported_type_and_large_file():
+    c=TestClient(app)
+    unsupported=c.post('/api/attachments',files={'file':('x.exe',b'abc','application/octet-stream')})
+    assert unsupported.status_code==415
+    huge=b'x'*(12*1024*1024+1)
+    oversized=c.post('/api/attachments',files={'file':('huge.txt',huge,'text/plain')})
+    assert oversized.status_code==413
+
+
+def test_same_conversation_rejects_parallel_run_but_other_conversation_is_allowed(monkeypatch):
+    async def slow_execute(*args, **kwargs):
+        await asyncio.sleep(.2)
+
+    monkeypatch.setattr(api_module, '_execute', slow_execute)
+    with TestClient(app) as c:
+        one=c.post('/api/conversations',json={"scene":"search","title":"one"}).json()
+        two=c.post('/api/conversations',json={"scene":"recommend","title":"two"}).json()
+        first=c.post(f"/api/conversations/{one['id']}/messages",json={"content":"检查搜索体验"})
+        assert first.status_code==200
+        active=c.get(f"/api/conversations/{one['id']}").json()
+        assert active['active_run']['run_id']==first.json()['run_id']
+        duplicate=c.post(f"/api/conversations/{one['id']}/messages",json={"content":"再检查一次"})
+        assert duplicate.status_code==409
+        parallel=c.post(f"/api/conversations/{two['id']}/messages",json={"content":"检查推荐体验"})
+        assert parallel.status_code==200
+
+
 def test_status_and_capabilities_expose_autonomous_runtime():
     c = TestClient(app)
     status = c.get('/api/status').json()
     assert status["autonomous_decision"] is True
     assert status["self_evolving"] is True
+    assert status["runtime"]["evidence_utility_controller"] is True
     assert status["runtime"]["eval_gated_learning"] is True
     assert status["runtime"]["checkpoint_resume"] is True
     assert status["runtime"]["idempotent_adaptation"] is True
     assert status["runtime"]["automatic_rollback"] is True
+    assert status["multimodal"]["attachments"] is True
+    assert "available" in status["network"]
     capabilities = c.get('/api/capabilities')
     assert capabilities.status_code == 200
     body = capabilities.json()
     assert body["autonomy"]["dynamic_replan"] is True
+    assert body["autonomy"]["evidence_utility_controller"] is True
     assert body["autonomy"]["holdout_validation"] is True
     assert body["autonomy"]["checkpoint_resume"] is True
+    assert body["multimodal"]["attachments"] is True
     assert any(tool["risk"] == "adaptive" for tool in body["tools"])

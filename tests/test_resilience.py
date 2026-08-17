@@ -55,7 +55,7 @@ def test_explicit_unknown_user_is_not_replaced_by_another_user():
     assert rec_action["result"]["user_id"] == "stranger"
 
 
-def test_shadow_compare_requires_real_evaluation_evidence():
+def test_evolution_requires_real_evaluation_evidence():
     catalog = Catalog(items=[Item("a", "A"), Item("b", "B")])
     search = evolve_search(catalog, SearchEngine(catalog))
     recommend = evolve_recommend(catalog, RecommendationEngine(catalog))
@@ -108,7 +108,7 @@ def test_audits_bound_large_evaluation_sets():
     assert rr["users"] == MAX_AUDIT_USERS and rr["sampled"] is True
 
 
-def test_shadow_compare_rejects_too_little_evidence():
+def test_evolution_rejects_too_little_evidence():
     from lingjing_harness.domain import QueryLabel
     catalog=Catalog(
         items=[Item("a","A"),Item("b","B"),Item("c","C")],

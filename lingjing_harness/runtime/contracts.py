@@ -30,8 +30,9 @@ class AgentPlan:
     goal: str
     query: str | None = None
     user_id: str | None = None
-    compare: bool = False
+    explore: bool = False
     allow_adaptation: bool = False
+    allow_network: bool = False
     constraints: tuple[str, ...] = ()
     steps: list[PlanStep] = field(default_factory=list)
 

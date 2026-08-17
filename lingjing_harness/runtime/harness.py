@@ -37,7 +37,7 @@ class RunEvent:
 
 
 class AgentHarness:
-    """Autonomous search/recommendation harness with persistent memory and eval-gated self-evolution."""
+    """Autonomous search/recommendation harness with memory, recovery and eval-gated evolution."""
 
     def __init__(
         self,
@@ -93,12 +93,14 @@ class AgentHarness:
         self,
         text: str,
         *,
+        context: str = "",
+        allow_network: bool = False,
         sink: EventSink | None = None,
         checkpoint_sink: CheckpointSink | None = None,
         resume: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         started = time.monotonic()
-        plan = self.policy.plan(text, self.catalog)
+        plan = self.policy.plan(text, self.catalog, context=context, allow_network=allow_network)
         memory_hits = self.memory.recall(self.catalog_key, plan.goal, plan.mode, limit=4)
         if resume:
             run_id, state, events = self._rehydrate(resume, plan)
@@ -117,6 +119,12 @@ class AgentHarness:
             state = RunState()
             events: list[RunEvent] = []
             self._emit(events, sink, "observe", "读取当前工作区", "确认当前数据、目标和执行边界", 5, mode=plan.mode)
+            if context:
+                self._emit(
+                    events, sink, "perceive", "理解附件上下文",
+                    "已把附件转换为受限观察；附件内容不会扩大联网或策略修改权限",
+                    7, multimodal=True,
+                )
             if memory_hits:
                 self._emit(
                     events,
@@ -128,7 +136,10 @@ class AgentHarness:
                     memories=[{"goal": row["goal"], "score": row["score"]} for row in memory_hits],
                 )
             if plan.constraints:
-                self._emit(events, sink, "guard", "锁定执行约束", "；".join(plan.constraints), 11, allow_adaptation=plan.allow_adaptation)
+                self._emit(
+                    events, sink, "guard", "锁定执行约束", "；".join(plan.constraints), 11,
+                    allow_adaptation=plan.allow_adaptation, allow_network=plan.allow_network,
+                )
 
         while state.cycle < self.budget.max_tools:
             if time.monotonic() - started > self.budget.max_seconds:
@@ -193,6 +204,7 @@ class AgentHarness:
                     spec.name,
                     decision.step.args,
                     allow_adaptation=plan.allow_adaptation,
+                    allow_network=plan.allow_network,
                     invocation_id=invocation_id,
                 )
                 action["result"] = result
@@ -214,7 +226,7 @@ class AgentHarness:
             state.findings = ["本次执行未发现阻断性问题"]
         verification = self.verifier.final(state.actions, state.findings, state.evidence, allow_adaptation=plan.allow_adaptation)
         learned = self._learned_events(state.actions)
-        suggestions = self._suggestions(plan.mode, plan.compare, state.findings, learned)
+        suggestions = self._suggestions(plan.mode, plan.explore, state.findings, learned)
         answer = self._answer(state.blocks, state.findings, suggestions, learned)
         reward = self._reward(verification, state, learned)
         action_keys = [row["tool"] for row in state.actions if row.get("status") == "completed"]
@@ -245,19 +257,21 @@ class AgentHarness:
                 "mode": plan.mode,
                 "query": plan.query,
                 "user_id": plan.user_id,
-                "compare": plan.compare,
+                "explore": plan.explore,
                 "allow_adaptation": plan.allow_adaptation,
+                "allow_network": plan.allow_network,
                 "constraints": list(plan.constraints),
             },
             "events": [event.dict() for event in events],
             "findings": state.findings[:8],
-            "evidence": state.evidence[:12],
+            "evidence": state.evidence[:16],
             "suggestions": suggestions,
             "actions": state.actions,
             "decisions": state.decisions,
             "verification": verification,
             "autonomy": {
                 "dynamic_replan": True,
+                "evidence_utility_controller": True,
                 "cycles": state.cycle,
                 "spent_cost": round(state.spent_cost, 3),
                 "budget": {
@@ -280,6 +294,11 @@ class AgentHarness:
                 "checkpoint_resume": True,
                 "idempotent_adaptive_tools": True,
             },
+            "multimodal": {"context_used": bool(context)},
+            "network": {
+                "allowed": plan.allow_network,
+                "used": any(row.get("tool") == "web.research" and row.get("status") == "completed" for row in state.actions),
+            },
             "data": self.catalog.summary(),
             "owned_policy": True,
             "self_evolving": True,
@@ -298,6 +317,20 @@ class AgentHarness:
             if rollbacks:
                 state.findings.append("系统检测到已学习策略出现回退，已自动恢复到稳健策略")
                 state.blocks.append("系统在执行前发现历史策略出现回退，已经自动完成回滚。")
+            return
+        if tool == "web.research":
+            rows = result.get("results", [])
+            for row in rows[:6]:
+                state.evidence.append({
+                    "kind": "external",
+                    "title": row.get("title") or "外部资料",
+                    "detail": row.get("snippet") or "公开来源",
+                    "url": row.get("url"),
+                })
+            if rows:
+                state.blocks.append(f"联网补充了 {len(rows)} 条带来源的公开资料；这些资料只用于当前判断，不进入策略学习门槛。")
+            else:
+                state.findings.append("联网研究没有返回可用公开资料")
             return
         if tool == "search.run":
             rows = result.get("results", [])
@@ -394,7 +427,7 @@ class AgentHarness:
         return max(0.0, min(1.0, reward))
 
     @staticmethod
-    def _suggestions(mode: str, compare: bool, findings: list[str], learned: list[dict[str, Any]]) -> list[str]:
+    def _suggestions(mode: str, explore: bool, findings: list[str], learned: list[dict[str, Any]]) -> list[str]:
         if mode == "search":
             rows = ["把最差的查询样本展开", "检查无结果与低相关查询", "允许自主优化后再复核一次"]
         elif mode == "recommend":
@@ -405,7 +438,7 @@ class AgentHarness:
             rows = ["先看搜索体验", "先看推荐体验", "导入我的真实数据"]
         if learned:
             rows[2] = "复核刚学到的策略经验"
-        elif compare and any("没有形成" in item or "不" in item for item in findings):
+        elif explore and any("没有形成" in item or "不" in item for item in findings):
             rows[2] = "继续探索新的候选策略"
         return rows
 
@@ -461,8 +494,9 @@ class AgentHarness:
                 "mode": plan.mode,
                 "query": plan.query,
                 "user_id": plan.user_id,
-                "compare": plan.compare,
+                "explore": plan.explore,
                 "allow_adaptation": plan.allow_adaptation,
+                "allow_network": plan.allow_network,
             },
             "cycle": state.cycle,
             "spent_cost": state.spent_cost,

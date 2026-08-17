@@ -1,99 +1,139 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1020" viewBox="0 0 1600 1020" role="img" aria-labelledby="title desc">
-  <title id="title">Recsys Harness autonomous system map</title>
-  <desc id="desc">Detailed architecture showing autonomous control, tools, evaluation-gated evolution, memory, trust, durability, data and owned search and recommendation algorithms.</desc>
-  <defs>
-    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="#223227" stroke-width="1" opacity=".38"/></pattern>
-    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0L9 4.5 0 9Z" fill="#C8F06A"/></marker>
-    <style>
-      .s{font-family:Arial,'Noto Sans SC',sans-serif}.m{font-family:'SFMono-Regular',Consolas,monospace}.white{fill:#F8FAF4}.ink{fill:#142219}.muted{fill:#93A096}.dim{fill:#5E6D63}.accent{fill:#C8F06A}.k{font-size:13px;letter-spacing:2px;font-weight:700}.h1{font-size:31px;font-weight:700}.h2{font-size:19px;font-weight:700}.b{font-size:14px}.sm{font-size:12px}.xs{font-size:10px;letter-spacing:1px}.flow{stroke:#C8F06A;stroke-width:2;fill:none;marker-end:url(#arrow)}.link{stroke:#607066;stroke-width:1.3;fill:none}.dark{fill:#15241A;stroke:#3A4D40}.paper{fill:#F1EFE7}.soft{fill:#E3E4DC}.lime{fill:#D9E8BE}.panel{fill:#17271C;stroke:#3A4D40}
-    </style>
-  </defs>
-  <rect width="1600" height="1020" fill="#0E1711"/><rect width="1600" height="1020" fill="url(#grid)"/>
-  <text x="62" y="52" class="s k accent">AUTONOMOUS SYSTEM MAP / SEARCH + RECOMMENDATION</text>
-  <text x="62" y="91" class="s h1 white">Decide → act → verify → learn → recover, inside explicit safety boundaries.</text>
-  <text x="62" y="118" class="s b muted">The ranking core stays owned. The harness controls autonomy, evolution, memory, trust and durability.</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1040" viewBox="0 0 1600 1040" role="img" aria-labelledby="title desc">
+<title id="title">Recsys Harness autonomous multimodal system map</title>
+<desc id="desc">Detailed system map showing multimodal input, owned autonomous control, permissioned network evidence, tool execution, self-evolution, memory, trust and durability planes.</desc>
+<style>
+  .bg{fill:#f5f1e8}.ink{fill:#172019}.night{fill:#14231e}.paper{fill:#fffdf7}.paper2{fill:#eae5da}.signal{fill:#d9ff59}.hot{fill:#f36b4b}.line{stroke:#a9ad9f;stroke-width:1.3}.strong{stroke:#172019;stroke-width:1.8}.dash{stroke:#7b8279;stroke-width:1.2;stroke-dasharray:7 7}.t{font-family:"Avenir Next",system-ui,-apple-system,"Segoe UI",sans-serif;fill:#172019}.white{fill:#f7f4eb}.cap{font-size:13px;font-weight:700;letter-spacing:2.2px}.h1{font-family:Georgia,"Times New Roman",serif;font-size:34px;font-weight:700}.h2{font-size:18px;font-weight:750}.body{font-size:13px}.small{font-size:11px;fill:#5e675f}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px}.node{fill:#fffdf7;stroke:#a9ad9f;stroke-width:1.2}.nodeStrong{fill:#fffdf7;stroke:#172019;stroke-width:1.6}.tag{fill:#e5e0d4}.arrow{fill:none;stroke:#172019;stroke-width:1.5;marker-end:url(#arrow)}.arrowSoft{fill:none;stroke:#6f786f;stroke-width:1.2;marker-end:url(#arrowSoft)}
+</style>
+<defs>
+  <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#172019"/></marker>
+  <marker id="arrowSoft" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#6f786f"/></marker>
+</defs>
+<rect class="bg" width="1600" height="1040"/>
+<rect class="night" x="0" y="0" width="1600" height="114"/>
+<text class="t white cap" x="54" y="42">SYSTEM MAP / AUTONOMOUS EXPERIENCE HARNESS</text>
+<text class="t white h1" x="54" y="82">Evidence moves forward. Permission never does.</text>
+<text class="t white body" x="1124" y="47">MULTIMODAL · NETWORK · MEMORY</text>
+<text class="t white body" x="1124" y="72">EVOLUTION · RECOVERY · OWNED CONTROL</text>
 
-  <!-- experience -->
-  <rect x="62" y="158" width="310" height="210" rx="5" class="dark"/>
-  <text x="84" y="186" class="s xs accent">01 / EXPERIENCE</text><text x="84" y="218" class="s h2 white">Business goal in.</text>
-  <text x="84" y="246" class="s b muted">搜索体验 · 推荐体验 · 方案复核</text><text x="84" y="269" class="s b muted">全局体检 · 执行记录 · 判断依据</text>
-  <line x1="84" y1="290" x2="348" y2="290" stroke="#405247"/>
-  <text x="84" y="318" class="m sm accent">GOAL</text><text x="140" y="318" class="s sm white">自然语言目标</text>
-  <text x="84" y="342" class="m sm accent">GUARD</text><text x="140" y="342" class="s sm white">显式“不改变 / 允许调整”</text>
+<!-- left input plane -->
+<text class="t cap" x="54" y="154">01 · EXPERIENCE INPUT</text>
+<rect class="nodeStrong" x="54" y="178" width="292" height="194" rx="2"/>
+<rect class="signal" x="54" y="178" width="8" height="194"/>
+<text class="t h2" x="82" y="215">Goal + multimodal context</text>
+<text class="t body" x="82" y="247">Natural-language objective</text>
+<text class="t body" x="82" y="273">Screenshot / pasted image</text>
+<text class="t body" x="82" y="299">JSON · CSV · Markdown · TXT</text>
+<text class="t body" x="82" y="325">Per-run network permission</text>
+<text class="t small" x="82" y="353">Attachments are observations, never permissions.</text>
 
-  <!-- control -->
-  <rect x="408" y="158" width="700" height="210" rx="5" class="paper"/>
-  <text x="432" y="186" class="s xs ink">02 / AUTONOMOUS CONTROL PLANE</text><text x="432" y="217" class="s h2 ink">Dynamic replan, not a fixed workflow.</text>
-  <g transform="translate(432 244)"><rect width="116" height="82" rx="4" class="soft"/><text x="13" y="23" class="m xs ink">OBSERVE</text><text x="13" y="47" class="s sm dim">state + evidence</text><text x="13" y="65" class="s sm dim">memory recall</text></g>
-  <g transform="translate(560 244)"><rect width="116" height="82" rx="4" class="lime"/><text x="13" y="23" class="m xs ink">DECIDE</text><text x="13" y="47" class="s sm dim">score actions</text><text x="13" y="65" class="s sm dim">learned utility</text></g>
-  <g transform="translate(688 244)"><rect width="116" height="82" rx="4" class="soft"/><text x="13" y="23" class="m xs ink">ACT</text><text x="13" y="47" class="s sm dim">real handler</text><text x="13" y="65" class="s sm dim">cost + risk</text></g>
-  <g transform="translate(816 244)"><rect width="116" height="82" rx="4" class="soft"/><text x="13" y="23" class="m xs ink">REPLAN</text><text x="13" y="47" class="s sm dim">new observation</text><text x="13" y="65" class="s sm dim">change path</text></g>
-  <g transform="translate(944 244)"><rect width="140" height="82" rx="4" class="soft"/><text x="13" y="23" class="m xs ink">COMPLETE</text><text x="13" y="47" class="s sm dim">global verify</text><text x="13" y="65" class="s sm dim">reward + learn</text></g>
-  <path d="M548 285H558M676 285H686M804 285H814M932 285H942" class="flow"/>
-  <path d="M1000 337C1000 352 625 352 625 333" class="link"/><text x="706" y="352" class="s xs dim">loop until evidence / budget / guard says stop</text>
+<rect class="node" x="54" y="394" width="292" height="126" rx="2"/>
+<text class="t h2" x="82" y="430">Perception boundary</text>
+<text class="t body" x="82" y="458">Local text parsing</text>
+<text class="t body" x="82" y="484">Optional image perception service</text>
+<text class="t small" x="82" y="506">No tool choice · no strategy promotion</text>
 
-  <!-- trust -->
-  <rect x="1144" y="158" width="394" height="210" rx="5" class="panel"/>
-  <text x="1168" y="186" class="s xs accent">03 / TRUST &amp; PERMISSIONS</text><text x="1168" y="218" class="s h2 white">Autonomy with hard gates.</text>
-  <text x="1168" y="250" class="m sm accent">READ</text><text x="1230" y="250" class="s sm white">reproduce / inspect / diagnose</text>
-  <text x="1168" y="276" class="m sm accent">SIM</text><text x="1230" y="276" class="s sm white">offline audit / counterfactual</text>
-  <text x="1168" y="302" class="m sm accent">ADAPT</text><text x="1230" y="302" class="s sm white">learn internally; activation gated</text>
-  <line x1="1168" y1="319" x2="1510" y2="319" stroke="#405247"/>
-  <text x="1168" y="343" class="s xs muted">RESULT VERIFIER · USER CONSTRAINT · BUDGET · ROLLBACK</text>
+<!-- central control -->
+<text class="t cap" x="398" y="154">02 · OWNED AUTONOMOUS CONTROL</text>
+<rect class="nodeStrong" x="398" y="178" width="566" height="342" rx="2"/>
+<text class="t h2" x="426" y="215">Evidence-utility controller</text>
+<text class="t small" x="426" y="239">Every cycle recomputes the next action from current state.</text>
 
-  <!-- tools -->
-  <rect x="62" y="410" width="370" height="288" rx="5" class="paper"/>
-  <text x="84" y="438" class="s xs ink">04 / TOOL PLANE</text><text x="84" y="470" class="s h2 ink">Typed capability contracts</text>
-  <text x="84" y="496" class="s sm dim">risk · cost · side_effect · schema · repeatability</text>
-  <line x1="84" y1="515" x2="408" y2="515" stroke="#C6CBC4"/>
-  <text x="84" y="542" class="m sm ink">data.inspect</text><text x="248" y="542" class="s sm dim">workspace + memory</text>
-  <text x="84" y="570" class="m sm ink">search.run</text><text x="248" y="570" class="s sm dim">real ranking</text>
-  <text x="84" y="598" class="m sm ink">search.diagnose</text><text x="248" y="598" class="s sm dim">failure evidence</text>
-  <text x="84" y="626" class="m sm ink">search.audit / evolve</text><text x="248" y="626" class="s sm dim">eval + learning</text>
-  <text x="84" y="654" class="m sm ink">recommend.*</text><text x="248" y="654" class="s sm dim">run / diagnose / audit / evolve</text>
-  <text x="84" y="681" class="s xs dim">CAPABILITY MANIFEST AVAILABLE THROUGH /api/capabilities</text>
+<rect class="paper2" x="426" y="266" width="150" height="78" rx="2"/>
+<text class="t cap" x="445" y="291">OBSERVE</text>
+<text class="t small" x="445" y="317">data · memory</text>
+<text class="t small" x="445" y="334">attachments · evidence</text>
 
-  <!-- evolution -->
-  <rect x="468" y="410" width="640" height="288" rx="5" class="dark"/>
-  <text x="492" y="438" class="s xs accent">05 / EVOLUTION LAB</text><text x="492" y="470" class="s h2 white">Eval-gated self-evolution</text>
-  <g transform="translate(492 503)"><rect width="132" height="70" rx="4" fill="#203126"/><text x="13" y="22" class="m xs accent">GENERATE</text><text x="13" y="45" class="s sm white">targeted + memory</text><text x="13" y="61" class="s sm muted">+ perturbation</text></g>
-  <g transform="translate(636 503)"><rect width="132" height="70" rx="4" fill="#203126"/><text x="13" y="22" class="m xs accent">DISCOVERY</text><text x="13" y="45" class="s sm white">candidate race</text><text x="13" y="61" class="s sm muted">elite mutation</text></g>
-  <g transform="translate(780 503)"><rect width="132" height="70" rx="4" fill="#203126"/><text x="13" y="22" class="m xs accent">HOLDOUT</text><text x="13" y="45" class="s sm white">unseen samples</text><text x="13" y="61" class="s sm muted">generalization</text></g>
-  <g transform="translate(924 503)"><rect width="160" height="70" rx="4" fill="#203126"/><text x="13" y="22" class="m xs accent">REGRESSION</text><text x="13" y="45" class="s sm white">full evidence</text><text x="13" y="61" class="s sm muted">worst-case gate</text></g>
-  <path d="M624 538H634M768 538H778M912 538H922" class="flow"/>
-  <rect x="492" y="600" width="592" height="66" rx="4" fill="#D9E8BE"/>
-  <text x="510" y="624" class="m xs ink">PROMOTE</text><text x="585" y="624" class="s sm ink">safe + stable advantage → trusted skill</text>
-  <text x="510" y="648" class="m xs ink">ACTIVATE</text><text x="585" y="648" class="s sm ink">only with explicit permission · future drift can rollback</text>
+<rect class="signal" x="592" y="266" width="150" height="78" rx="2"/>
+<text class="t cap" x="611" y="291">DECIDE</text>
+<text class="t small" x="611" y="317">evidence gap</text>
+<text class="t small" x="611" y="334">information gain · cost</text>
 
-  <!-- memory -->
-  <rect x="1144" y="410" width="394" height="288" rx="5" class="paper"/>
-  <text x="1168" y="438" class="s xs ink">06 / MEMORY PLANE</text><text x="1168" y="470" class="s h2 ink">Learn and forget.</text>
-  <text x="1168" y="511" class="m sm ink">EPISODIC</text><text x="1270" y="511" class="s sm dim">goal · trace · reward</text>
-  <text x="1168" y="545" class="m sm ink">PROCEDURAL</text><text x="1270" y="545" class="s sm dim">trusted / active skill</text>
-  <text x="1168" y="579" class="m sm ink">POLICY</text><text x="1270" y="579" class="s sm dim">action utility</text>
-  <line x1="1168" y1="600" x2="1510" y2="600" stroke="#C6CBC4"/>
-  <text x="1168" y="625" class="s sm dim">Recent + high-value retention</text><text x="1168" y="648" class="s sm dim">Skill capacity · retire stale experience</text>
-  <text x="1168" y="675" class="s xs dim">CATALOG FINGERPRINT PREVENTS STALE CROSS-DATA REUSE</text>
+<rect class="paper2" x="758" y="266" width="150" height="78" rx="2"/>
+<text class="t cap" x="777" y="291">ACT</text>
+<text class="t small" x="777" y="317">tool risk guard</text>
+<text class="t small" x="777" y="334">real handler</text>
 
-  <!-- durability -->
-  <rect x="62" y="742" width="470" height="220" rx="5" class="panel"/>
-  <text x="84" y="770" class="s xs accent">07 / DURABILITY</text><text x="84" y="802" class="s h2 white">Crash-safe autonomous runs</text>
-  <text x="84" y="836" class="m sm accent">CHECKPOINT</text><text x="186" y="836" class="s sm white">state · evidence · decisions · cost</text>
-  <text x="84" y="866" class="m sm accent">REHYDRATE</text><text x="186" y="866" class="s sm white">continue after completed actions</text>
-  <text x="84" y="896" class="m sm accent">IDEMPOTENCY</text><text x="186" y="896" class="s sm white">adaptive invocation result replay</text>
-  <text x="84" y="930" class="s xs muted">SQLITE RUN STORE · RECOVERABLE JOBS · NO DUPLICATE LEARNING</text>
+<path class="arrow" d="M576 305 H592"/><path class="arrow" d="M742 305 H758"/>
+<path class="arrowSoft" d="M833 344 C833 380 505 380 505 344"/>
+<text class="t small" x="618" y="376">observation changes the next decision</text>
 
-  <!-- owned core -->
-  <rect x="568" y="742" width="970" height="220" rx="5" class="paper"/>
-  <text x="592" y="770" class="s xs ink">08 / OWNED SEARCH + RECOMMENDATION CORE</text><text x="592" y="802" class="s h2 ink">Algorithms remain project-owned.</text>
-  <g transform="translate(592 832)"><rect width="285" height="92" rx="4" class="soft"/><text x="16" y="24" class="m xs ink">SEARCH</text><text x="16" y="49" class="s sm dim">lexical evidence · title · semantic</text><text x="16" y="69" class="s sm dim">quality · freshness · diversity</text><text x="16" y="85" class="s xs dim">PREPARED FEATURE REUSE</text></g>
-  <g transform="translate(895 832)"><rect width="285" height="92" rx="4" class="soft"/><text x="16" y="24" class="m xs ink">RECOMMEND</text><text x="16" y="49" class="s sm dim">profile · graph · category · novelty</text><text x="16" y="69" class="s sm dim">freshness · exploration · diversity</text><text x="16" y="85" class="s xs dim">SHARED GRAPH + PREPARED FEATURES</text></g>
-  <g transform="translate(1198 832)"><rect width="316" height="92" rx="4" class="lime"/><text x="16" y="24" class="m xs ink">EVALUATION</text><text x="16" y="49" class="s sm ink">search relevance · coverage · freshness</text><text x="16" y="69" class="s sm ink">robustness · holdout · regression</text><text x="16" y="85" class="s xs ink">COUNTERFACTUAL STRATEGY SANDBOX</text></g>
+<rect class="node" x="426" y="402" width="226" height="88" rx="2"/>
+<text class="t h2" x="445" y="431">Hard boundaries</text>
+<text class="t small" x="445" y="454">time · tool count · cost</text>
+<text class="t small" x="445" y="473">adaptation · network permission</text>
 
-  <!-- cross-plane flows -->
-  <path d="M372 263H406" class="flow"/><path d="M1108 263H1142" class="flow"/>
-  <path d="M755 368V408" class="flow"/><path d="M930 368V408" class="flow"/>
-  <path d="M1144 555H1110" class="flow"/><path d="M1338 698V740" class="flow"/>
-  <path d="M300 698V740" class="flow"/><path d="M788 698V740" class="flow"/>
-  <path d="M532 851H566" class="flow"/>
+<rect class="node" x="670" y="402" width="238" height="88" rx="2"/>
+<text class="t h2" x="689" y="431">Decision provenance</text>
+<text class="t small" x="689" y="454">chosen action · alternatives</text>
+<text class="t small" x="689" y="473">learned utility · cycle trace</text>
+
+<!-- right evidence -->
+<text class="t cap" x="1016" y="154">03 · EXTERNAL EVIDENCE</text>
+<rect class="nodeStrong" x="1016" y="178" width="530" height="158" rx="2"/>
+<rect class="hot" x="1016" y="178" width="8" height="158"/>
+<text class="t h2" x="1044" y="215">Permissioned network research</text>
+<text class="t body" x="1044" y="247">Only appears when configured + allowed for this run.</text>
+<text class="t body" x="1044" y="274">Returns title · URL · snippet as attributable evidence.</text>
+<text class="t small" x="1044" y="307">Network content never enters strategy-promotion samples.</text>
+
+<rect class="node" x="1016" y="358" width="530" height="162" rx="2"/>
+<text class="t h2" x="1044" y="395">Evidence ledger</text>
+<text class="t body" x="1044" y="426">Result evidence</text>
+<text class="t body" x="1044" y="451">Diagnostic evidence</text>
+<text class="t body" x="1044" y="476">External evidence with source URL</text>
+<text class="t small" x="1044" y="502">The verifier sees provenance, not just prose.</text>
+
+<path class="arrow" d="M346 274 H398"/><path class="arrowSoft" d="M346 457 H398"/>
+<path class="arrowSoft" d="M964 246 H1016"/><path class="arrow" d="M1016 431 H964"/>
+
+<!-- tool plane -->
+<text class="t cap" x="54" y="576">04 · TOOL PLANE</text>
+<rect class="nodeStrong" x="54" y="600" width="910" height="154" rx="2"/>
+<text class="t h2" x="82" y="636">Real capabilities with explicit risk contracts</text>
+<g>
+<rect class="tag" x="82" y="660" width="132" height="52" rx="2"/><text class="t mono" x="96" y="681">data.inspect</text><text class="t small" x="96" y="700">read</text>
+<rect class="tag" x="226" y="660" width="132" height="52" rx="2"/><text class="t mono" x="240" y="681">search.*</text><text class="t small" x="240" y="700">read · simulation</text>
+<rect class="tag" x="370" y="660" width="132" height="52" rx="2"/><text class="t mono" x="384" y="681">recommend.*</text><text class="t small" x="384" y="700">read · simulation</text>
+<rect class="signal" x="514" y="660" width="132" height="52" rx="2"/><text class="t mono" x="528" y="681">*.evolve</text><text class="t small" x="528" y="700">adaptive</text>
+<rect class="tag" x="658" y="660" width="132" height="52" rx="2"/><text class="t mono" x="672" y="681">web.research</text><text class="t small" x="672" y="700">network</text>
+<rect class="tag" x="802" y="660" width="132" height="52" rx="2"/><text class="t mono" x="816" y="681">checkpoint</text><text class="t small" x="816" y="700">durability</text>
+</g>
+<path class="arrow" d="M681 520 V600"/>
+
+<!-- evolution / memory / trust -->
+<text class="t cap" x="1016" y="576">05 · EVOLUTION + TRUST</text>
+<rect class="nodeStrong" x="1016" y="600" width="530" height="318" rx="2"/>
+<text class="t h2" x="1044" y="636">Eval-gated self-evolution</text>
+<text class="t small" x="1044" y="660">No arbitrary source-code mutation.</text>
+
+<rect class="paper2" x="1044" y="684" width="214" height="82" rx="2"/>
+<text class="t cap" x="1063" y="710">DISCOVERY</text>
+<text class="t small" x="1063" y="735">multi-candidate search</text>
+<text class="t small" x="1063" y="753">elite mutation</text>
+<rect class="paper2" x="1274" y="684" width="242" height="82" rx="2"/>
+<text class="t cap" x="1293" y="710">HOLDOUT</text>
+<text class="t small" x="1293" y="735">unseen validation</text>
+<text class="t small" x="1293" y="753">robustness gates</text>
+<path class="arrow" d="M1258 725 H1274"/>
+
+<rect class="signal" x="1044" y="784" width="214" height="98" rx="2"/>
+<text class="t cap" x="1063" y="810">PROMOTE</text>
+<text class="t small" x="1063" y="835">trusted strategy memory</text>
+<text class="t small" x="1063" y="855">activate only if allowed</text>
+<rect class="paper2" x="1274" y="784" width="242" height="98" rx="2"/>
+<text class="t cap" x="1293" y="810">DRIFT / ROLLBACK</text>
+<text class="t small" x="1293" y="835">future validation</text>
+<text class="t small" x="1293" y="855">retire on regression</text>
+<path class="arrow" d="M1395 766 V784"/><path class="arrowSoft" d="M1274 833 H1258"/>
+
+<text class="t cap" x="54" y="810">06 · MEMORY + DURABILITY</text>
+<rect class="nodeStrong" x="54" y="834" width="910" height="160" rx="2"/>
+<rect class="node" x="82" y="866" width="190" height="92" rx="2"/><text class="t h2" x="100" y="896">Episodic</text><text class="t small" x="100" y="921">goal · actions · reward</text><text class="t small" x="100" y="941">bounded recall + forgetting</text>
+<rect class="node" x="290" y="866" width="190" height="92" rx="2"/><text class="t h2" x="308" y="896">Procedural</text><text class="t small" x="308" y="921">trusted · active · retired</text><text class="t small" x="308" y="941">strategy fingerprints</text>
+<rect class="node" x="498" y="866" width="190" height="92" rx="2"/><text class="t h2" x="516" y="896">Policy utility</text><text class="t small" x="516" y="921">action trials · reward</text><text class="t small" x="516" y="941">bounded learned bonus</text>
+<rect class="node" x="706" y="866" width="230" height="92" rx="2"/><text class="t h2" x="724" y="896">Durable run state</text><text class="t small" x="724" y="921">checkpoint · rehydrate</text><text class="t small" x="724" y="941">idempotent adaptive replay</text>
+<path class="arrowSoft" d="M510 754 V834"/>
+<path class="arrowSoft" d="M964 898 H1016"/>
+
+<text class="t small" x="54" y="1022">Owned ranking core remains the source of search/recommend execution and evaluation. Optional perception and network services provide observations, never control.</text>
 </svg>

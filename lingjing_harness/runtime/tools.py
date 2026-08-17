@@ -18,6 +18,7 @@ from lingjing_harness.algorithms.text import tokenize
 from lingjing_harness.domain import Catalog
 from .contracts import ToolSpec
 from .memory import AgentMemory, catalog_fingerprint
+from .network import NetworkResearch
 
 
 class ToolRegistry:
@@ -25,9 +26,15 @@ class ToolRegistry:
 
     ACTIVE_VALIDATION_TTL = 300.0
 
-    def __init__(self, catalog: Catalog, memory: AgentMemory | None = None) -> None:
+    def __init__(
+        self,
+        catalog: Catalog,
+        memory: AgentMemory | None = None,
+        network: NetworkResearch | None = None,
+    ) -> None:
         self.catalog = catalog
         self.memory = memory or AgentMemory()
+        self.network = network or NetworkResearch()
         self.catalog_key = catalog_fingerprint(catalog)
         search_cfg = self._load_config("search", SearchConfig)
         recommend_cfg = self._load_config("recommend", RecommendConfig)
@@ -38,7 +45,7 @@ class ToolRegistry:
         self._specs = self._build_specs()
 
     def _build_specs(self) -> dict[str, ToolSpec]:
-        return {
+        specs = {
             "data.inspect": ToolSpec(
                 "data.inspect", "Inspect catalog and evaluation readiness", "read", self.inspect_data,
                 cost=.35, input_schema={"type": "object", "properties": {}},
@@ -78,21 +85,26 @@ class ToolRegistry:
                 input_schema={"type": "object", "properties": {"activate": {"type": "boolean"}}},
             ),
         }
+        if self.network.configured:
+            specs["web.research"] = ToolSpec(
+                "web.research", "Search current public web evidence", "network", self.web_research,
+                cost=1.8, side_effect="external_request",
+                input_schema={"type": "object", "properties": {"query": {"type": "string", "maxLength": 320}}},
+            )
+        return specs
 
     def fork(self) -> "ToolRegistry":
-        """Create an isolated per-run registry while sharing immutable indexes and graphs."""
+        """Create isolated run state while sharing immutable indexes, graphs and network adapter."""
         clone = object.__new__(ToolRegistry)
         clone.catalog = self.catalog
         clone.memory = self.memory
+        clone.network = self.network
         clone.catalog_key = self.catalog_key
         clone.rollback_events = []
         clone.search = self.search.with_config(clone._load_config("search", SearchConfig))
         clone.recommend = self.recommend.with_config(clone._load_config("recommend", RecommendConfig))
-        # A newly activated strategy has already passed full regression. Startup/new workspace
-        # construction performs drift validation; forks only isolate per-run mutable state.
         clone._specs = clone._build_specs()
         return clone
-
 
     def _validate_active_strategies(self) -> None:
         search_skill = self.memory.active_skill(self.catalog_key, "search")
@@ -157,7 +169,7 @@ class ToolRegistry:
             return cls()
 
     def replace_catalog(self, catalog: Catalog) -> None:
-        self.__init__(catalog, self.memory)
+        self.__init__(catalog, self.memory, self.network)
 
     def get(self, name: str) -> ToolSpec:
         if name not in self._specs:
@@ -186,16 +198,20 @@ class ToolRegistry:
         args: dict[str, Any] | None = None,
         *,
         allow_adaptation: bool = False,
+        allow_network: bool = False,
         invocation_id: str | None = None,
     ) -> dict[str, Any]:
         spec = self.get(name)
         args = dict(args or {})
         if "query" in args and args["query"] is not None:
-            args["query"] = str(args["query"]).strip()[:50]
+            limit = 320 if name == "web.research" else 50
+            args["query"] = str(args["query"]).strip()[:limit]
         if "user_id" in args and args["user_id"] is not None:
             args["user_id"] = str(args["user_id"]).strip()[:120]
         if spec.risk == "adaptive" and args.get("activate") and not allow_adaptation:
             raise PermissionError("当前目标没有授权改变工作区策略")
+        if spec.risk == "network" and not allow_network:
+            raise PermissionError("当前目标没有授权联网研究")
         if invocation_id and spec.risk == "adaptive":
             args["_invocation_id"] = invocation_id
         return spec.handler(**args)
@@ -227,8 +243,12 @@ class ToolRegistry:
                 "search": asdict(self.search.config),
                 "recommend": asdict(self.recommend.config),
             },
+            "network_available": self.network.configured,
             "rollbacks": list(self.rollback_events),
         }
+
+    def web_research(self, query: str | None = None, **_: Any) -> dict[str, Any]:
+        return self.network.search(query or "", limit=6)
 
     def run_search(self, query: str | None = None, **_: Any) -> dict[str, Any]:
         query = query or ""
