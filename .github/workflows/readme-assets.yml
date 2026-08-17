@@ -124,21 +124,23 @@ jobs:
 
           sha = os.environ['ASSET_SHA']
           base = f'https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@{sha}/docs/readme-assets'
-          targets = {
-              'Recsys Harness 真实运行界面': 'overview.png',
-              'Recsys Harness 工作台': 'workbench.png',
-              'Recsys Harness 证据面板': 'evidence.png',
-              'Recsys Harness 移动端': 'mobile.png',
-              'Recsys Harness system architecture': 'architecture.svg',
-          }
+          targets = (
+              'overview.png',
+              'workbench.png',
+              'evidence.png',
+              'mobile.png',
+              'architecture.svg',
+          )
           readme = Path('README.md')
           text = readme.read_text(encoding='utf-8')
-          for alt, name in targets.items():
-              pattern = re.compile(r'!\[' + re.escape(alt) + r'\]\([^\n)]+\)')
-              replacement = f'![{alt}]({base}/{name})'
-              text, count = pattern.subn(replacement, text, count=1)
+          for name in targets:
+              pattern = re.compile(
+                  r'https://cdn\.jsdelivr\.net/gh/jiaweine/recsys-harness@[0-9a-f]+/docs/readme-assets/'
+                  + re.escape(name)
+              )
+              text, count = pattern.subn(f'{base}/{name}', text, count=1)
               if count != 1:
-                  raise SystemExit(f'could not uniquely update README image: {alt}')
+                  raise SystemExit(f'could not uniquely update README asset URL: {name}')
           readme.write_text(text if text.endswith('\n') else text + '\n', encoding='utf-8')
           PY
 
