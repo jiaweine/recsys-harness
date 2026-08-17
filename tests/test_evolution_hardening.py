@@ -22,7 +22,11 @@ from lingjing_harness.sample_data import build_sample_catalog
 def test_duplicate_query_labels_are_merged_before_any_holdout_split():
     source = build_sample_catalog()
     first = source.query_labels[0]
-    extra_relevant = source.items[-1].item_id
+    extra_relevant = next(
+        item.item_id
+        for item in source.items
+        if item.eligible and item.item_id not in set(first.relevant)
+    )
     catalog = Catalog(
         items=list(source.items),
         interactions=list(source.interactions),
