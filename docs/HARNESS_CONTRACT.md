@@ -28,6 +28,13 @@ The runtime implementation lives primarily in:
 - `lingjing_harness/runtime/verifier.py`
 - `lingjing_harness/runtime/memory.py`
 
+Vertical strategy evolution additionally lives in:
+
+- `lingjing_harness/algorithms/capabilities.py`
+- `lingjing_harness/algorithms/evolution.py`
+- `lingjing_harness/algorithms/search.py`
+- `lingjing_harness/algorithms/recommend.py`
+
 ## Normative rules
 
 ### H1 — Authority originates from the user
@@ -115,6 +122,37 @@ reflections, critic state, actions, observations, decisions and spent budget.
 Resume **MUST** continue after completed actions rather than replaying them.
 Adaptive writes **MUST** remain idempotent under replay.
 
+### H13 — Structural evolution is typed, evaluator-selected and holdout-gated
+
+Self-evolution **MAY** change both continuous ranking parameters and registered
+vertical capability choices, but it **MUST NOT** treat a capability name as a
+hard-coded preference in the central evolver.
+
+A structural capability participating in trusted evolution **MUST**:
+
+- belong to an explicit Search/RecSys capability group;
+- be discoverable through the typed domain configuration schema;
+- execute as part of the real candidate pipeline during discovery evaluation;
+- receive credit from domain metrics rather than descriptive prose;
+- pass the same independent holdout, regression and robustness gates as numeric changes;
+- remain separately permissioned before activation.
+
+The registry defines **what implementations exist**. The evaluator decides **which
+implementation wins**. A previously persisted capability that is no longer
+registered **MUST** fail closed to an owned safe default rather than execute an
+unknown implementation.
+
+### H14 — Evaluation slices must match the evolved behavior
+
+An evolved behavior **MUST NOT** receive credit from a slice that cannot exercise
+that behavior. In particular, cold-start and exploration policies require explicit
+cold-start evaluation evidence rather than being inferred solely from warm-user
+metrics.
+
+Discovery and holdout identities for synthetic evaluation slices **MUST** remain
+separate. Holdout outcomes **MUST NOT** be used to route mutation arms or select the
+discovery winner.
+
 ## Decision utility
 
 The controller deliberately uses multiple signals instead of a single hard-coded
@@ -138,6 +176,29 @@ A coefficient change is acceptable only if contract probes still demonstrate
 scope correctness, authority isolation, dynamic diagnosis, critic-gated closure
 and checkpoint continuity.
 
+## Vertical evolution contract
+
+The optimizer operates on a mixed domain genome:
+
+```text
+continuous genes
+  → measured up/down response surface
+
+capability genes
+  → registered alternative implementation
+
+both
+  → posterior-guided routing
+  → quality-diversity archive
+  → independent holdout / robustness
+  → trusted strategy memory
+  → optional activation
+```
+
+Trusted historical strategies may contribute bounded priors to future numeric
+directions and capability choices. Those priors **MUST NOT** override current-domain
+evidence, trust gates or user authority.
+
 ## Contract probes
 
 `python scripts/probe_harness_contract.py`
@@ -152,4 +213,6 @@ behavioral invariants without relying on README prose:
 - full-run reflection traces;
 - permission isolation.
 
-The pytest suite adds deeper regression and resilience coverage.
+The pytest suite adds deeper regression, resilience and mixed-genome evolution
+coverage, including capability discovery, real stage switching, holdout isolation
+and backward-safe fallback behavior.
