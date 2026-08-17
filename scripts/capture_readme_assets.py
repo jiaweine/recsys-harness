@@ -12,6 +12,14 @@ ROOT = Path(__file__).resolve().parents[1]
 ASSET_DIR = ROOT / "docs" / "readme-assets"
 BASE_URL = os.environ.get("RECSYS_CAPTURE_URL", "http://127.0.0.1:8765").rstrip("/")
 PROMPT = "最近搜索“露营灯”的结果不太准，结合附件帮我复现、诊断并探索一个可验证的改进方向，但先不要改变当前策略。"
+SCREENSHOTS = (
+    "workbench.png",
+    "overview.png",
+    "evidence.png",
+    "mobile-workspace.png",
+    "mobile-progress.png",
+    "mobile-evidence.png",
+)
 
 
 def post_json(path: str, payload: dict) -> dict:
@@ -82,13 +90,26 @@ def main() -> None:
         page.wait_for_timeout(120)
         page.screenshot(path=str(ASSET_DIR / "evidence.png"))
 
+        # Capture a real mobile gallery instead of forcing one tall screenshot to
+        # represent every responsive state. Each image shows a distinct product
+        # surface at the same viewport so the README can present them as a set.
         page.set_viewport_size({"width": 430, "height": 900})
-        page.wait_for_timeout(150)
+        page.wait_for_timeout(180)
+        if page.locator("#inspector").evaluate("el => el.classList.contains('open')"):
+            page.locator("#inspectorClose").click()
+            page.wait_for_timeout(100)
+        page.locator("#scrollArea").evaluate("el => { el.scrollTop = 0; }")
+        page.screenshot(path=str(ASSET_DIR / "mobile-workspace.png"), full_page=False)
+
         page.locator("#inspectorToggle").click()
         page.wait_for_selector("#inspector.open", timeout=5_000)
+        page.locator(".tab[data-tab='progress']").click()
+        page.wait_for_timeout(150)
+        page.screenshot(path=str(ASSET_DIR / "mobile-progress.png"), full_page=False)
+
         page.locator(".tab[data-tab='evidence']").click()
         page.wait_for_timeout(150)
-        page.screenshot(path=str(ASSET_DIR / "mobile.png"), full_page=False)
+        page.screenshot(path=str(ASSET_DIR / "mobile-evidence.png"), full_page=False)
 
         for selector in ("#sendBtn", "#attachBtn", "#networkBtn", "#newTaskBtn", "#inspectorToggle", "#inspectorClose"):
             locator = page.locator(selector)
@@ -104,7 +125,7 @@ def main() -> None:
             raise RuntimeError("Same-origin HTTP failures during product smoke test: " + " | ".join(bad_responses))
         browser.close()
 
-    for name in ("workbench.png", "overview.png", "evidence.png", "mobile.png"):
+    for name in SCREENSHOTS:
         path = ASSET_DIR / name
         if not path.exists() or path.stat().st_size < 10_000:
             raise RuntimeError(f"Screenshot capture failed: {path}")
