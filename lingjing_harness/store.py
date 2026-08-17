@@ -242,9 +242,9 @@ class WorkspaceStore:
                 "select status,owner_id,lease_until from runs where run_id=?", (run_id,)
             ).fetchone()
             if (
-                active
-                and owner_id
+                owner_id
                 and existing
+                and existing["status"] in ACTIVE_RUN_STATUSES
                 and existing["owner_id"]
                 and existing["owner_id"] != owner_id
                 and float(existing["lease_until"] or 0.0) > time.time()

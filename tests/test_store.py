@@ -53,3 +53,25 @@ def test_remote_cancel_wins_over_stale_running_checkpoint(tmp_path):
     persisted = owner.save_run("run-cancel", conversation["id"], "cancel", "running", stale, owner_id="worker-one", lease_seconds=10)
     assert persisted == "cancel_requested"
     assert remote.run_status("run-cancel") == "cancel_requested"
+
+
+def test_stale_worker_cannot_commit_terminal_result_after_lease_takeover(tmp_path):
+    import time
+    path = tmp_path / "lease-fencing.db"
+    old_worker = WorkspaceStore(path)
+    new_worker = WorkspaceStore(path)
+    conversation = old_worker.create_conversation()
+    started = time.time()
+    snapshot = {"run_id":"run-fence","conversation_id":conversation["id"],"goal":"fence","status":"running","events":[],"created_at":started,"updated_at":started}
+    assert old_worker.reserve_run("run-fence", conversation["id"], "fence", snapshot, owner_id="old-worker", lease_seconds=2)
+    claimed = new_worker.claim_recoverable_runs(owner_id="new-worker", lease_seconds=30, now=started + 3)
+    assert [row["run_id"] for row in claimed] == ["run-fence"]
+    stale_completed = {**snapshot, "status":"completed", "updated_at":started + 3.1}
+    persisted = old_worker.save_run(
+        "run-fence", conversation["id"], "fence", "completed", stale_completed,
+        owner_id="old-worker", lease_seconds=30,
+    )
+    assert persisted == "running"
+    current = new_worker.get_run("run-fence")
+    assert current["status"] == "running"
+    assert current["owner_id"] == "new-worker"
