@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import blake2b
 from math import exp, sqrt
 
@@ -9,17 +9,28 @@ from lingjing_harness.domain import Catalog, Item
 from .text import cosine, hashed_vector
 
 
+_BLEND = {"evolve_group": "blend", "min": 0.005, "max": 0.75, "relative_step": 0.16}
+_INDEPENDENT = {"evolve_group": "independent", "min": 0.0, "max": 0.32, "relative_step": 0.18}
+
+
 @dataclass(frozen=True)
 class RecommendConfig:
-    profile: float = 0.34
-    graph: float = 0.20
-    category: float = 0.10
-    quality: float = 0.12
-    freshness: float = 0.13
-    popularity: float = 0.05
-    novelty: float = 0.06
-    diversity: float = 0.14
-    exploration: float = 0.04
+    """Recommendation weights with a declarative evolution schema.
+
+    The evolver discovers dimensions and constraints from dataclass metadata,
+    so new ranking signals can enter self-evolution without editing a mutation
+    arm registry.
+    """
+
+    profile: float = field(default=0.34, metadata=_BLEND)
+    graph: float = field(default=0.20, metadata=_BLEND)
+    category: float = field(default=0.10, metadata=_BLEND)
+    quality: float = field(default=0.12, metadata=_BLEND)
+    freshness: float = field(default=0.13, metadata=_BLEND)
+    popularity: float = field(default=0.05, metadata=_BLEND)
+    novelty: float = field(default=0.06, metadata=_BLEND)
+    diversity: float = field(default=0.14, metadata=_INDEPENDENT)
+    exploration: float = field(default=0.04, metadata=_BLEND)
 
 
 class RecommendationEngine:
@@ -35,7 +46,6 @@ class RecommendationEngine:
         for e in catalog.interactions: self._by_user[e.user_id].append(e)
         self._co: dict[str, Counter[str]] = defaultdict(Counter)
         for events in self._by_user.values():
-            # Bound pair generation for users with very long histories and favor recent evidence.
             ids = list(dict.fromkeys(e.item_id for e in reversed(events)))[: self.MAX_GRAPH_HISTORY]
             for i,a in enumerate(ids):
                 for b in ids[i+1:]:
@@ -69,7 +79,6 @@ class RecommendationEngine:
         raw = sum(weight*self._co[s].get(item_id,0) for s,weight in seeds.items())
         denom = sum(seeds.values()) or 1.0
         return min(1.0, raw/denom)
-
 
     def _graph_scores(self, seeds: Counter[str]) -> dict[str, float]:
         denom = sum(seeds.values()) or 1.0
