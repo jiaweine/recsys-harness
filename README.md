@@ -4,7 +4,7 @@
 
 ### 自主运行搜索与推荐系统的 Agent Harness
 
-**让搜索与推荐从“脚本、指标和人工经验”变成一个会观察、决策、执行、验证、恢复和学习的闭环。**
+**把搜推工程从“脚本、指标和人工经验”变成一个会观察、决策、执行、验证、恢复和学习的闭环。**
 
 [![CI](https://github.com/jiaweine/recsys-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/jiaweine/recsys-harness/actions/workflows/ci.yml)
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
@@ -22,51 +22,62 @@
 
 <p align="center"><sub>DESKTOP · FULL WORKSPACE</sub></p>
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@17d737d2c996e77a8280740910ac233657fc8055/docs/readme-assets/overview.png" alt="Recsys Harness 真实运行界面" width="96%">
+  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@0128d0654fd39b32be146108d070b495e5d81983/docs/readme-assets/overview.png" alt="Recsys Harness 真实运行界面" width="96%">
 </p>
 <p align="center">
-  <sub>完整任务视图 · 对话、运行状态与检查面板在同一工作区。</sub>
+  <sub>一个任务面：对话、运行状态、证据、附件和可恢复执行保持在同一上下文。</sub>
 </p>
 
-> **Real product, real browser.** 这些截图不是设计稿。仓库会启动当前应用，用真实浏览器执行产品任务，并自动刷新 README 中的产品截图。
+> **Real product, real browser.** 截图来自仓库实际启动的应用。CI 会用真实浏览器执行产品任务，并在视觉 QA 通过后刷新 README 资产。
 
 <table>
   <tr>
     <td width="50%" valign="top" align="center">
       <strong>任务工作台</strong><br>
-      <sub>输入、附件和执行入口保持在同一操作面。</sub><br><br>
-      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@17d737d2c996e77a8280740910ac233657fc8055/docs/readme-assets/workbench.png" alt="Recsys Harness 工作台" width="100%">
+      <sub>输入、附件、权限和执行入口保持在同一操作面。</sub><br><br>
+      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@0128d0654fd39b32be146108d070b495e5d81983/docs/readme-assets/workbench.png" alt="Recsys Harness 工作台" width="100%">
     </td>
     <td width="50%" valign="top" align="center">
       <strong>证据与判断</strong><br>
-      <sub>轨迹、证据和结论集中在独立检查视图。</sub><br><br>
-      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@17d737d2c996e77a8280740910ac233657fc8055/docs/readme-assets/evidence.png" alt="Recsys Harness 证据面板" width="100%">
+      <sub>轨迹、依据和结论集中在独立检查视图。</sub><br><br>
+      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@0128d0654fd39b32be146108d070b495e5d81983/docs/readme-assets/evidence.png" alt="Recsys Harness 证据面板" width="100%">
     </td>
+  </tr>
+</table>
+
+### Mobile · task first
+
+移动端不复刻桌面三栏，也不把证据面板粗暴铺满整屏。它遵循三个原则：
+
+<table>
+  <tr>
+    <td width="33%" valign="top"><strong>01 · One primary flow</strong><br><sub>主任务始终是第一层；导航与状态为内容让路。</sub></td>
+    <td width="33%" valign="top"><strong>02 · Evidence as a sheet</strong><br><sub>轨迹与依据从底部进入，保留上方任务上下文。</sub></td>
+    <td width="33%" valign="top"><strong>03 · Touch first</strong><br><sub>关键交互保持可触达尺寸，并考虑 safe-area。</sub></td>
   </tr>
 </table>
 
 <p align="center">
   <sub>MOBILE · THREE REAL STATES</sub><br>
-  <strong>移动端不是一张缩小版桌面图，而是一套完整的任务体验。</strong><br>
-  <sub>主任务、执行轨迹和判断依据分别保留自己的阅读层级。</sub>
+  <strong>同一个真实任务的主工作区、执行轨迹与判断依据。</strong>
 </p>
 
 <table>
   <tr>
-    <td width="33%" valign="top" align="center">
+    <td width="38%" valign="top" align="center">
       <strong>01 · 主任务</strong><br>
       <sub>对话、结论与执行入口</sub><br><br>
-      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@17d737d2c996e77a8280740910ac233657fc8055/docs/readme-assets/mobile-workspace.png" alt="Recsys Harness 移动端主任务" width="92%">
+      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@0128d0654fd39b32be146108d070b495e5d81983/docs/readme-assets/mobile-workspace.png" alt="Recsys Harness 移动端主任务" width="94%">
     </td>
-    <td width="33%" valign="top" align="center">
+    <td width="31%" valign="top" align="center">
       <strong>02 · 执行轨迹</strong><br>
-      <sub>任务状态与实际动作</sub><br><br>
-      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@17d737d2c996e77a8280740910ac233657fc8055/docs/readme-assets/mobile-progress.png" alt="Recsys Harness 移动端执行轨迹" width="92%">
+      <sub>bottom sheet · 任务状态与真实动作</sub><br><br>
+      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@0128d0654fd39b32be146108d070b495e5d81983/docs/readme-assets/mobile-progress.png" alt="Recsys Harness 移动端执行轨迹" width="92%">
     </td>
-    <td width="33%" valign="top" align="center">
+    <td width="31%" valign="top" align="center">
       <strong>03 · 判断依据</strong><br>
-      <sub>可复核证据与结论来源</sub><br><br>
-      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@17d737d2c996e77a8280740910ac233657fc8055/docs/readme-assets/mobile-evidence.png" alt="Recsys Harness 移动端判断依据" width="92%">
+      <sub>bottom sheet · 可复核证据与来源</sub><br><br>
+      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@0128d0654fd39b32be146108d070b495e5d81983/docs/readme-assets/mobile-evidence.png" alt="Recsys Harness 移动端判断依据" width="92%">
     </td>
   </tr>
 </table>
@@ -110,18 +121,10 @@
 
 <table>
   <tr>
-    <td width="33%" valign="top">
-      <strong>01 · Observe</strong><br>
-      <sub>复现真实结果，读取工作区状态，确认当前问题是否存在。</sub>
-    </td>
-    <td width="33%" valign="top">
-      <strong>02 · Decide & Explore</strong><br>
-      <sub>根据证据缺口选择诊断或候选探索，而不是执行固定脚本。</sub>
-    </td>
-    <td width="33%" valign="top">
-      <strong>03 · Verify & Close</strong><br>
-      <sub>独立验证、全量回归，并决定记录经验、激活策略或停止。</sub>
-    </td>
+    <td width="25%" valign="top"><strong>01 · Observe</strong><br><sub>复现真实结果，读取工作区、附件和历史状态。</sub></td>
+    <td width="25%" valign="top"><strong>02 · Decide</strong><br><sub>根据证据缺口、信息增益、风险和预算选择下一步。</sub></td>
+    <td width="25%" valign="top"><strong>03 · Execute & Verify</strong><br><sub>运行真实工具，并用独立样本与全量回归验证。</sub></td>
+    <td width="25%" valign="top"><strong>04 · Learn / Stop</strong><br><sub>记录可信经验、受控激活，或在证据不足时停止。</sub></td>
   </tr>
 </table>
 
@@ -129,7 +132,7 @@
 
 每一次工具返回新 observation 后，控制器都会重新判断下一步。复现正常，就不会为了“流程完整”机械诊断；证据出现冲突、冷启动或覆盖不足，后续动作会重新规划。
 
-> **控制循环：** Observe · Decide · Execute · Checkpoint · Replan · Verify · Learn / Stop
+> **Control loop:** Observe → Decide → Execute → Checkpoint → Replan → Verify → Learn / Stop
 
 ---
 
@@ -175,7 +178,7 @@ python -m uvicorn lingjing_harness.api:app --host 127.0.0.1 --port 8765
 http://127.0.0.1:8765
 ```
 
-CLI 也可以直接运行：
+CLI：
 
 ```bash
 lingjing-harness "做一次全局体检"
@@ -194,8 +197,6 @@ pytest -q
 
 ## 核心能力
 
-先看全貌，再看细节。
-
 <table>
   <tr>
     <td width="33%" valign="top"><strong>01 · Autonomous Control</strong><br><sub>每次 observation 后重新决策，不依赖一次性 Plan。</sub></td>
@@ -212,9 +213,7 @@ pytest -q
 <details open>
 <summary><strong>01 · 自主决策，而不是一次性 Plan</strong></summary>
 
-项目自己的决策控制器会在**每一次工具返回新 observation 后重新选择下一步**。
-
-动作效用综合：
+项目自己的决策控制器会在**每一次工具返回新 observation 后重新选择下一步**。动作效用综合：
 
 - 当前证据缺口与预期信息增益；
 - 异常与冲突信号；
@@ -237,8 +236,6 @@ pytest -q
 | 结果多样性 | 质量 / 新鲜度 / 热度 / 新颖度 |
 | Recall / MRR / NDCG 离线复核 | Coverage / Diversity / Freshness / Novelty 复核 |
 
-搜索和推荐是能力，**Harness 才是产品主体**。
-
 </details>
 
 <details>
@@ -254,9 +251,7 @@ pytest -q
 | **Robustness gate** | 改进是否足够稳定，而不是偶然波动 |
 | **Trusted strategy memory** | 是否有资格进入可信策略记忆 |
 
-没有独立 holdout，只允许探索，**不能变成 trusted / active 策略**。
-
-即使候选通过验证，是否激活仍受用户权限控制。没有明确授权时，系统可以学习可信经验，但不会改变当前工作区策略。后续如果 active strategy 出现明显漂移，系统会 retired 该策略并回到稳健配置。
+没有独立 holdout，只允许探索，**不能变成 trusted / active 策略**。即使候选通过验证，是否激活仍受用户权限控制；未来验证出现明显漂移时，可以 retired 并回到稳健配置。
 
 </details>
 
@@ -280,9 +275,7 @@ pytest -q
 
 文本和数据文件直接本地解析。图片可以交给可选的本地视觉感知接口转成受限 observation。
 
-> **权限隔离：** 感知层不是 Agent 大脑。图片中的文字不能扩大联网权限、不能批准策略激活，也不能绕过工具 guardrail。
-
-附件存储带总容量限制、未引用附件 TTL 回收和证据引用保护；感知阶段也响应停止信号和时间预算。
+> **Permission boundary:** 感知层不是 Agent 大脑。图片中的文字不能扩大联网权限、不能批准策略激活，也不能绕过工具 guardrail。
 
 </details>
 
@@ -291,7 +284,7 @@ pytest -q
 
 联网是显式能力，不是后台默认行为。只有当用户在任务里授权联网，并且服务端配置了搜索端点，网络研究工具才会进入本次可用工具集合。
 
-网络结果会保留来源和摘要，作为当前判断的 evidence；**公开网页证据不会直接成为搜索 / 推荐策略晋升数据**。策略改进仍需回到本地工作区经过独立验证。
+网络结果会保留来源和摘要，作为当前判断的 evidence；**公开网页证据不会直接成为搜索 / 推荐策略晋升数据**。
 
 ```bash
 export LINGJING_WEB_SEARCH_URL=<your-search-endpoint>
@@ -327,8 +320,6 @@ export LINGJING_VISION_MODEL=<your-model-id>
 <details open>
 <summary><strong>Tool guardrails</strong></summary>
 
-每个工具声明：
-
 ```text
 risk · cost · side_effect · repeatable · input_schema
 ```
@@ -358,26 +349,16 @@ actions · observations · findings · evidence · decisions · cost · events
 <details>
 <summary><strong>Multi-worker fencing</strong></summary>
 
-SQLite 同时承担共享运行协调：
+SQLite 同时承担共享运行协调：conversation 级原子 run reservation、worker owner + lease + heartbeat、stale worker fencing，以及 completed / failed / cancelled 单调终态。
 
-- conversation 级原子 run reservation；
-- worker owner + lease + heartbeat；
-- lease 过期后只有一个新 worker 接管；
-- stale worker 的迟到 checkpoint 不能覆盖新 owner；
-- **completed / failed / cancelled 是单调终态，落库后不能被迟到 worker 复活或覆盖**；
-- stop 请求写入共享 run 状态，可以由不同 worker 接收；
-- `cancel_requested` 重启后安全收敛，而不是留下孤儿任务。
-
-同一个 conversation 同时只允许一个 active run；不同 conversation 可以并行。
+同一个 conversation 同时只允许一个 active run；不同 conversation 可以并行。`cancel_requested` 在重启后安全收敛，迟到 worker 不能覆盖新 owner 的 checkpoint。
 
 </details>
 
 <details>
 <summary><strong>Workspace coherence</strong></summary>
 
-工作区 Catalog 有共享 revision 和 update lock。
-
-数据导入期间不接受新的 run；revision 提交后，其他 worker 会重新加载相同 Catalog / Harness，避免一个 worker 用新数据、另一个 worker 继续接旧数据任务。
+工作区 Catalog 有共享 revision 和 update lock。数据导入期间不接受新的 run；revision 提交后，其他 worker 会重新加载同一 Catalog / Harness，避免跨 worker 使用不同版本数据。
 
 </details>
 
@@ -385,22 +366,33 @@ SQLite 同时承担共享运行协调：
 
 ## 系统架构
 
+<p align="center"><sub>CONTROL · EVIDENCE · TRUST · STATE</sub></p>
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@17d737d2c996e77a8280740910ac233657fc8055/docs/readme-assets/architecture.svg" alt="Recsys Harness system architecture" width="94%">
+  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@0128d0654fd39b32be146108d070b495e5d81983/docs/readme-assets/architecture.svg" alt="Recsys Harness system architecture" width="97%">
 </p>
 
-| 层 | 职责 |
-|---|---|
-| **Experience** | 文本、附件、联网授权、执行轨迹、证据 |
-| **Perception** | 文档解析、可选图片感知、权限隔离 |
-| **Autonomous Control** | 目标理解、动作效用、动态 Replan、预算与停止条件 |
-| **Tool Plane** | 搜索、推荐、评估、学习、联网工具与风险边界 |
-| **Evolution** | 多候选探索、holdout、全量回归、robustness gate |
-| **Memory** | episodic / procedural / policy memory |
-| **Trust** | 用户约束、独立验证、激活门槛、漂移回滚 |
-| **Durability** | checkpoint、lease、heartbeat、fencing、幂等恢复 |
-| **Workspace** | revision、更新锁、跨 worker 数据一致性 |
-| **Access** | 可选登录、共享限流、生产安全边界 |
+架构图刻意把系统分成三个面，而不是把组件堆成一张依赖关系图：
+
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <strong>Control plane</strong><br>
+      <sub>目标、observation、动作效用、预算、风险和 Replan 在项目自有控制核中闭环。</sub>
+    </td>
+    <td width="33%" valign="top">
+      <strong>Evidence plane</strong><br>
+      <sub>真实搜推工具、诊断结果、附件感知与可选网络研究只提供可追溯 evidence。</sub>
+    </td>
+    <td width="33%" valign="top">
+      <strong>Trust & state plane</strong><br>
+      <sub>holdout、回归、memory、checkpoint、lease、workspace revision 与 access 共同约束长期行为。</sub>
+    </td>
+  </tr>
+</table>
+
+**Architecture invariants**
+
+`attachments never grant permission` · `network evidence never promotes strategy` · `holdout precedes trust` · `stale workers cannot overwrite current state`
 
 > 完整设计说明：[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
@@ -410,14 +402,8 @@ SQLite 同时承担共享运行协调：
 
 <table>
   <tr>
-    <td width="50%" valign="top">
-      <strong>Local development</strong><br>
-      <sub>默认本地模式不要求登录，适合单机开发、调试和体验。</sub>
-    </td>
-    <td width="50%" valign="top">
-      <strong>Production exposure</strong><br>
-      <sub>生产模式必须显式配置访问密钥，并启用服务端安全边界。</sub>
-    </td>
+    <td width="50%" valign="top"><strong>Local development</strong><br><sub>默认本地模式不要求登录，适合单机开发、调试和体验。</sub></td>
+    <td width="50%" valign="top"><strong>Production exposure</strong><br><sub>生产模式必须显式配置访问密钥，并启用服务端安全边界。</sub></td>
   </tr>
 </table>
 
@@ -463,8 +449,6 @@ export LINGJING_TRUST_PROXY_IP=1
 
 ## 质量门槛
 
-核心检查只有三个入口：
-
 ```bash
 make check
 make test
@@ -479,8 +463,8 @@ make demo
 - wheel 构建、干净安装与安装后 Web / API 能力；
 - 前端 JavaScript 语法；
 - UI 不泄漏内部算法或第三方产品名；
-- 没有历史编号产品路径或旧决策路径；
 - 真实浏览器桌面 / 移动流程与附件交互；
+- 移动证据面板必须保持 bottom-sheet 结构与任务上下文；
 - 瞬时 polling 故障后的自动重连；
 - 关键移动触控目标；
 - 浏览器 page / console error；
