@@ -58,7 +58,9 @@ jobs:
             docs/readme-assets/workbench.png
             docs/readme-assets/overview.png
             docs/readme-assets/evidence.png
-            docs/readme-assets/mobile.png
+            docs/readme-assets/mobile-workspace.png
+            docs/readme-assets/mobile-progress.png
+            docs/readme-assets/mobile-evidence.png
           retention-days: 5
 
       - name: Publish screenshots and advance README when CDN is ready
@@ -66,7 +68,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add docs/readme-assets/workbench.png docs/readme-assets/overview.png docs/readme-assets/evidence.png docs/readme-assets/mobile.png
+          git add \
+            docs/readme-assets/workbench.png \
+            docs/readme-assets/overview.png \
+            docs/readme-assets/evidence.png \
+            docs/readme-assets/mobile-workspace.png \
+            docs/readme-assets/mobile-progress.png \
+            docs/readme-assets/mobile-evidence.png
           if ! git diff --cached --quiet; then
             git commit -m "Refresh README product screenshots"
             # Publish the immutable asset commit before asking the independent CDN for it.
@@ -83,7 +91,7 @@ jobs:
           # CDN propagation can lag a fresh Git commit. That must never turn a
           # successful browser QA run into a failure or replace a known-good
           # README image set with URLs that are not ready yet.
-          for name in overview.png workbench.png evidence.png mobile.png architecture.svg; do
+          for name in overview.png workbench.png evidence.png mobile-workspace.png mobile-progress.png mobile-evidence.png architecture.svg; do
             rm -f "/tmp/${name}"
             if ! curl -fsSL --retry 2 --retry-all-errors --retry-delay 2 \
               --connect-timeout 8 --max-time 20 \
@@ -102,7 +110,14 @@ jobs:
             if ! python - <<'PY'
           from pathlib import Path
 
-          for name in ('overview.png', 'workbench.png', 'evidence.png', 'mobile.png'):
+          for name in (
+              'overview.png',
+              'workbench.png',
+              'evidence.png',
+              'mobile-workspace.png',
+              'mobile-progress.png',
+              'mobile-evidence.png',
+          ):
               data = Path('/tmp', name).read_bytes()
               assert data.startswith(b'\x89PNG\r\n\x1a\n'), f'{name} is not a PNG'
           assert '<svg' in Path('/tmp/architecture.svg').read_text(encoding='utf-8'), 'architecture.svg is not SVG'
@@ -113,7 +128,7 @@ jobs:
           fi
 
           if [ "$cdn_ready" != "1" ]; then
-            echo "::warning::New screenshot commit is published, but the independent CDN is still propagating it. Keeping the last verified README image set."
+            echo "::warning::New screenshot commit is published, but the independent CDN is still propagating it. Keeping the README image URLs unchanged until the next successful refresh."
             exit 0
           fi
 
@@ -128,7 +143,9 @@ jobs:
               'overview.png',
               'workbench.png',
               'evidence.png',
-              'mobile.png',
+              'mobile-workspace.png',
+              'mobile-progress.png',
+              'mobile-evidence.png',
               'architecture.svg',
           )
           readme = Path('README.md')
@@ -150,4 +167,3 @@ jobs:
             git push
           else
             echo "README asset URLs are already pinned."
-          fi
