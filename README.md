@@ -4,13 +4,13 @@
 
 ### 垂直自进化的 Search / Recommendation Agent Harness
 
-**让搜推系统不只会执行和诊断，还能在真实领域指标、独立验证与权限边界内，自主重组策略能力、实验、学习、恢复并持续进化。**
+**让搜推系统不只会执行和诊断，还能在真实领域指标、隔离验证、策略一致性与权限边界内，自主重组能力、实验、学习、恢复并持续进化。**
 
 [![CI](https://github.com/jiaweine/recsys-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/jiaweine/recsys-harness/actions/workflows/ci.yml)
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![Local-first](https://img.shields.io/badge/runtime-local--first-111827)
 
-**Mission Graph · Mixed Strategy Genome · Capability Evolution · Reflection · Independent Holdout · Durable Recovery**
+**Mission Graph · Mixed Strategy Genome · Capability Evolution · Failure-oriented Evaluation · Independent Holdout · Durable Recovery**
 
 [真实产品](#真实产品) · [为什么是 Harness](#为什么是-harness) · [Agent Harness 方法](#agent-harness-方法) · [垂直自进化](#垂直自进化从参数到能力) · [快速启动](#快速启动) · [能力](#能力) · [可靠性](#可靠性) · [系统架构](#系统架构) · [质量门槛](#质量门槛)
 
@@ -82,11 +82,13 @@ Recsys Harness 把这些问题放进一个持久、可审计、可恢复、受�
 | 历史对话就是 memory | episodic / procedural / policy memory 分开、受限、可退休 |
 | 优化就是调几个权重 | mixed genome 同时探索参数与真实搜推 capability |
 | 架构选择靠开发者写死 | registry 声明可用实现；真实领域评估决定哪个实现获胜 |
-| 在同一批数据上提案又验收 | discovery 与 independent holdout 隔离 |
+| 同一批样本既提案又验收 | evaluation identity 先去重；discovery 与 independent holdout 隔离 |
+| 冷启动只看 warm-user 汇总指标 | cold-start 有独立 probe、独立 holdout delta 与退化门槛 |
+| 历史配置拿来就执行 | active strategy 先 canonicalize；失效 capability / 非法 gene 会退休而不是静默执行 |
 | 重启后重新跑 | mission、reflection、critic、actions、observations 一起 checkpoint / resume |
 | 联网或附件可能影响权限 | observation 与 authority 严格分离；只有用户能扩大权限 |
 
-> **核心原则：** 自主性不是“让 Agent 想做什么就做什么”。自主性是让它在证据、领域指标、权限、风险、预算、验证和恢复边界内，持续选择并进化当前最有价值的策略。
+> **核心原则：** 自主性不是“让 Agent 想做什么就做什么”。自主性是让它在证据、领域指标、权限、风险、预算、验证和恢复边界内，持续选择并进化当前最有价值的策略；而这些边界本身不属于 optimizer 的搜索空间。
 
 ---
 
@@ -104,12 +106,14 @@ Recsys Harness 把这些问题放进一个持久、可审计、可恢复、受�
   </tr>
   <tr>
     <td width="33%" valign="top"><strong>ToolRegistry</strong><br><sub>真实 search / recommend / audit / evolve / network 工具及风险契约。</sub></td>
-    <td width="33%" valign="top"><strong>CapabilityRegistry + Mixed Genome</strong><br><sub>参数 gene 与结构 capability gene 共用一套领域进化与验证流程。</sub></td>
+    <td width="33%" valign="top"><strong>CapabilityRegistry + Mixed Genome</strong><br><sub>参数 gene 与结构 capability gene 共用领域实验、credit assignment 与验证流程。</sub></td>
     <td width="33%" valign="top"><strong>Verifier + Memory + Checkpoint</strong><br><sub>独立验收、typed learning、策略生命周期与 durable state。</sub></td>
   </tr>
 </table>
 
-对应实现：[`harness.py`](lingjing_harness/runtime/harness.py) · [`deliberation.py`](lingjing_harness/runtime/deliberation.py) · [`capabilities.py`](lingjing_harness/algorithms/capabilities.py) · [`evolution.py`](lingjing_harness/algorithms/evolution.py) · [`tools.py`](lingjing_harness/runtime/tools.py) · [`verifier.py`](lingjing_harness/runtime/verifier.py) · [`memory.py`](lingjing_harness/runtime/memory.py)
+对应实现：[`harness.py`](lingjing_harness/runtime/harness.py) · [`deliberation.py`](lingjing_harness/runtime/deliberation.py) · [`capabilities.py`](lingjing_harness/algorithms/capabilities.py) · [`evolution_core.py`](lingjing_harness/algorithms/evolution_core.py) · [`tools_core.py`](lingjing_harness/runtime/tools_core.py) · [`verifier.py`](lingjing_harness/runtime/verifier.py) · [`memory.py`](lingjing_harness/runtime/memory.py)
+
+`evolution.py`、`recommend.py`、`runtime/tools.py` 保持稳定 import surface；复杂实现集中在对应 `*_core.py`，避免兼容 API 和演化逻辑继续耦合成单一巨型文件。
 
 规范性行为契约：[`docs/HARNESS_CONTRACT.md`](docs/HARNESS_CONTRACT.md)  
 垂直进化设计：[`docs/VERTICAL_EVOLUTION.md`](docs/VERTICAL_EVOLUTION.md)
@@ -296,6 +300,8 @@ risk · cost · side_effect · repeatable · input_schema
 | Procedural | 通过验证的 Search / RecSys strategy genome | trusted / active / retired 生命周期 |
 | Policy | 上下文-动作历史 reward | 有界 prior，不覆盖当前证据 |
 
+**Durable memory 不是可信输入。** 旧版本、损坏或已经失效的 strategy config 在进入引擎之前必须重新通过当前 schema：非有限数值、越界 gene 会被拒绝；已删除 capability 会 canonicalize 到 owned default，而 active fingerprint 如果因此不再描述真实执行策略，会被退休并要求重新评估。
+
 ### 9 · Recoverable deliberation
 
 Checkpoint 持久化：
@@ -321,16 +327,20 @@ critic · stagnation · spent cost · events
 ```text
 Strategy Genome
 ├─ continuous genes
-│  ├─ lexical / semantic / title / freshness ...
-│  └─ profile / graph / novelty / exploration ...
+│  ├─ normalized warm-ranking blend
+│  │  ├─ Search: lexical / semantic / title / quality / popularity / freshness
+│  │  └─ Rec: profile / graph / category / quality / freshness / popularity / novelty / exploration
+│  └─ independent bounded genes
+│     ├─ slate diversity
+│     └─ recommendation cold-start pressure
 └─ capability genes
    ├─ Search: query / candidate / rerank
    └─ Rec: profile / candidate / cold-start / exploration / rerank
 ```
 
-连续 gene 由 dataclass metadata 声明边界和归一化组；capability gene 只声明 `capability_group`，具体合法实现从 `CapabilityRegistry` 自动发现。
+这里有一个重要约束：**只对同一语义作用域的权重做归一化。** `cold_start` 对 warm user 不生效，因此它是独立 gene，不能因为调冷启动而偷偷重分配 profile / graph / freshness 等 warm-ranking 权重。
 
-**中心 evolver 不维护“哪个搜推能力更好”的表。**
+连续 gene 由 dataclass metadata 声明边界和归一化组；capability gene 只声明 `capability_group`，具体合法实现从 `CapabilityRegistry` 自动发现。
 
 > Registry 定义 **what exists**；domain evaluator 决定 **what wins**。
 
@@ -365,9 +375,9 @@ Strategy Genome
 
 这些不是 README 标签。每个选择都真实进入 `SearchEngine` / `RecommendationEngine` 执行路径。
 
-例如 `semantic_rescue` 只能在已有 lexical / catalog anchor 的前提下补充候选；未知 query 不会因为向量哈希碰撞被凭空召回。能力进化不能破坏已有 retrieval invariant。
+例如 `semantic_rescue` 只能在已有 lexical / catalog anchor 的前提下补充候选；未知 query 不会因为向量哈希碰撞被凭空召回。结构能力返回的 candidate IDs 还会在进入推荐打分前去重，避免 capability 实现细节制造重复 slate 候选。
 
-### 3 · Mixed response surface
+### 3 · Mixed response surface + constrained projection
 
 每次 evolution 先在 discovery split 上测局部响应面。
 
@@ -388,14 +398,23 @@ field = registered alternative B
 
 每一个 structural neighbor 都重新执行完整 pipeline，而不是只修改配置字符串。
 
-输出包括：
+对于需要保持总质量的 blend group，变异后不是简单“clip 一次再平均修正”。当前实现用**有界 capacity redistribution**把剩余质量分配到仍有容量的 gene，直到满足：
+
+```text
+∀ gene: min ≤ value ≤ max
+Σ blend genes = original group mass
+```
+
+因此极端 mutation / clipping 也不能让权重总量悄悄漂移。
+
+Response surface 输出：
 
 ```text
 arm · kind · objective_delta · robustness
 historical_prior · posterior_sample · routing_score
 ```
 
-### 4 · Posterior routing：跨任务学习“哪类结构更值得试”
+### 4 · Posterior routing：历史经验是先验，不是输入真相
 
 Trusted strategy memory 不只记参数，也记 capability selection。
 
@@ -408,7 +427,9 @@ rerank_strategy=hybrid_mmr
 cold_start_strategy=discovery_prior
 ```
 
-Router 将**当前 catalog 的真实 response**与历史 posterior 合并。当前 evidence 权重大于历史记忆，因此曾经的 winner 不会成为永久规则。
+但 durable memory 本身可能来自旧版本。Router 只消费结构有效的 trusted / active rows；坏掉的 numeric value、未知字段或无法投影的旧 config 会被跳过，而不是让新 evolution run 崩溃。
+
+当前 catalog 的 discovery response 权重大于历史 posterior，因此曾经的 winner 不会成为永久规则。
 
 ### 5 · Quality-Diversity：不让进化塌成一个局部最优
 
@@ -421,33 +442,75 @@ profile_strategy=recent_intent + exploration_strategy=novelty_seek
 lexical:up + semantic:down
 ```
 
-下一代可以从多个 mechanism parent 继续探索，而不是只围着全局第一名做小幅抖动。
+下一代可以从多个 mechanism parent 继续探索，而不是只围着全局第一名做小幅抖动。Population expansion 还有显式尝试上限，避免低维/重复 genome 因无法产生足够 unique candidate 而无限循环。
 
-### 6 · Cold-start 也必须有自己的验证证据
+### 6 · Evaluation identity：先保证“独立”，再谈 holdout
 
-如果只在 warm users 上评价，`cold_start_strategy` 就算进入 genome 也只是伪进化。
+“discovery / holdout 两个列表”并不自动意味着独立。如果同一个 query 被重复导入两次，它仍可能以两条 row 的形式泄漏到两边。
 
-因此推荐 evolution 额外计算 `cold_start_quality`，并给 discovery / holdout 使用不同 synthetic cold-user identity：
+因此当前数据路径先做两层防护：
+
+```text
+Catalog ingest
+  → same query labels merge relevance sets
+  → one canonical label per query
+        ↓
+Evolution split
+  → defensive unique-by-identity
+  → deterministic discovery / holdout split
+```
+
+推荐 warm-user split 同样按 user identity 去重。**评价单位的 identity 不能同时出现在 discovery 与 holdout。**
+
+### 7 · Cold-start：独立 probe 必须进入独立 gate
+
+以前仅仅“计算一个 cold-start 指标”还不够。如果 final trust gate 不检查 holdout cold-start regression，这个指标仍然只是旁观数据。
+
+当前推荐 evolution 的路径是：
 
 ```text
 discovery warm users
-+ discovery cold-start slice
++ discovery cold-start identities
         ↓
-mixed genome search
+mixed response surface / routing
         ↓
 discovery winner
 
-independent holdout users
-+ separate cold-start holdout identity
+independent holdout warm users
++ disjoint holdout cold-start identities
         ↓
-regression / robustness gates
+quality / coverage / robustness
++ explicit cold_start_quality_delta gate
         ↓
 trusted strategy memory
 ```
 
-Holdout 只负责验收，永远不参与 arm routing 或 discovery winner 选择。
+Synthetic cold identities 会显式避开真实 user IDs；即使真实数据里恰好存在内部 probe 前缀，也会生成新的无历史 identity，防止“冷启动 probe 意外继承真实行为”。
 
-### 7 · Evolution ≠ self-modifying code
+Trust 现在允许**真正的 cold-start-only improvement**获得 credit，但前提是 independent cold holdout 同样没有退化；反过来，即使 warm quality / coverage 明显提升，只要 holdout cold-start 显著回归，也不能通过 safety gate。
+
+### 8 · Active strategy ≠ 永久可信
+
+一个曾经 trusted / active 的策略，在代码 schema 或 capability registry 变化后不能直接继承旧可信度。
+
+启动时：
+
+```text
+persisted active config
+        ↓
+current schema validation
+  · numeric finite?
+  · within declared bounds?
+  · capability still registered?
+        ↓
+effective config == stored config ?
+  ├─ no  → retire old active fingerprint → owned default → re-evaluate later
+  └─ yes → run active regression validation
+```
+
+Recommendation 的 active regression 不只看 aggregate quality / coverage，还看 `cold_start_quality`。这修正了“整体指标没坏，但冷启动已经明显退化仍继续 active”的漏洞。
+
+### 9 · Evolution ≠ self-modifying code
 
 允许进化：
 
@@ -465,7 +528,7 @@ Holdout 只负责验收，永远不参与 arm routing 或 discovery winner 选�
 
 - 用户权限
 - network authority
-- holdout membership
+- evaluation identity / holdout membership
 - verifier / trust gate
 - tool risk class
 - checkpoint / lease / fencing
@@ -540,9 +603,9 @@ python scripts/probe_harness_contract.py
     <td width="33%" valign="top"><strong>03 · Capability Evolution</strong><br><sub>参数 + 结构 mixed genome，真实 pipeline response surface。</sub></td>
   </tr>
   <tr>
-    <td width="33%" valign="top"><strong>04 · Independent Evaluation</strong><br><sub>Discovery / holdout / regression / robustness / cold-start slice。</sub></td>
+    <td width="33%" valign="top"><strong>04 · Independent Evaluation</strong><br><sub>identity-isolated discovery / holdout、regression、robustness、cold-start gate。</sub></td>
     <td width="33%" valign="top"><strong>05 · Controlled Evidence</strong><br><sub>多模态与网络只能提供 observation / provenance，不扩大 authority。</sub></td>
-    <td width="33%" valign="top"><strong>06 · Durable Learning</strong><br><sub>Episodic / procedural / policy memory + checkpoint / recovery。</sub></td>
+    <td width="33%" valign="top"><strong>06 · Durable Learning</strong><br><sub>Episodic / procedural / policy memory + canonicalization / retirement + recovery。</sub></td>
   </tr>
 </table>
 
@@ -555,7 +618,7 @@ python scripts/probe_harness_contract.py
 | lexical postings / bounded semantic rescue | full-pool / evidence-union candidates |
 | field-aware lexical + semantic scoring | graph / content / category / quality / freshness |
 | category / semantic / hybrid MMR | cold-start + stable / novelty / coverage exploration |
-| Recall / MRR / NDCG | Coverage / Diversity / Freshness / Novelty + cold-start slice |
+| Recall / MRR / NDCG | Coverage / Diversity / Freshness / Novelty + collision-safe cold-start slice |
 
 </details>
 
@@ -580,8 +643,8 @@ export LINGJING_VISION_MODEL=<your-model-id>
 <table>
   <tr>
     <td width="25%" valign="top"><strong>Guardrails</strong><br><sub>risk / cost / side effect / schema / authority 显式化。</sub></td>
-    <td width="25%" valign="top"><strong>Verification</strong><br><sub>critic、verifier、holdout、regression 与 robustness 分层。</sub></td>
-    <td width="25%" valign="top"><strong>Durability</strong><br><sub>动作、mission 与 deliberation state 一起 checkpoint。</sub></td>
+    <td width="25%" valign="top"><strong>Verification</strong><br><sub>critic、verifier、identity-isolated holdout、cold gate 与 robustness 分层。</sub></td>
+    <td width="25%" valign="top"><strong>Durability</strong><br><sub>动作、mission、deliberation 与 effective strategy state 可恢复。</sub></td>
     <td width="25%" valign="top"><strong>Fencing</strong><br><sub>lease + heartbeat + revision 阻止 stale worker 覆盖新状态。</sub></td>
   </tr>
 </table>
@@ -592,6 +655,13 @@ export LINGJING_VISION_MODEL=<your-model-id>
 同一个 conversation 同时只允许一个 active run；不同 conversation 可以并行。Adaptive invocation 幂等；`cancel_requested` 可跨进程安全收敛。
 
 SQLite 同时承担 conversation reservation、worker owner、lease、heartbeat 与 terminal-state fencing。迟到 worker 不能覆盖新 owner 已提交的状态。
+
+</details>
+
+<details>
+<summary><strong>Strategy lifecycle hardening</strong></summary>
+
+Active strategy 不是绕过验证的永久缓存。加载时先验证当前 schema / bounds / capability registry；effective config 与旧 fingerprint 不一致就退休。定期 revalidation 会重新比较 owned default，Recommendation 还额外检查 cold-start regression。
 
 </details>
 
@@ -638,33 +708,39 @@ ResultVerifier
 ```text
 Current Search / RecSys Strategy
       ↓
-Mixed Genome
-  continuous + capability genes
+Schema + Capability Canonicalization
       ↓
-Discovery Response Surface
+Mixed Genome
+  warm blend + independent genes + capability genes
+      ↓
+Identity-Isolated Discovery Response Surface
       ↓
 Posterior-Guided Mixed Routing
       ↓
 Population + QD Archive
       ↓
-Independent Holdout + Robustness
+Independent Warm + Cold Holdout
+      ↓
+Regression / Robustness / Cold-start Gates
       ↓
 Trusted Strategy Memory
       ↓
 Optional Permissioned Activation
+      ↓
+Periodic Active Revalidation / Retirement
 ```
 
 <table>
   <tr>
     <td width="33%" valign="top"><strong>Control plane</strong><br><sub>Mission Graph、Deliberation、Reflection、Trajectory Critic 持有任务级决策权。</sub></td>
-    <td width="33%" valign="top"><strong>Evolution plane</strong><br><sub>CapabilityRegistry、mixed genome、response surface、posterior router 与 QD archive 负责领域策略搜索。</sub></td>
-    <td width="33%" valign="top"><strong>Trust & state plane</strong><br><sub>Verifier、holdout、typed memory、checkpoint、lease 与 workspace revision 约束长期行为。</sub></td>
+    <td width="33%" valign="top"><strong>Evolution plane</strong><br><sub>CapabilityRegistry、mixed genome、bounded projection、response surface、posterior router 与 QD archive 负责领域策略搜索。</sub></td>
+    <td width="33%" valign="top"><strong>Trust & state plane</strong><br><sub>identity isolation、Verifier、warm/cold holdout、typed memory、strategy retirement、checkpoint、lease 与 revision 约束长期行为。</sub></td>
   </tr>
 </table>
 
 **Architecture invariants**
 
-`attachments never grant permission` · `network evidence never promotes strategy` · `registry defines choices, evaluator selects winners` · `holdout precedes trust` · `critic gates clean closure` · `stale workers cannot overwrite current state`
+`attachments never grant permission` · `network evidence never promotes strategy` · `one evaluation identity cannot cross discovery / holdout` · `cold-start credit requires cold-start evidence` · `stored strategy must equal effective strategy` · `holdout precedes trust` · `critic gates clean closure` · `stale workers cannot overwrite current state`
 
 > 架构说明：[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · Harness contract：[`docs/HARNESS_CONTRACT.md`](docs/HARNESS_CONTRACT.md) · Self-evolution：[`docs/VERTICAL_EVOLUTION.md`](docs/VERTICAL_EVOLUTION.md)
 
@@ -692,6 +768,8 @@ python -m uvicorn lingjing_harness.api:app --host 0.0.0.0 --port 8765
 
 `items` · `interactions` · `query labels` · `eligibility` · `quality` · `popularity` · `freshness`
 
+重复 query label 会在 Catalog 边界合并 relevance set；query 本身是 Search evaluation 的 identity，不会以重复 row 的方式跨 discovery / holdout。
+
 完整格式见 [`docs/DATA_FORMAT.md`](docs/DATA_FORMAT.md)。
 
 ---
@@ -707,35 +785,43 @@ python scripts/probe_harness_contract.py
 
 CI 覆盖：Python 编译与完整回归、Harness contract probe、mixed-genome / capability-stage 测试、CLI smoke、wheel 干净安装、产品 hygiene、真实浏览器桌面 / 移动流程、多 worker lease / fencing / workspace revision，以及生产访问与限流契约。
 
-结构进化还有专门的回归检查：
+这次 hardening 不是只补 happy-path，而是增加 failure-oriented regression：
 
-- config schema 能自动发现 continuous / capability genes；
-- registry 新增 capability 不需要 central arm list；
-- trusted memory 能形成 numeric direction / capability choice prior；
-- 非默认 query / candidate / profile / cold-start / exploration / rerank 真实执行；
-- unknown persisted capability fail-closed 到 owned default；
-- independent holdout 不参与 discovery routing；
-- cold-start behavior 有自己的 evaluation slice。
+- duplicate query identity 不得跨 discovery / holdout；
+- 极端 clipping 后 blend 仍严格满足 bounds + exact group mass；
+- `cold_start` mutation 不得改变 warm ranking blend；
+- 损坏 / 旧版 trusted memory 不得让 evolution 崩溃；
+- synthetic cold identity 与真实用户撞名时必须避让；
+- cold-start-only improvement 在独立 holdout 支持时可以获得 trust；
+- warm 指标再好也不能掩盖 holdout cold-start regression；
+- public recommendation audit 必须实际报告 cold-start slice；
+- 已删除 capability / 非法 active config 在执行前退休；
+- active recommendation 的 cold-start 回归必须触发 rollback；
+- 非默认 query / candidate / profile / cold-start / exploration / rerank 仍真实执行；
+- Harness contract、CLI、wheel、resilience 与既有产品测试必须同时通过。
 
 ---
 
 ## Repository map
 
 ```text
-frontend/                          产品 UI
+frontend/                          产品 UI（本轮 hardening 不修改）
 lingjing_harness/
   algorithms/
-    capabilities.py                typed Search/RecSys capability registry
+    capabilities.py                typed registry + config canonicalization
     search.py                      search mixed strategy genome + real stages
-    recommend.py                   recommendation mixed genome + real stages
-    evolution.py                   response surface / posterior router / QD archive
-    evaluation.py                  domain metrics
+    recommend.py                   stable public compatibility surface
+    recommend_core.py              hardened recommendation stages / cold-start isolation
+    evolution.py                   stable public compatibility surface
+    evolution_core.py              response surface / posterior / QD / isolated gates
+    evaluation.py                  Search/Rec metrics + collision-safe cold probes
   runtime/
     harness.py                     Agent Harness orchestration / checkpoint loop
     policy.py                      用户目标、scope 与 authority 编译
     deliberation.py                Mission Graph / hypotheses / reflection / critic
     contracts.py                   runtime state / requirement / decision contracts
-    tools.py                       真实工具与 risk / cost / side-effect contract
+    tools.py                       stable ToolRegistry import surface
+    tools_core.py                  strategy validation / activation / rollback lifecycle
     verifier.py                    独立结果、权限与 trajectory 验证
     memory.py                      episodic / procedural / policy memory
     perception.py                  多模态 observation
@@ -744,8 +830,9 @@ lingjing_harness/
   store.py                         durable run、lease、revision、共享限流
 tests/test_deliberation.py         mission / reflection / critic 回归
 tests/test_vertical_evolution.py   mixed-genome / holdout / posterior 回归
-tests/test_capability_genome.py    real capability-stage 与 fail-closed 回归
-docs/HARNESS_CONTRACT.md           H1–H14 规范性 Harness contract
+tests/test_capability_genome.py    real capability-stage 回归
+tests/test_evolution_hardening.py  identity / memory / projection / cold-gate 对抗回归
+docs/HARNESS_CONTRACT.md           规范性 Harness contract
 docs/VERTICAL_EVOLUTION.md         垂直自进化设计与扩展契约
 scripts/probe_harness_contract.py  可执行 contract probe
 scripts/capture_readme_assets.py   真实浏览器 QA 与 README 截图
@@ -759,8 +846,8 @@ scripts/capture_readme_assets.py   真实浏览器 QA 与 README 截图
 
 ### Search and recommendation are the domain. The self-evolving Harness is the product.
 
-**Compile · Deliberate · Execute · Reflect · Evolve · Holdout · Verify · Learn · Recover**
+**Compile · Deliberate · Execute · Reflect · Evolve · Isolate · Holdout · Verify · Learn · Recover**
 
-<sub>Mission graphs · Mixed genomes · Real capabilities · Independent gates · Typed memory · Durable state</sub>
+<sub>Mission graphs · Mixed genomes · Real capabilities · Failure-oriented gates · Typed memory · Durable state</sub>
 
 </div>
