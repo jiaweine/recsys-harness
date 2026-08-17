@@ -22,7 +22,7 @@
 
 <p align="center"><sub>DESKTOP · FULL WORKSPACE</sub></p>
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@27b2d3977d451b4093687f5d728d89d3942e890a/docs/readme-assets/overview.png" alt="Recsys Harness 真实运行界面" width="96%">
+  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@17d737d2c996e77a8280740910ac233657fc8055/docs/readme-assets/overview.png" alt="Recsys Harness 真实运行界面" width="96%">
 </p>
 <p align="center">
   <sub>完整任务视图 · 对话、运行状态与检查面板在同一工作区。</sub>
@@ -35,12 +35,12 @@
     <td width="50%" valign="top" align="center">
       <strong>任务工作台</strong><br>
       <sub>输入、附件和执行入口保持在同一操作面。</sub><br><br>
-      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@27b2d3977d451b4093687f5d728d89d3942e890a/docs/readme-assets/workbench.png" alt="Recsys Harness 工作台" width="100%">
+      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@17d737d2c996e77a8280740910ac233657fc8055/docs/readme-assets/workbench.png" alt="Recsys Harness 工作台" width="100%">
     </td>
     <td width="50%" valign="top" align="center">
       <strong>证据与判断</strong><br>
       <sub>轨迹、证据和结论集中在独立检查视图。</sub><br><br>
-      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@27b2d3977d451b4093687f5d728d89d3942e890a/docs/readme-assets/evidence.png" alt="Recsys Harness 证据面板" width="100%">
+      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@17d737d2c996e77a8280740910ac233657fc8055/docs/readme-assets/evidence.png" alt="Recsys Harness 证据面板" width="100%">
     </td>
   </tr>
 </table>
@@ -56,17 +56,17 @@
     <td width="33%" valign="top" align="center">
       <strong>01 · 主任务</strong><br>
       <sub>对话、结论与执行入口</sub><br><br>
-      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@27b2d3977d451b4093687f5d728d89d3942e890a/docs/readme-assets/mobile-workspace.png" alt="Recsys Harness 移动端主任务" width="92%">
+      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@17d737d2c996e77a8280740910ac233657fc8055/docs/readme-assets/mobile-workspace.png" alt="Recsys Harness 移动端主任务" width="92%">
     </td>
     <td width="33%" valign="top" align="center">
       <strong>02 · 执行轨迹</strong><br>
       <sub>任务状态与实际动作</sub><br><br>
-      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@27b2d3977d451b4093687f5d728d89d3942e890a/docs/readme-assets/mobile-progress.png" alt="Recsys Harness 移动端执行轨迹" width="92%">
+      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@17d737d2c996e77a8280740910ac233657fc8055/docs/readme-assets/mobile-progress.png" alt="Recsys Harness 移动端执行轨迹" width="92%">
     </td>
     <td width="33%" valign="top" align="center">
       <strong>03 · 判断依据</strong><br>
       <sub>可复核证据与结论来源</sub><br><br>
-      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@27b2d3977d451b4093687f5d728d89d3942e890a/docs/readme-assets/mobile-evidence.png" alt="Recsys Harness 移动端判断依据" width="92%">
+      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@17d737d2c996e77a8280740910ac233657fc8055/docs/readme-assets/mobile-evidence.png" alt="Recsys Harness 移动端判断依据" width="92%">
     </td>
   </tr>
 </table>
@@ -386,7 +386,7 @@ SQLite 同时承担共享运行协调：
 ## 系统架构
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@27b2d3977d451b4093687f5d728d89d3942e890a/docs/readme-assets/architecture.svg" alt="Recsys Harness system architecture" width="94%">
+  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@17d737d2c996e77a8280740910ac233657fc8055/docs/readme-assets/architecture.svg" alt="Recsys Harness system architecture" width="94%">
 </p>
 
 | 层 | 职责 |
