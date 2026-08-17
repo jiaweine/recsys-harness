@@ -18,21 +18,35 @@
 
 ## 真实产品
 
-![Recsys Harness 真实运行界面](https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@65453ad0536e8320f045ff7ff358a57a5b0283fc/docs/readme-assets/overview.png)
+<p align="center">
+  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@65453ad0536e8320f045ff7ff358a57a5b0283fc/docs/readme-assets/overview.png" alt="Recsys Harness 真实运行界面" width="100%">
+</p>
+<p align="center">
+  <sub>完整任务视图 · 对话、运行状态与检查面板在同一工作区。</sub>
+</p>
 
-> 上图不是设计稿。仓库会启动当前应用，用真实浏览器执行产品任务，并自动刷新 README 截图。
+> 这些截图不是设计稿。仓库会启动当前应用，用真实浏览器执行产品任务，并自动刷新 README 中的产品截图。
 
-### 工作台
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <p><strong>工作台</strong><br><sub>任务输入、附件和运行入口集中在主工作区。</sub></p>
+      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@65453ad0536e8320f045ff7ff358a57a5b0283fc/docs/readme-assets/workbench.png" alt="Recsys Harness 工作台" width="100%">
+    </td>
+    <td width="50%" valign="top">
+      <p><strong>执行轨迹与判断依据</strong><br><sub>证据、轨迹和结论保持在同一检查视图。</sub></p>
+      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@65453ad0536e8320f045ff7ff358a57a5b0283fc/docs/readme-assets/evidence.png" alt="Recsys Harness 证据面板" width="100%">
+    </td>
+  </tr>
+</table>
 
-![Recsys Harness 工作台](https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@65453ad0536e8320f045ff7ff358a57a5b0283fc/docs/readme-assets/workbench.png)
-
-### 执行轨迹与判断依据
-
-![Recsys Harness 证据面板](https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@65453ad0536e8320f045ff7ff358a57a5b0283fc/docs/readme-assets/evidence.png)
-
-### 移动端
-
-![Recsys Harness 移动端](https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@65453ad0536e8320f045ff7ff358a57a5b0283fc/docs/readme-assets/mobile.png)
+<p align="center">
+  <strong>移动端</strong><br>
+  <sub>窄屏保留主流程，并把检查区收束为更适合触控的面板。</sub>
+</p>
+<p align="center">
+  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@65453ad0536e8320f045ff7ff358a57a5b0283fc/docs/readme-assets/mobile.png" alt="Recsys Harness 移动端" width="280">
+</p>
 
 产品界面只呈现业务语言：搜索体验、推荐体验、自主优化、全局体检、执行轨迹、判断依据、图片感知和联网研究。内部算法与可选后端不会暴露在客户界面。
 
