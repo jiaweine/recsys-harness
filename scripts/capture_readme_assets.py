@@ -53,7 +53,7 @@ def main() -> None:
         })
         page.wait_for_selector(".attachment-card", timeout=10_000)
         page.wait_for_timeout(650)
-        page.screenshot(path=str(ASSET_DIR / "product-workbench.png"))
+        page.screenshot(path=str(ASSET_DIR / "workbench.png"))
 
         if page.locator(".history-item").count() and page.locator(".history-item").first.evaluate("el => el.tagName") != "BUTTON":
             raise RuntimeError("History items must be keyboard-native buttons")
@@ -76,11 +76,11 @@ def main() -> None:
         page.wait_for_function("document.getElementById('stateText').textContent === '已完成'", timeout=30_000)
         page.wait_for_timeout(250)
         page.locator("#scrollArea").evaluate("el => { el.scrollTop = 0; }")
-        page.screenshot(path=str(ASSET_DIR / "product-run.png"))
+        page.screenshot(path=str(ASSET_DIR / "overview.png"))
 
         page.locator(".tab[data-tab='evidence']").click()
         page.wait_for_timeout(120)
-        page.screenshot(path=str(ASSET_DIR / "product-evidence.png"))
+        page.screenshot(path=str(ASSET_DIR / "evidence.png"))
 
         page.set_viewport_size({"width": 430, "height": 900})
         page.wait_for_timeout(150)
@@ -88,7 +88,7 @@ def main() -> None:
         page.wait_for_selector("#inspector.open", timeout=5_000)
         page.locator(".tab[data-tab='evidence']").click()
         page.wait_for_timeout(150)
-        page.screenshot(path=str(ASSET_DIR / "product-mobile.png"), full_page=False)
+        page.screenshot(path=str(ASSET_DIR / "mobile.png"), full_page=False)
 
         for selector in ("#sendBtn", "#attachBtn", "#networkBtn", "#newTaskBtn", "#inspectorToggle", "#inspectorClose"):
             locator = page.locator(selector)
@@ -104,7 +104,7 @@ def main() -> None:
             raise RuntimeError("Same-origin HTTP failures during product smoke test: " + " | ".join(bad_responses))
         browser.close()
 
-    for name in ("product-workbench.png", "product-run.png", "product-evidence.png", "product-mobile.png"):
+    for name in ("workbench.png", "overview.png", "evidence.png", "mobile.png"):
         path = ASSET_DIR / name
         if not path.exists() or path.stat().st_size < 10_000:
             raise RuntimeError(f"Screenshot capture failed: {path}")
