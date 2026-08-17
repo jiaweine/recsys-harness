@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import copy
 from contextlib import asynccontextmanager, suppress
+import hashlib
+import hmac
 import json
 import mimetypes
 import os
@@ -13,8 +16,8 @@ import uuid
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
@@ -64,6 +67,13 @@ ATTACHMENT_LOCK = threading.RLock()
 WORKER_ID = os.environ.get("LINGJING_WORKER_ID") or f"worker-{uuid.uuid4().hex[:10]}"
 RUN_LEASE_SECONDS = max(6.0, float(os.environ.get("LINGJING_RUN_LEASE_SECONDS", "30")))
 WORKSPACE_UPDATE_LEASE_SECONDS = max(30.0, float(os.environ.get("LINGJING_WORKSPACE_UPDATE_LEASE_SECONDS", "120")))
+APP_ENV = os.environ.get("LINGJING_ENV", "development").strip().lower()
+ACCESS_TOKEN = os.environ.get("LINGJING_ACCESS_TOKEN", "")
+AUTH_REQUIRED = APP_ENV == "production" or bool(ACCESS_TOKEN)
+SESSION_TTL_SECONDS = max(900, int(os.environ.get("LINGJING_SESSION_TTL_SECONDS", "43200")))
+COOKIE_SECURE = os.environ.get("LINGJING_COOKIE_SECURE", "1" if APP_ENV == "production" else "0") not in {"0", "false", "False"}
+TRUST_PROXY_IP = os.environ.get("LINGJING_TRUST_PROXY_IP", "0") in {"1", "true", "True"}
+SESSION_COOKIE = "lingjing_session"
 MAX_RUNS = 200
 MAX_IMPORT_BYTES = 8 * 1024 * 1024
 MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024
@@ -93,6 +103,8 @@ async def _lease_heartbeat_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    if APP_ENV == "production" and len(ACCESS_TOKEN) < 16:
+        raise RuntimeError("production 模式必须配置至少 16 个字符的 LINGJING_ACCESS_TOKEN")
     _gc_attachments()
     for _ in range(50):
         if _sync_workspace():
@@ -112,11 +124,86 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="灵境体验工作台",
-    docs_url="/docs" if os.environ.get("LINGJING_ENV") != "production" else None,
+    docs_url="/docs" if APP_ENV != "production" else None,
     redoc_url=None,
     lifespan=lifespan,
 )
 app.mount("/assets", StaticFiles(directory=FRONTEND), name="assets")
+
+
+def _client_key(request: Request) -> str:
+    if TRUST_PROXY_IP:
+        forwarded = (request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
+        if forwarded:
+            return forwarded[:80]
+    return str(request.client.host if request.client else "unknown")[:80]
+
+
+def _rate_rule(path: str, method: str) -> tuple[str, int, int] | None:
+    if path == "/api/auth/login" and method == "POST":
+        return ("login", 10, 300)
+    if path == "/api/attachments" and method == "POST":
+        return ("attachment", 30, 60)
+    if path.endswith("/messages") and method == "POST":
+        return ("task", 60, 60)
+    if path in {"/api/data/import", "/api/data/import-file"} and method == "POST":
+        return ("import", 12, 600)
+    return None
+
+
+def _session_value(now: float | None = None) -> str:
+    now = time.time() if now is None else float(now)
+    expires = int(now + SESSION_TTL_SECONDS)
+    payload = str(expires)
+    digest = hmac.new(ACCESS_TOKEN.encode("utf-8"), f"lingjing:{payload}".encode("utf-8"), hashlib.sha256).digest()
+    signature = base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+    return f"{payload}.{signature}"
+
+
+def _session_valid(request: Request, now: float | None = None) -> bool:
+    if not AUTH_REQUIRED:
+        return True
+    raw = request.cookies.get(SESSION_COOKIE, "")
+    try:
+        payload, signature = raw.split(".", 1)
+        expires = int(payload)
+    except (ValueError, TypeError):
+        return False
+    now = time.time() if now is None else float(now)
+    if expires <= now:
+        return False
+    expected = _session_value(expires - SESSION_TTL_SECONDS).split(".", 1)[1]
+    return hmac.compare_digest(signature, expected)
+
+
+@app.middleware("http")
+async def access_boundary(request: Request, call_next):
+    path = request.url.path
+    method = request.method.upper()
+    rule = _rate_rule(path, method)
+    if rule:
+        scope, limit, window = rule
+        if not store.consume_rate_limit(
+            f"{scope}:{_client_key(request)}", limit=limit, window_seconds=window
+        ):
+            return JSONResponse({"detail": "请求过于频繁，请稍后重试"}, status_code=429)
+    open_api = path in {"/api/auth/status", "/api/auth/login", "/api/auth/logout"}
+    if AUTH_REQUIRED and path.startswith("/api/") and not open_api and not _session_valid(request):
+        return JSONResponse({"detail": "需要访问授权"}, status_code=401)
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    if APP_ENV == "production":
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+        )
+    return response
+
+
+class LoginRequest(BaseModel):
+    access_key: str = Field(min_length=1, max_length=512)
 
 
 class ConversationCreate(BaseModel):
@@ -362,6 +449,39 @@ async def _perceive_with_cancel(
 @app.get("/")
 def index():
     return FileResponse(FRONTEND / "index.html")
+
+
+@app.get("/api/auth/status")
+def auth_status(request: Request):
+    return {
+        "required": AUTH_REQUIRED,
+        "authenticated": _session_valid(request),
+        "production": APP_ENV == "production",
+    }
+
+
+@app.post("/api/auth/login")
+def auth_login(req: LoginRequest, response: Response):
+    if not AUTH_REQUIRED:
+        return {"ok": True, "required": False}
+    if not hmac.compare_digest(req.access_key, ACCESS_TOKEN):
+        raise HTTPException(401, "访问密钥不正确")
+    response.set_cookie(
+        SESSION_COOKIE,
+        _session_value(),
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite="strict",
+        path="/",
+    )
+    return {"ok": True, "required": True}
+
+
+@app.post("/api/auth/logout")
+def auth_logout(response: Response):
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return {"ok": True}
 
 
 @app.get("/api/status")

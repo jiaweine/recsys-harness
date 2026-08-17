@@ -33,6 +33,19 @@
   font-synthesis:none;
 }
 *{box-sizing:border-box}
+
+.auth-gate{position:fixed;inset:0;z-index:300;display:grid;place-items:center;padding:24px;background:var(--canvas)}
+.auth-gate[hidden]{display:none}
+.auth-panel{width:min(420px,100%);padding:30px;border:1px solid var(--line-strong);border-radius:14px;background:var(--surface);box-shadow:var(--shadow)}
+.auth-panel>span{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--accent);text-transform:uppercase}
+.auth-panel h1{margin:9px 0 8px;font-family:var(--display);font-size:28px;letter-spacing:-.035em}
+.auth-panel p{margin:0 0 24px;color:var(--muted);font-size:12px;line-height:1.65}
+.auth-panel label{display:block;margin-bottom:7px;font-size:11px;font-weight:700}
+.auth-panel input{width:100%;height:46px;border:1px solid var(--line-strong);border-radius:9px;background:var(--canvas);color:var(--ink);padding:0 12px;outline:none}
+.auth-panel input:focus{border-color:var(--accent)}
+.auth-panel button{width:100%;min-height:46px;margin-top:12px;border:0;border-radius:9px;background:var(--ink);color:var(--surface);font-weight:760;cursor:pointer}
+.auth-panel button:disabled{opacity:.5}
+.auth-panel small{display:block;min-height:18px;margin-top:10px;color:var(--warm);font-size:10px}
 html,body{height:100%}
 body{margin:0;overflow:hidden;background:var(--canvas);color:var(--ink);font-size:14px;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 button,textarea,input{font:inherit}
@@ -61,7 +74,7 @@ body.ready .shell{animation:shellIn .34s var(--ease) forwards}
 .top-link:hover:after,.trace-toggle:hover:after{right:0}
 .top-link:hover,.trace-toggle:hover{color:var(--accent-strong)}
 .trace-toggle{display:none}
-.avatar{width:31px;height:31px;border:1px solid var(--line-strong);border-radius:50%;display:grid;place-items:center;font-size:10px;font-family:var(--mono);color:var(--accent-strong);background:var(--surface)}
+.avatar{width:31px;height:31px;padding:0;border:1px solid var(--line-strong);border-radius:50%;display:grid;place-items:center;font-size:10px;font-family:var(--mono);color:var(--accent-strong);background:var(--surface)}
 
 /* sidebar */
 .sidebar{grid-area:side;border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;padding:16px 14px 13px;background:var(--surface-2)}

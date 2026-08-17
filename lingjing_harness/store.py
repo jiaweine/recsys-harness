@@ -49,6 +49,12 @@ class WorkspaceStore:
           update_until real,
           updated_at real not null
         );
+        create table if not exists rate_limits(
+          scope_key text primary key,
+          window_start real not null,
+          count integer not null,
+          updated_at real not null
+        );
         """
         with self._lock, self._connect() as connection:
             connection.executescript(sql)
@@ -166,6 +172,45 @@ class WorkspaceStore:
             "payload": payload,
             "created_at": now,
         }
+
+    def consume_rate_limit(
+        self, scope_key: str, *, limit: int, window_seconds: float, now: float | None = None
+    ) -> bool:
+        now = time.time() if now is None else float(now)
+        limit = max(1, int(limit))
+        window_seconds = max(1.0, float(window_seconds))
+        with self._lock, self._connect() as connection:
+            connection.execute("begin immediate")
+            row = connection.execute(
+                "select window_start,count from rate_limits where scope_key=?", (scope_key,)
+            ).fetchone()
+            if not row or now - float(row["window_start"]) >= window_seconds:
+                connection.execute(
+                    """
+                    insert into rate_limits(scope_key,window_start,count,updated_at) values(?,?,1,?)
+                    on conflict(scope_key) do update set
+                      window_start=excluded.window_start,count=1,updated_at=excluded.updated_at
+                    """,
+                    (scope_key, now, now),
+                )
+                allowed = True
+            elif int(row["count"]) >= limit:
+                connection.execute(
+                    "update rate_limits set updated_at=? where scope_key=?", (now, scope_key)
+                )
+                allowed = False
+            else:
+                connection.execute(
+                    "update rate_limits set count=count+1,updated_at=? where scope_key=?",
+                    (now, scope_key),
+                )
+                allowed = True
+            if int(now) % 101 == 0:
+                connection.execute(
+                    "delete from rate_limits where updated_at<?", (now - 86400.0,)
+                )
+            connection.commit()
+        return allowed
 
     def ensure_workspace_revision(self, revision: str) -> str:
         revision = str(revision or "").strip()

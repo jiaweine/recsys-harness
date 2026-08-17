@@ -12,6 +12,7 @@ const state = {
   networkAvailable:false,
   visionReady:false,
   dragDepth:0,
+  authRequired:false,
 };
 
 const scenePrompt = {
@@ -28,10 +29,28 @@ function safeExternalUrl(value){try{const u=new URL(String(value));return ['http
 async function api(path,opt={}){
   const {headers={},...rest}=opt;
   const r=await fetch(path,{...rest,headers:{...(opt.body instanceof FormData?{}:{'Content-Type':'application/json'}),...headers}});
-  if(!r.ok){let t=await r.text();try{t=JSON.parse(t).detail||t}catch{}throw new Error(typeof t==='string'?t:JSON.stringify(t))}
+  if(!r.ok){
+    let t=await r.text();try{t=JSON.parse(t).detail||t}catch{}
+    const e=new Error(typeof t==='string'?t:JSON.stringify(t));e.status=r.status;
+    if(r.status===401&&state.authRequired){showAuthGate('会话已失效，请重新进入工作区')}
+    throw e;
+  }
   const type=r.headers.get('content-type')||'';
   return type.includes('application/json')?r.json():r.text();
 }
+
+function showAuthGate(message=''){const gate=$('authGate');gate.hidden=false;$('authError').textContent=message;$('authKey').value='';setTimeout(()=>$('authKey').focus(),0)}
+function hideAuthGate(){$('authGate').hidden=true;$('authError').textContent=''}
+async function checkAuth(){const r=await fetch('/api/auth/status');if(!r.ok)throw new Error('无法检查工作区访问状态');return r.json()}
+async function login(e){
+  e.preventDefault();const button=$('authSubmit');button.disabled=true;$('authError').textContent='';
+  try{
+    const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_key:$('authKey').value})});
+    if(!r.ok){let t=await r.text();try{t=JSON.parse(t).detail||t}catch{}throw new Error(typeof t==='string'?t:'无法进入工作区')}
+    location.reload();
+  }catch(err){$('authError').textContent=err.message;button.disabled=false;$('authKey').focus()}
+}
+async function logout(){try{await fetch('/api/auth/logout',{method:'POST'});}finally{location.reload()}}
 
 function toast(t){const el=$('toast');el.textContent=t;el.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>el.classList.remove('show'),2300)}
 function md(text){let s=esc(text||'');s=s.replace(/^###\s+(.+)$/gm,'<h3>$1</h3>');const lines=s.split('\n'),out=[];let list=false;for(const line of lines){if(line.startsWith('- ')){if(!list){out.push('<ul>');list=true}out.push(`<li>${line.slice(2)}</li>`)}else{if(list){out.push('</ul>');list=false}if(line.trim())out.push(`<p>${line}</p>`)}}if(list)out.push('</ul>');return out.join('')}
@@ -121,6 +140,7 @@ async function pollRun(id,conversationId){
     try{
       r=await api(`/api/runs/${id}`);failures=0;reconnectNotified=false;
     }catch(e){
+      if(e.status===401)return;
       failures+=1;const isCurrent=state.conversation?.id===conversationId;
       if(isCurrent){$('taskState').textContent='连接中断 · 正在重连';$('runDetail').textContent='任务仍在后台执行，正在重新连接…'}
       if(!reconnectNotified){toast('连接暂时中断，任务仍在后台执行');reconnectNotified=true}
@@ -191,6 +211,7 @@ function openInspector(){const el=$('inspector');el.classList.add('open');$('ins
 function closeInspector(){const el=$('inspector');el.classList.remove('open');$('inspectorToggle').setAttribute('aria-expanded','false')}
 
 function bind(){
+  $('authForm').onsubmit=login;$('lockBtn').onclick=logout;
   document.querySelectorAll('.scene').forEach(b=>b.onclick=()=>startDraft(b.dataset.scene));
   document.querySelectorAll('[data-prompt]').forEach(b=>b.onclick=()=>{$('input').value=b.dataset.prompt;autoSize();$('input').focus()});
   document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>{const active=x===b;x.classList.toggle('active',active);x.setAttribute('aria-selected',String(active))});document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));$(`panel-${b.dataset.tab}`).classList.add('active')});
@@ -211,6 +232,9 @@ function bind(){
 }
 
 async function boot(){
-  bind();autoSize();renderAttachments();$('copyBtn').disabled=true;await loadStatus();const rows=await loadHistory();if(rows.length)await openConversation(rows[0].id);else startDraft('search');document.body.classList.add('ready');
+  bind();autoSize();renderAttachments();$('copyBtn').disabled=true;
+  const auth=await checkAuth();state.authRequired=!!auth.required;$('lockBtn').hidden=!auth.required;
+  if(auth.required&&!auth.authenticated){document.body.classList.add('ready');showAuthGate();return}
+  hideAuthGate();await loadStatus();const rows=await loadHistory();if(rows.length)await openConversation(rows[0].id);else startDraft('search');document.body.classList.add('ready');
 }
 boot().catch(e=>{document.body.classList.add('ready');toast(e.message)});

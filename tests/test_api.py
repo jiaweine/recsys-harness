@@ -320,3 +320,24 @@ def test_worker_sync_reloads_catalog_after_shared_revision_changes():
         assert api_module.store.commit_workspace_revision(restore_owner, original_revision)
         assert api_module._sync_workspace() is True
         assert api_module.CATALOG_REVISION == original_revision
+
+
+def test_protected_mode_uses_signed_http_only_session(monkeypatch):
+    monkeypatch.setattr(api_module, "AUTH_REQUIRED", True)
+    monkeypatch.setattr(api_module, "ACCESS_TOKEN", "test-secret-with-enough-length")
+    monkeypatch.setattr(api_module, "COOKIE_SECURE", False)
+    with TestClient(app) as c:
+        before = c.get('/api/auth/status')
+        assert before.status_code == 200
+        assert before.json()['required'] is True
+        assert before.json()['authenticated'] is False
+        assert c.get('/api/status').status_code == 401
+        assert c.post('/api/auth/login', json={'access_key':'wrong'}).status_code == 401
+        login = c.post('/api/auth/login', json={'access_key':'test-secret-with-enough-length'})
+        assert login.status_code == 200
+        cookie = login.headers.get('set-cookie','')
+        assert 'HttpOnly' in cookie and 'SameSite=strict' in cookie
+        assert c.get('/api/status').status_code == 200
+        logout = c.post('/api/auth/logout', json={})
+        assert logout.status_code == 200
+        assert c.get('/api/status').status_code == 401

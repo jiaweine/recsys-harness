@@ -106,3 +106,13 @@ def test_active_run_blocks_distributed_workspace_update(tmp_path):
     snapshot = {"run_id":"active","conversation_id":conversation["id"],"goal":"active","status":"running","events":[],"created_at":now,"updated_at":now}
     assert one.reserve_run("active", conversation["id"], "active", snapshot, owner_id="worker-one", lease_seconds=30)
     assert two.begin_workspace_update("worker-two", lease_seconds=30) is False
+
+
+def test_rate_limit_counter_is_shared_across_store_instances(tmp_path):
+    path = tmp_path / "rate-limit.db"
+    one = WorkspaceStore(path)
+    two = WorkspaceStore(path)
+    assert one.consume_rate_limit("login:client", limit=2, window_seconds=60, now=100) is True
+    assert two.consume_rate_limit("login:client", limit=2, window_seconds=60, now=101) is True
+    assert one.consume_rate_limit("login:client", limit=2, window_seconds=60, now=102) is False
+    assert two.consume_rate_limit("login:client", limit=2, window_seconds=60, now=161) is True

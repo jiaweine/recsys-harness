@@ -9,6 +9,17 @@
   <link rel="stylesheet" href="/assets/app.css" />
 </head>
 <body>
+<div class="auth-gate" id="authGate" hidden>
+  <form class="auth-panel" id="authForm" autocomplete="off">
+    <span>受保护工作区</span>
+    <h1>进入灵境</h1>
+    <p>输入部署时配置的访问密钥。凭据只用于建立当前浏览器的安全会话。</p>
+    <label for="authKey">访问密钥</label>
+    <input id="authKey" type="password" autocomplete="current-password" maxlength="512" required />
+    <button type="submit" id="authSubmit">进入工作区</button>
+    <small id="authError" aria-live="polite"></small>
+  </form>
+</div>
 <div class="shell">
   <header class="topbar">
     <div class="brand" aria-label="灵境搜推体验工作台">
@@ -24,7 +35,7 @@
     <div class="top-actions">
       <button class="top-link" id="importBtn">导入工作区</button>
       <button class="trace-toggle" id="inspectorToggle" aria-expanded="false" aria-controls="inspector">查看证据</button>
-      <div class="avatar" aria-hidden="true">LJ</div>
+      <button class="avatar" id="lockBtn" type="button" aria-label="锁定工作区" hidden>LJ</button>
     </div>
   </header>
 
