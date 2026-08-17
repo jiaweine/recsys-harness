@@ -185,3 +185,13 @@ def test_fork_reuses_features_but_picks_up_new_active_strategy(tmp_path):
     assert next_run.tools.recommend.config == child.tools.recommend.config
     assert next_run.tools.recommend._co is base.tools.recommend._co
     assert next_run.tools.search._vectors is base.tools.search._vectors
+
+
+def test_small_evolution_without_holdout_cannot_be_trusted():
+    from lingjing_harness.algorithms import SearchEngine, evolve_search
+    catalog = build_sample_catalog()
+    catalog.query_labels = catalog.query_labels[:3]
+    result = evolve_search(catalog, SearchEngine(catalog))
+    assert result["evaluation_ready"] is True
+    assert result["validation"]["holdout"]["samples"] == 0
+    assert result["trusted"] is False

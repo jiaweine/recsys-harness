@@ -330,7 +330,7 @@ def evolve_search(
         and (not holdout or (holdout_quality_delta >= -0.005 and holdout_recall_delta >= -0.02))
         and (not holdout_robust or holdout_robust["worst_delta"] >= -0.45)
     )
-    trusted = safe and discovery_delta >= 0.001 and (quality_delta > 0.0005 or recall_delta > 0.002)
+    trusted = safe and bool(holdout_labels) and discovery_delta >= 0.001 and (quality_delta > 0.0005 or recall_delta > 0.002)
     return {
         "reference": reference,
         "candidate": trial,
@@ -347,6 +347,7 @@ def evolve_search(
             "discovery": {"samples": len(discovery_labels), "objective_delta": round(discovery_delta, 5)},
             "holdout": {
                 "samples": len(holdout_labels),
+                "independent": bool(holdout_labels),
                 "quality_delta": round(holdout_quality_delta, 4),
                 "recall_delta": round(holdout_recall_delta, 4),
                 "robustness": holdout_robust,
@@ -428,7 +429,7 @@ def evolve_recommend(
         and (not holdout or (holdout_q_delta >= -0.008 and holdout_cov_delta >= -0.06))
         and (not holdout_robust or holdout_robust["worst_delta"] >= -0.35)
     )
-    trusted = safe and discovery_delta >= 0.001 and (q_delta > 0.0005 or fresh_delta > 0.002 or div_delta > 0.002)
+    trusted = safe and bool(holdout_users) and discovery_delta >= 0.001 and (q_delta > 0.0005 or fresh_delta > 0.002 or div_delta > 0.002)
     return {
         "reference": reference,
         "candidate": trial,
@@ -450,6 +451,7 @@ def evolve_recommend(
             "discovery": {"samples": len(discovery_users), "objective_delta": round(discovery_delta, 5)},
             "holdout": {
                 "samples": len(holdout_users),
+                "independent": bool(holdout_users),
                 "quality_delta": round(holdout_q_delta, 4),
                 "coverage_delta": round(holdout_cov_delta, 4),
                 "robustness": holdout_robust,

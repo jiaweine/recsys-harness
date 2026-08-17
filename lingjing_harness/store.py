@@ -91,7 +91,7 @@ class WorkspaceStore:
     def recoverable_runs(self, limit: int = 20) -> list[dict[str, Any]]:
         with self._connect() as c:
             rows = c.execute(
-                "select run_id,conversation_id,goal,status,snapshot from runs where status in ('running','interrupted') order by updated_at desc limit ?",
+                "select run_id,conversation_id,goal,status,snapshot from runs where status in ('running','interrupted','cancel_requested') order by updated_at desc limit ?",
                 (limit,),
             ).fetchall()
         out = []

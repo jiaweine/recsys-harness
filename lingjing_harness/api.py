@@ -56,6 +56,8 @@ def _persist_catalog(value: Catalog) -> None:
 
 catalog = _load_catalog()
 harness = AgentHarness(catalog, memory=memory)
+WORKSPACE_LOCK = threading.RLock()
+CATALOG_REVISION = catalog_fingerprint(catalog)
 RUNS: dict[str, dict[str, Any]] = {}
 RUN_LOCK = threading.RLock()
 MAX_RUNS = 200
@@ -342,6 +344,7 @@ async def _execute(
     attachment_ids: list[str] | None = None,
     allow_network: bool = False,
     resume: dict[str, Any] | None = None,
+    catalog_revision: str | None = None,
 ) -> None:
     loop = asyncio.get_running_loop()
 
@@ -409,6 +412,12 @@ async def _execute(
         )
         result["job_id"] = run_id
         result["attachments"] = observed_attachments
+        with WORKSPACE_LOCK:
+            current_revision = CATALOG_REVISION
+        expected_revision = catalog_revision or current_revision
+        if expected_revision != current_revision:
+            raise RuntimeError("工作区数据已更新，本次旧数据执行结果未写入当前工作区")
+        result["catalog_revision"] = expected_revision
         message = store.add_message(cid, "assistant", result["answer"], result)
         with RUN_LOCK:
             row = RUNS.get(run_id)
@@ -445,9 +454,29 @@ async def _recover_on_startup() -> None:
         cid = saved["conversation_id"]
         text = saved["goal"]
         snapshot = saved.get("snapshot") or {}
-        snapshot.update({"run_id": run_id, "conversation_id": cid, "goal": text, "status": "running", "updated_at": time.time()})
         snapshot.setdefault("events", [])
         snapshot.setdefault("result", None)
+        if saved.get("status") == "cancel_requested":
+            snapshot.update({"run_id": run_id, "conversation_id": cid, "goal": text, "status": "cancelled", "updated_at": time.time()})
+            snapshot["events"].append({
+                "phase": "cancel", "title": "已停止本次执行",
+                "detail": "服务恢复时确认了停止请求，任务没有重新执行",
+                "progress": int(snapshot["events"][-1].get("progress", 0)) if snapshot["events"] else 0,
+                "payload": {"recovered": True}, "created_at": time.time(),
+            })
+            store.save_run(run_id, cid, text, "cancelled", snapshot)
+            continue
+        with WORKSPACE_LOCK:
+            current_revision = CATALOG_REVISION
+        saved_revision = snapshot.get("catalog_revision") or current_revision
+        if saved_revision != current_revision:
+            snapshot.update({
+                "run_id": run_id, "conversation_id": cid, "goal": text, "status": "failed",
+                "error": "工作区数据已变化，未恢复旧数据任务", "updated_at": time.time(),
+            })
+            store.save_run(run_id, cid, text, "failed", snapshot)
+            continue
+        snapshot.update({"run_id": run_id, "conversation_id": cid, "goal": text, "status": "running", "catalog_revision": saved_revision, "updated_at": time.time()})
         with RUN_LOCK:
             RUNS[run_id] = snapshot
             _persist_run(snapshot)
@@ -460,6 +489,7 @@ async def _recover_on_startup() -> None:
                 attachment_ids=list(snapshot.get("attachment_ids") or []),
                 allow_network=bool(snapshot.get("allow_network")),
                 resume=snapshot.get("checkpoint"),
+                catalog_revision=saved_revision,
             )
         )
 
@@ -474,7 +504,9 @@ async def add_message(cid: str, req: ChatRequest):
     attachment_rows = _resolve_attachments(req.attachments)
     public_attachments = [_public_attachment(row) for row in attachment_rows]
     run_id = f"job-{uuid.uuid4().hex[:10]}"
-    runner = harness.fork()
+    with WORKSPACE_LOCK:
+        runner = harness.fork()
+        revision = CATALOG_REVISION
     now = time.time()
     row = {
         "run_id": run_id,
@@ -486,6 +518,7 @@ async def add_message(cid: str, req: ChatRequest):
         "attachment_ids": list(req.attachments),
         "attachments": public_attachments,
         "allow_network": req.allow_network,
+        "catalog_revision": revision,
         "created_at": now,
         "updated_at": now,
     }
@@ -509,6 +542,7 @@ async def add_message(cid: str, req: ChatRequest):
             runner,
             attachment_ids=list(req.attachments),
             allow_network=req.allow_network,
+            catalog_revision=revision,
         )
     )
     return {"status": "accepted", "run_id": run_id, "message": user}
@@ -553,20 +587,24 @@ def get_run(run_id: str):
 
 @app.post("/api/data/import")
 def import_data(req: ImportPayload):
-    global catalog, harness
+    global catalog, harness, CATALOG_REVISION
     try:
         new = Catalog.from_payload(req.data, name=req.name)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    catalog = new
-    _persist_catalog(catalog)
-    harness = AgentHarness(catalog, memory=memory)
-    return {"ok": True, "data": catalog.summary()}
+    with WORKSPACE_LOCK, RUN_LOCK:
+        if any(row.get("status") in ACTIVE_RUN_STATUSES for row in RUNS.values()):
+            raise HTTPException(409, "仍有任务在执行，请停止或等待完成后再更换工作区数据")
+        _persist_catalog(new)
+        catalog = new
+        harness = AgentHarness(catalog, memory=memory)
+        CATALOG_REVISION = catalog_fingerprint(catalog)
+    return {"ok": True, "data": catalog.summary(), "catalog_revision": CATALOG_REVISION}
 
 
 @app.post("/api/data/import-file")
 async def import_file(file: UploadFile = File(...)):
-    global catalog, harness
+    global catalog, harness, CATALOG_REVISION
     raw = await file.read(MAX_IMPORT_BYTES + 1)
     if len(raw) > MAX_IMPORT_BYTES:
         raise HTTPException(413, "文件不能超过 8MB")
@@ -578,7 +616,11 @@ async def import_file(file: UploadFile = File(...)):
         new = Catalog.from_payload(payload, name=file.filename or "导入数据")
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    catalog = new
-    _persist_catalog(catalog)
-    harness = AgentHarness(catalog, memory=memory)
-    return {"ok": True, "data": catalog.summary()}
+    with WORKSPACE_LOCK, RUN_LOCK:
+        if any(row.get("status") in ACTIVE_RUN_STATUSES for row in RUNS.values()):
+            raise HTTPException(409, "仍有任务在执行，请停止或等待完成后再更换工作区数据")
+        _persist_catalog(new)
+        catalog = new
+        harness = AgentHarness(catalog, memory=memory)
+        CATALOG_REVISION = catalog_fingerprint(catalog)
+    return {"ok": True, "data": catalog.summary(), "catalog_revision": CATALOG_REVISION}

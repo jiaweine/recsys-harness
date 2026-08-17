@@ -197,3 +197,37 @@ def test_running_task_can_be_stopped_and_conversation_becomes_available(monkeypa
         again = c.post(f"/api/conversations/{conv['id']}/messages", json={"content": "重新检查"})
         assert again.status_code == 200
         c.post(f"/api/runs/{again.json()['run_id']}/cancel", json={})
+
+
+def test_cancel_requested_run_is_finalized_on_restart():
+    run_id = "job-cancel-recovery"
+    conv = api_module.store.create_conversation("cancel recovery", "search")
+    snapshot = {
+        "run_id": run_id, "conversation_id": conv["id"], "goal": "停止这个任务",
+        "status": "cancel_requested", "events": [], "created_at": time.time(), "updated_at": time.time(),
+    }
+    api_module.store.save_run(run_id, conv["id"], snapshot["goal"], "cancel_requested", snapshot)
+    with api_module.RUN_LOCK:
+        api_module.RUNS.pop(run_id, None)
+    asyncio.run(api_module._recover_on_startup())
+    saved = api_module.store.get_run(run_id)
+    assert saved["status"] == "cancelled"
+    assert saved["events"][-1]["phase"] == "cancel"
+    assert saved["events"][-1]["payload"]["recovered"] is True
+
+
+def test_workspace_import_is_blocked_while_a_run_is_active():
+    c = TestClient(app)
+    run_id = "job-import-guard"
+    with api_module.RUN_LOCK:
+        api_module.RUNS[run_id] = {
+            "run_id": run_id, "conversation_id": "guard", "goal": "guard",
+            "status": "running", "events": [], "created_at": time.time(), "updated_at": time.time(),
+        }
+    try:
+        blocked = c.post('/api/data/import', json={"name": "replacement", "data": api_module.catalog.to_payload()})
+        assert blocked.status_code == 409
+        assert "仍有任务在执行" in blocked.json()["detail"]
+    finally:
+        with api_module.RUN_LOCK:
+            api_module.RUNS.pop(run_id, None)
