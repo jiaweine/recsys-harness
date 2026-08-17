@@ -159,3 +159,41 @@ def test_status_and_capabilities_expose_autonomous_runtime():
     assert body["autonomy"]["checkpoint_resume"] is True
     assert body["multimodal"]["attachments"] is True
     assert any(tool["risk"] == "adaptive" for tool in body["tools"])
+
+
+def test_running_task_can_be_stopped_and_conversation_becomes_available(monkeypatch):
+    from lingjing_harness.runtime import RunCancelled
+
+    def cancellable_run(self, text, *, should_stop=None, **kwargs):
+        deadline = time.time() + 1.0
+        while time.time() < deadline:
+            if should_stop and should_stop():
+                raise RunCancelled("stopped")
+            time.sleep(.01)
+        raise AssertionError("cancel signal was not delivered")
+
+    monkeypatch.setattr(api_module.AgentHarness, "run", cancellable_run)
+    with TestClient(app) as c:
+        conv = c.post('/api/conversations', json={"scene": "search", "title": "cancel"}).json()
+        accepted = c.post(f"/api/conversations/{conv['id']}/messages", json={"content": "检查搜索体验"})
+        assert accepted.status_code == 200
+        run_id = accepted.json()["run_id"]
+
+        stopped = c.post(f"/api/runs/{run_id}/cancel", json={})
+        assert stopped.status_code == 200
+        assert stopped.json()["status"] in {"cancel_requested", "cancelled"}
+
+        row = None
+        for _ in range(120):
+            row = c.get(f"/api/runs/{run_id}").json()
+            if row["status"] == "cancelled":
+                break
+            time.sleep(.01)
+        assert row and row["status"] == "cancelled"
+        assert row["events"][-1]["phase"] == "cancel"
+
+        conversation = c.get(f"/api/conversations/{conv['id']}").json()
+        assert conversation["active_run"] is None
+        again = c.post(f"/api/conversations/{conv['id']}/messages", json={"content": "重新检查"})
+        assert again.status_code == 200
+        c.post(f"/api/runs/{again.json()['run_id']}/cancel", json={})

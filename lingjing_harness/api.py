@@ -23,7 +23,7 @@ import frontend as frontend_package
 from .domain import Catalog
 from .sample_data import build_sample_catalog
 from .store import WorkspaceStore
-from .runtime import AgentHarness, AgentMemory, catalog_fingerprint
+from .runtime import AgentHarness, AgentMemory, RunCancelled, catalog_fingerprint
 from .runtime.perception import PerceptionEngine
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -61,6 +61,7 @@ RUN_LOCK = threading.RLock()
 MAX_RUNS = 200
 MAX_IMPORT_BYTES = 8 * 1024 * 1024
 MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024
+ACTIVE_RUN_STATUSES = {"running", "cancel_requested"}
 ATTACHMENT_ID = re.compile(r"^att-[a-f0-9]{12}$")
 ALLOWED_IMAGE_MIMES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 ALLOWED_DOCUMENT_MIMES = {
@@ -136,7 +137,7 @@ def _prune_runs_locked() -> None:
     if len(RUNS) < MAX_RUNS:
         return
     removable = sorted(
-        (row for row in RUNS.values() if row.get("status") in {"completed", "failed"}),
+        (row for row in RUNS.values() if row.get("status") in {"completed", "failed", "cancelled"}),
         key=lambda row: row.get("updated_at", 0.0),
     )
     for row in removable[: max(1, len(RUNS) - MAX_RUNS + 1)]:
@@ -305,7 +306,7 @@ def get_attachment(attachment_id: str):
 def conversations():
     rows = store.list_conversations()
     with RUN_LOCK:
-        active = {row.get("conversation_id") for row in RUNS.values() if row.get("status") == "running"}
+        active = {row.get("conversation_id") for row in RUNS.values() if row.get("status") in ACTIVE_RUN_STATUSES}
     return [{**row, "active": row["id"] in active} for row in rows]
 
 
@@ -322,7 +323,7 @@ def get_conversation(cid: str):
         raise HTTPException(404, "任务不存在") from exc
     with RUN_LOCK:
         active = next(
-            (copy.deepcopy(row) for row in RUNS.values() if row.get("conversation_id") == cid and row.get("status") == "running"),
+            (copy.deepcopy(row) for row in RUNS.values() if row.get("conversation_id") == cid and row.get("status") in ACTIVE_RUN_STATUSES),
             None,
         )
     if active:
@@ -388,6 +389,11 @@ async def _execute(
             row["updated_at"] = time.time()
             _persist_run(row)
 
+    def should_stop() -> bool:
+        with RUN_LOCK:
+            row = RUNS.get(run_id)
+            return bool(row and row.get("status") == "cancel_requested")
+
     try:
         result = await loop.run_in_executor(
             None,
@@ -398,6 +404,7 @@ async def _execute(
                 sink=sink,
                 checkpoint_sink=checkpoint,
                 resume=resume,
+                should_stop=should_stop,
             ),
         )
         result["job_id"] = run_id
@@ -407,6 +414,22 @@ async def _execute(
             row = RUNS.get(run_id)
             if row is not None:
                 row.update({"status": "completed", "result": result, "message": message, "updated_at": time.time()})
+                _persist_run(row)
+    except RunCancelled:
+        with RUN_LOCK:
+            row = RUNS.get(run_id)
+            if row is not None:
+                events = list(row.get("events") or [])
+                progress = int(events[-1].get("progress", 0)) if events else 0
+                events.append({
+                    "phase": "cancel",
+                    "title": "已停止本次执行",
+                    "detail": "已在当前动作结束后停止，不再扩展新的工具调用",
+                    "progress": progress,
+                    "payload": {},
+                    "created_at": time.time(),
+                })
+                row.update({"status": "cancelled", "events": events, "updated_at": time.time()})
                 _persist_run(row)
     except Exception as exc:
         with RUN_LOCK:
@@ -467,7 +490,7 @@ async def add_message(cid: str, req: ChatRequest):
         "updated_at": now,
     }
     with RUN_LOCK:
-        if any(existing.get("conversation_id") == cid and existing.get("status") == "running" for existing in RUNS.values()):
+        if any(existing.get("conversation_id") == cid and existing.get("status") in ACTIVE_RUN_STATUSES for existing in RUNS.values()):
             raise HTTPException(409, "当前任务仍在执行，请等待完成或切换到另一个任务")
         user = store.add_message(
             cid,
@@ -489,6 +512,30 @@ async def add_message(cid: str, req: ChatRequest):
         )
     )
     return {"status": "accepted", "run_id": run_id, "message": user}
+
+
+@app.post("/api/runs/{run_id}/cancel")
+def cancel_run(run_id: str):
+    with RUN_LOCK:
+        row = RUNS.get(run_id)
+        if row is None:
+            try:
+                saved = store.get_run(run_id)
+            except KeyError as exc:
+                raise HTTPException(404, "执行任务不存在") from exc
+            status = saved.get("status")
+            if status == "cancelled":
+                return {"ok": True, "status": "cancelled"}
+            raise HTTPException(409, "该执行已经结束，无法停止")
+        status = row.get("status")
+        if status == "cancelled":
+            return {"ok": True, "status": "cancelled"}
+        if status not in ACTIVE_RUN_STATUSES:
+            raise HTTPException(409, "该执行已经结束，无法停止")
+        row["status"] = "cancel_requested"
+        row["updated_at"] = time.time()
+        _persist_run(row)
+    return {"ok": True, "status": "cancel_requested"}
 
 
 @app.get("/api/runs/{run_id}")

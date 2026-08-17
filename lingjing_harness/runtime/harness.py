@@ -14,6 +14,12 @@ from .verifier import ResultVerifier
 
 EventSink = Callable[[dict[str, Any]], None]
 CheckpointSink = Callable[[dict[str, Any]], None]
+StopSignal = Callable[[], bool]
+
+
+class RunCancelled(RuntimeError):
+    """Raised between tool actions when a durable run receives a stop request."""
+
 
 
 @dataclass(slots=True)
@@ -98,6 +104,7 @@ class AgentHarness:
         sink: EventSink | None = None,
         checkpoint_sink: CheckpointSink | None = None,
         resume: dict[str, Any] | None = None,
+        should_stop: StopSignal | None = None,
     ) -> dict[str, Any]:
         started = time.monotonic()
         plan = self.policy.plan(text, self.catalog, context=context, allow_network=allow_network)
@@ -142,6 +149,8 @@ class AgentHarness:
                 )
 
         while state.cycle < self.budget.max_tools:
+            if should_stop and should_stop():
+                raise RunCancelled("本次执行已由用户停止")
             if time.monotonic() - started > self.budget.max_seconds:
                 state.findings.append("本次自主执行达到时间预算，已停止继续扩展动作")
                 break
@@ -219,6 +228,8 @@ class AgentHarness:
             state.actions.append(action)
             if checkpoint_sink:
                 checkpoint_sink(self._checkpoint(run_id, plan, state, events))
+            if should_stop and should_stop():
+                raise RunCancelled("本次执行已由用户停止")
 
         self._emit(events, sink, "verify", "独立核对结论", "检查证据完整性、执行异常、策略门槛和用户约束", 92)
         state.findings = list(dict.fromkeys(item for item in state.findings if item))

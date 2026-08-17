@@ -298,7 +298,7 @@ export LINGJING_WEB_SEARCH_KEY=...
 
 Adaptive action 使用稳定 invocation id；如果“策略记忆已经写入，但进程恰好在 checkpoint 前中断”，恢复时会复用第一次结果，而不是把一次学习重复记成多次胜利。
 
-同一个 conversation 同时只允许一个 active run，保证消息顺序稳定；**不同 conversation 可以并行执行**，因此长任务不会锁死整个工作台。
+同一个 conversation 同时只允许一个 active run，保证消息顺序稳定；**不同 conversation 可以并行执行**。运行中的任务支持用户主动停止：当前动作安全结束后不再扩展新的工具调用，因此长任务既不会锁死整个工作台，也不会剥夺用户控制权。
 
 ---
 

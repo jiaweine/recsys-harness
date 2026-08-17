@@ -38,7 +38,7 @@ function md(text){let s=esc(text||'');s=s.replace(/^###\s+(.+)$/gm,'<h3>$1</h3>'
 function autoSize(){const el=$('input');el.style.height='auto';el.style.height=Math.min(150,Math.max(58,el.scrollHeight))+'px'}
 function scrollBottom(){requestAnimationFrame(()=>{$('scrollArea').scrollTop=$('scrollArea').scrollHeight})}
 function currentBusy(){return !!(state.conversation?.id&&state.activeRuns.has(state.conversation.id))}
-function updateSendState(){const busy=currentBusy();$('sendBtn').disabled=busy||state.uploading>0;$('taskState').textContent=busy?'正在自主执行':state.conversation?'可继续追问':'等待输入'}
+function updateSendState(){const busy=currentBusy();$('sendBtn').disabled=busy||state.uploading>0;$('runStopBtn').disabled=!busy;$('taskState').textContent=busy?'正在自主执行':state.conversation?'可继续追问':'等待输入'}
 function updateSceneNav(){document.querySelectorAll('.scene').forEach(x=>x.classList.toggle('active',x.dataset.scene===state.scene))}
 function updateNetworkButton(){const b=$('networkBtn');b.disabled=!state.networkAvailable;b.setAttribute('aria-pressed',String(state.network&&state.networkAvailable));b.title=state.networkAvailable?'允许本次任务检索公开网络资料':'当前没有配置联网研究服务'}
 
@@ -63,7 +63,7 @@ async function loadHistory(){
 }
 
 function clearResult(){
-  state.lastResult=null;state.seenEvents=0;$('stateText').textContent='等待开始';$('running').hidden=true;
+  state.lastResult=null;state.seenEvents=0;$('stateText').textContent='等待开始';$('running').hidden=true;$('copyBtn').disabled=true;
   $('timeline').innerHTML='<div class="empty">开始一个任务后，这里会记录系统实际做过的每一步。</div>';
   $('evidenceList').innerHTML='<div class="empty">还没有执行结果。</div>';
   $('suggestions').innerHTML='<button>先做一次全局体检</button><button>检查一个具体搜索</button>';
@@ -97,17 +97,17 @@ function messageContextHtml(m){
   return `${chips.length?`<div class="msg-meta">${chips.join('')}</div>`:''}${files}`;
 }
 function userMessageHtml(m){return `<div class="msg user"><div class="bubble"><div class="bubble-text">${esc(m.content)}</div>${messageContextHtml(m)}</div></div>`}
-function assistantMessageHtml(m){return `<div class="msg assistant"><div class="bubble"><div class="assistant-label"><b>灵境</b><span>EXECUTION COMPLETE</span></div><div class="answer">${md(m.content)}</div></div></div>`}
+function assistantMessageHtml(m){return `<div class="msg assistant"><div class="bubble"><div class="assistant-label"><b>灵境</b><span>执行完成</span></div><div class="answer">${md(m.content)}</div></div></div>`}
 function renderMessages(rows){$('welcome').hidden=rows.length>0;$('messageList').innerHTML=rows.map(m=>m.role==='user'?userMessageHtml(m):assistantMessageHtml(m)).join('');scrollBottom()}
 function appendUser(text,payload){$('welcome').hidden=true;$('messageList').insertAdjacentHTML('beforeend',userMessageHtml({content:text,payload}));scrollBottom()}
 function appendAssistant(msg){$('messageList').insertAdjacentHTML('beforeend',assistantMessageHtml(msg));scrollBottom()}
 
 function renderEvent(ev,index,total){const done=ev.progress>=100||index<total-1;return `<div class="timeline-row ${done?'done':''}"><span>${done?'✓':String(index+1).padStart(2,'0')}</span><div><b>${esc(ev.title)}</b><small>${esc(ev.detail)}</small></div></div>`}
-function renderRunning(events=[]){if(!events.length)return;const ev=events.at(-1);$('running').hidden=false;$('runTitle').textContent=ev.title;$('runDetail').textContent=ev.detail;$('runPercent').textContent=`${ev.progress}%`;$('runBar').style.width=`${ev.progress}%`;$('stateText').textContent=ev.progress>=100?'已完成':'正在执行';$('taskState').textContent=ev.progress>=100?'已完成':'正在自主执行';$('timeline').innerHTML=events.map((x,i)=>renderEvent(x,i,events.length)).join('');state.seenEvents=events.length;scrollBottom()}
+function renderRunning(events=[]){if(!events.length)return;const ev=events.at(-1);$('running').hidden=false;$('runStopBtn').disabled=false;$('runStopBtn').textContent='停止';$('runTitle').textContent=ev.title;$('runDetail').textContent=ev.detail;$('runPercent').textContent=`${ev.progress}%`;$('runBar').style.width=`${ev.progress}%`;$('stateText').textContent=ev.progress>=100?'已完成':'正在执行';$('taskState').textContent=ev.progress>=100?'已完成':'正在自主执行';$('timeline').innerHTML=events.map((x,i)=>renderEvent(x,i,events.length)).join('');state.seenEvents=events.length;scrollBottom()}
 function evidenceHtml(x,i){const url=safeExternalUrl(x.url);return `<div class="evidence-item"><span>${x.kind==='external'?'公开来源':'依据'} ${String(i+1).padStart(2,'0')}</span><b>${esc(x.title)}</b><small>${esc(x.detail||'已在本次执行中复核')}</small>${url?`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">打开公开来源 ↗</a>`:''}</div>`}
 function bindSuggestionButtons(){$('suggestions').querySelectorAll('button').forEach(b=>b.onclick=()=>{$('input').value=b.textContent;autoSize();$('input').focus()})}
 function renderResult(r){
-  if(!r)return clearResult();state.lastResult=r;$('running').hidden=true;$('stateText').textContent='已完成';$('taskState').textContent='已完成';
+  if(!r)return clearResult();state.lastResult=r;$('running').hidden=true;$('copyBtn').disabled=false;$('stateText').textContent='已完成';$('taskState').textContent='已完成';
   const events=r.events||[];$('timeline').innerHTML=events.length?events.map((ev,i)=>renderEvent({...ev,progress:100},i,events.length)).join(''):'<div class="empty">本次没有执行记录。</div>';
   const evidence=r.evidence||[];$('evidenceList').innerHTML=evidence.length?evidence.map(evidenceHtml).join(''):'<div class="empty">本次没有生成具体结果证据。</div>';
   $('suggestions').innerHTML=(r.suggestions||[]).map(x=>`<button>${esc(x)}</button>`).join('')||'<button>继续检查一个具体问题</button>';bindSuggestionButtons();
@@ -121,6 +121,10 @@ async function pollRun(id,conversationId){
       if(r.status==='completed'){
         state.activeRuns.delete(conversationId);if(isCurrent){appendAssistant(r.message);renderResult(r.result)}await loadHistory();updateSendState();return;
       }
+      if(r.status==='cancel_requested'){if(isCurrent){$('runStopBtn').disabled=true;$('runStopBtn').textContent='停止中';$('runDetail').textContent='正在安全结束当前动作…'} }
+      if(r.status==='cancelled'){
+        state.activeRuns.delete(conversationId);if(isCurrent){$('running').hidden=true;$('stateText').textContent='已停止';$('taskState').textContent='已停止';toast('本次执行已停止')}await loadHistory();updateSendState();return;
+      }
       if(r.status==='failed'){
         state.activeRuns.delete(conversationId);if(isCurrent){$('running').hidden=true;$('stateText').textContent='执行失败';$('taskState').textContent='需要处理';toast('执行失败：'+(r.error||'未知错误'))}await loadHistory();updateSendState();return;
       }
@@ -128,6 +132,15 @@ async function pollRun(id,conversationId){
     }
     state.activeRuns.delete(conversationId);if(state.conversation?.id===conversationId){$('running').hidden=true;toast('执行等待时间过长，可从历史任务继续查看')}updateSendState();
   }catch(e){state.activeRuns.delete(conversationId);if(state.conversation?.id===conversationId)toast(e.message);updateSendState()}
+}
+
+
+async function cancelCurrentRun(){
+  const conversationId=state.conversation?.id,runId=conversationId?state.activeRuns.get(conversationId):null;
+  if(!runId)return;
+  const button=$('runStopBtn');button.disabled=true;button.textContent='停止中';
+  try{await api(`/api/runs/${runId}/cancel`,{method:'POST',body:JSON.stringify({})});$('runDetail').textContent='正在安全结束当前动作…'}
+  catch(e){button.disabled=false;button.textContent='停止';toast(e.message)}
 }
 
 async function ensureConversation(){if(state.conversation)return state.conversation;const c=await api('/api/conversations',{method:'POST',body:JSON.stringify({scene:state.scene,title:'新的体验任务'})});state.conversation=c;$('taskTitle').textContent=c.title;await loadHistory();return c}
@@ -170,7 +183,7 @@ function bind(){
   document.querySelectorAll('.scene').forEach(b=>b.onclick=()=>startDraft(b.dataset.scene));
   document.querySelectorAll('[data-prompt]').forEach(b=>b.onclick=()=>{$('input').value=b.dataset.prompt;autoSize();$('input').focus()});
   document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>{const active=x===b;x.classList.toggle('active',active);x.setAttribute('aria-selected',String(active))});document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));$(`panel-${b.dataset.tab}`).classList.add('active')});
-  $('newTaskBtn').onclick=()=>startDraft(state.scene);$('refreshBtn').onclick=()=>{void loadHistory().catch(e=>toast(e.message))};$('sendBtn').onclick=send;
+  $('newTaskBtn').onclick=()=>startDraft(state.scene);$('refreshBtn').onclick=()=>{void loadHistory().catch(e=>toast(e.message))};$('sendBtn').onclick=send;$('runStopBtn').onclick=()=>{void cancelCurrentRun()};
   $('input').oninput=autoSize;$('input').onkeydown=e=>{if(e.isComposing||e.keyCode===229)return;if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();void send()}};
   $('input').addEventListener('paste',e=>{const files=[...(e.clipboardData?.files||[])].filter(f=>f.type.startsWith('image/'));if(files.length)void addFiles(files)});
   $('attachBtn').onclick=()=>$('fileInput').click();$('fileInput').onchange=e=>{if(e.target.files?.length)void addFiles(e.target.files);e.target.value=''};
@@ -187,6 +200,6 @@ function bind(){
 }
 
 async function boot(){
-  bind();autoSize();renderAttachments();await loadStatus();const rows=await loadHistory();if(rows.length)await openConversation(rows[0].id);else startDraft('search');
+  bind();autoSize();renderAttachments();$('copyBtn').disabled=true;await loadStatus();const rows=await loadHistory();if(rows.length)await openConversation(rows[0].id);else startDraft('search');document.body.classList.add('ready');
 }
-boot().catch(e=>toast(e.message));
+boot().catch(e=>{document.body.classList.add('ready');toast(e.message)});

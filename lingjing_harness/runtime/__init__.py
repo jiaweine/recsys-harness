@@ -1,4 +1,4 @@
-from .harness import AgentHarness
+from .harness import AgentHarness, RunCancelled
 from .memory import AgentMemory, catalog_fingerprint
 from .network import NetworkResearch
 from .perception import PerceptionEngine
@@ -7,7 +7,7 @@ from .tools import ToolRegistry
 from .verifier import ResultVerifier
 
 __all__ = [
-    "AgentHarness",
+    "AgentHarness", "RunCancelled",
     "AgentMemory",
     "catalog_fingerprint",
     "NetworkResearch",

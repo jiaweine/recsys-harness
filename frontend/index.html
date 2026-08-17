@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta name="theme-color" content="#13231e" />
+  <meta name="theme-color" content="#f2f3f1" />
   <meta name="color-scheme" content="light" />
   <title>灵境 · 搜推体验工作台</title>
   <link rel="stylesheet" href="/assets/app.css" />
@@ -14,7 +14,7 @@
     <div class="brand" aria-label="灵境搜推体验工作台">
       <span class="brand-mark">灵境</span>
       <span class="brand-rule"></span>
-      <span class="brand-sub">搜推体验工作台</span>
+      <span class="brand-sub">体验工作台</span>
     </div>
     <div class="top-status" aria-label="工作区状态">
       <span class="status-chip"><i class="status-dot"></i><b id="dataName">示例体验数据</b><small id="dataMeta">连接中</small></span>
@@ -46,7 +46,7 @@
 
   <main class="main">
     <div class="main-head">
-      <div class="task-kicker"><span>ACTIVE WORK</span><i></i></div>
+      <div class="task-kicker"><span>当前任务</span><i></i></div>
       <div class="task-title-wrap"><h1 id="taskTitle">新的体验任务</h1><span id="taskState">等待输入</span></div>
       <button class="copy-btn" id="copyBtn">复制结论</button>
     </div>
@@ -55,19 +55,19 @@
       <section class="welcome" id="welcome">
         <div class="hero-grid">
           <div class="hero-copy">
-            <span class="hero-index">WORKSPACE / AUTONOMOUS EXPERIENCE LAB</span>
-            <h2>把一个目标、<br>一张截图、<br><em>一份真实数据</em>交进来。</h2>
-            <p>系统会自己判断该复现什么、检查什么、是否需要外部证据，以及有没有值得验证的新策略。你只负责说清楚目标和边界。</p>
+            <span class="hero-index">自主工作台 · 搜索与推荐</span>
+            <h2>把搜推问题交给系统，<br><em>结论必须能被复核。</em></h2>
+            <p>描述目标，附上截图或数据。系统会复现问题、判断证据缺口、执行必要检查，并在明确边界内继续推进。</p>
           </div>
           <div class="hero-signal" aria-label="系统能力">
-            <div><strong>01</strong><span>每轮重新决策</span><small>新证据会改变下一步</small></div>
-            <div><strong>02</strong><span>多模态上下文</span><small>截图与数据一起进入任务</small></div>
-            <div><strong>03</strong><span>证据门控学习</span><small>没有稳定优势就不晋升</small></div>
+            <div><strong>01</strong><span>先复现</span><small>从真实结果开始判断</small></div>
+            <div><strong>02</strong><span>再决策</span><small>证据变化会改变路径</small></div>
+            <div><strong>03</strong><span>后验证</span><small>没有稳定优势就不改变</small></div>
           </div>
         </div>
 
         <div class="prompt-board">
-          <div class="board-head"><span>从真实问题开始</span><small>点一下只是填入，不会直接执行</small></div>
+          <div class="board-head"><span>常用起点</span><small>选择后仍可继续编辑</small></div>
           <button data-prompt="最近搜索“露营灯”的结果不太准，帮我复现问题、定位原因，并探索一个可验证的改进方向，但先不要改变当前策略。"><span>搜索</span><b>为什么“露营灯”排得不够准？</b><i>复现 → 诊断 → 验证</i></button>
           <button data-prompt="帮我看看用户 u-lin 的推荐首屏，检查重复、新鲜度和冷启动风险，并告诉我最值得先处理的问题。"><span>推荐</span><b>这位用户的首屏哪里最值得改？</b><i>首屏 → 证据 → 优先级</i></button>
           <button data-prompt="做一次全局体检，自己判断搜索和推荐里现在最值得先解决的三个问题；如果证据足够，再探索改进策略，但不要直接改变当前策略。"><span>体检</span><b>先找到最值得处理的三个问题</b><i>扫描 → 判断 → 探索</i></button>
@@ -77,8 +77,8 @@
       <div class="messages" id="messageList" aria-live="polite"></div>
 
       <section class="running" id="running" hidden aria-live="polite">
-        <div class="run-meta"><span>AUTONOMOUS RUN</span><b id="runPercent">0%</b></div>
-        <div class="run-head"><i class="run-mark"></i><div><b id="runTitle">正在执行</b><small id="runDetail">读取当前工作区</small></div></div>
+        <div class="run-meta"><span>正在执行</span><b id="runPercent">0%</b></div>
+        <div class="run-head"><i class="run-mark"></i><div><b id="runTitle">正在执行</b><small id="runDetail">读取当前工作区</small></div><button class="run-stop" id="runStopBtn" type="button">停止</button></div>
         <div class="run-line"><i id="runBar"></i></div>
       </section>
     </div>
@@ -97,13 +97,13 @@
           <button class="send-btn" id="sendBtn" aria-label="发送任务"><span>执行</span><b aria-hidden="true">↗</b></button>
         </div>
       </div>
-      <p>附件观察与公开网络资料只作为任务证据；策略学习仍需通过独立验证门槛。</p>
+      <p>附件与公开资料只作为证据；策略变化仍需通过独立验证。</p>
     </div>
   </main>
 
   <aside class="inspector" id="inspector" aria-label="任务证据面板">
     <div class="inspector-head">
-      <div><span>LIVE TRACE</span><b>执行与证据</b></div>
+      <div><span>任务证据</span><b>执行与判断</b></div>
       <button id="inspectorClose" aria-label="关闭证据面板">×</button>
     </div>
     <div class="tabs" role="tablist">
@@ -118,11 +118,11 @@
         <div class="next-block"><span>继续追问</span><div id="suggestions"><button>先做一次全局体检</button><button>检查一个具体搜索</button></div></div>
       </section>
       <section class="panel" id="panel-evidence">
-        <div class="section-intro"><span>EVIDENCE</span><h3>只保留能复核的依据</h3><p>当前结果、排序位置、公开来源和执行检查集中在这里；外部资料会标明来源。</p></div>
+        <div class="section-intro"><span>判断依据</span><h3>只保留能复核的证据</h3><p>结果位置、执行检查和公开来源集中在这里；外部资料会单独标明。</p></div>
         <div class="evidence-list" id="evidenceList"><div class="empty">还没有执行结果。</div></div>
       </section>
       <section class="panel" id="panel-data">
-        <div class="section-intro"><span>WORKSPACE</span><h3 id="datasetTitle">当前体验数据</h3><p>用于复现问题、离线验证和核对结论。</p></div>
+        <div class="section-intro"><span>工作区</span><h3 id="datasetTitle">当前体验数据</h3><p>用于复现问题、离线验证和核对结论。</p></div>
         <div class="data-grid" id="dataGrid"></div>
         <div class="capability-lines">
           <div><span>图片与文件</span><b id="visionCapability">检查中</b></div>
