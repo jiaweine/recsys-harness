@@ -78,3 +78,21 @@ def test_file_import_rejects_non_object_json_and_oversized_payload():
     too_big=b'{' + b' '*(8*1024*1024) + b'}'
     oversized=c.post('/api/data/import-file',files={'file':('huge.json',too_big,'application/json')})
     assert oversized.status_code==413
+
+
+def test_status_and_capabilities_expose_autonomous_runtime():
+    c = TestClient(app)
+    status = c.get('/api/status').json()
+    assert status["autonomous_decision"] is True
+    assert status["self_evolving"] is True
+    assert status["runtime"]["eval_gated_learning"] is True
+    assert status["runtime"]["checkpoint_resume"] is True
+    assert status["runtime"]["idempotent_adaptation"] is True
+    assert status["runtime"]["automatic_rollback"] is True
+    capabilities = c.get('/api/capabilities')
+    assert capabilities.status_code == 200
+    body = capabilities.json()
+    assert body["autonomy"]["dynamic_replan"] is True
+    assert body["autonomy"]["holdout_validation"] is True
+    assert body["autonomy"]["checkpoint_resume"] is True
+    assert any(tool["risk"] == "adaptive" for tool in body["tools"])

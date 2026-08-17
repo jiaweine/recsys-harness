@@ -3,11 +3,18 @@
     "compile": true,
     "js": true,
     "tests": true,
+    "wheel_install": true,
+    "installed_web": true,
+    "dynamic_replan": true,
+    "eval_gated_evolution": true,
+    "checkpoint_resume": true,
+    "adaptive_idempotency": true,
+    "automatic_rollback": true,
     "customer_terms": true,
     "no_gradients": true,
     "no_backdrop_blur": true
   },
   "forbidden_hits": [],
-  "pytest": "..........                                                               [100%]",
+  "pytest": "38 passed",
   "ok": true
 }

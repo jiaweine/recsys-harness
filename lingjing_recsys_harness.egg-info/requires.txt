@@ -1,0 +1,8 @@
+fastapi<1,>=0.115
+uvicorn[standard]<1,>=0.30
+pydantic<3,>=2.7
+python-multipart>=0.0.9
+
+[dev]
+pytest>=8
+httpx>=0.27

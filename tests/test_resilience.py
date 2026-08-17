@@ -6,8 +6,8 @@ from lingjing_harness.algorithms import (
     RecommendationEngine,
     SearchEngine,
     audit_recommend,
-    compare_recommend,
-    compare_search,
+    evolve_recommend,
+    evolve_search,
 )
 from lingjing_harness.domain import Catalog, Interaction, Item
 from lingjing_harness.runtime import AgentHarness, OwnedPolicy
@@ -24,7 +24,7 @@ def test_catalog_rejects_bad_shapes_and_non_finite_numbers():
     with pytest.raises(ValueError, match="有限数值"):
         Catalog.from_payload({"items": [{"id": "a", "title": "A", "popularity": float("inf")}]})
     with pytest.raises(ValueError, match="有限数值"):
-        Catalog.from_payload({"items": [{"id": "a", "title": "A", "quality": float("nan")} ]})
+        Catalog.from_payload({"items": [{"id": "a", "title": "A", "quality": float("nan")}]})
 
 
 def test_catalog_parses_explicit_false_eligibility():
@@ -57,8 +57,8 @@ def test_explicit_unknown_user_is_not_replaced_by_another_user():
 
 def test_shadow_compare_requires_real_evaluation_evidence():
     catalog = Catalog(items=[Item("a", "A"), Item("b", "B")])
-    search = compare_search(catalog, SearchEngine(catalog))
-    recommend = compare_recommend(catalog, RecommendationEngine(catalog))
+    search = evolve_search(catalog, SearchEngine(catalog))
+    recommend = evolve_recommend(catalog, RecommendationEngine(catalog))
     assert search["evaluation_ready"] is False
     assert search["safe_to_try"] is False
     assert recommend["evaluation_ready"] is False
@@ -115,5 +115,24 @@ def test_shadow_compare_rejects_too_little_evidence():
         interactions=[Interaction("u","a")],
         query_labels=[QueryLabel("A",["a"])],
     )
-    assert compare_search(catalog,SearchEngine(catalog))["safe_to_try"] is False
-    assert compare_recommend(catalog,RecommendationEngine(catalog))["safe_to_try"] is False
+    assert evolve_search(catalog,SearchEngine(catalog))["safe_to_try"] is False
+    assert evolve_recommend(catalog,RecommendationEngine(catalog))["safe_to_try"] is False
+
+
+def test_bad_active_strategy_is_automatically_retired(tmp_path):
+    from dataclasses import asdict
+    from lingjing_harness.algorithms import RecommendConfig
+    from lingjing_harness.runtime import AgentMemory, catalog_fingerprint
+    from lingjing_harness.runtime.tools import ToolRegistry
+
+    catalog = __import__("lingjing_harness.sample_data", fromlist=["build_sample_catalog"]).build_sample_catalog()
+    memory = AgentMemory(tmp_path / "memory.db")
+    key = catalog_fingerprint(catalog)
+    bad = RecommendConfig(
+        profile=.001, graph=.001, category=.001, quality=.001, freshness=.001,
+        popularity=.99, novelty=.001, diversity=0.0, exploration=.001,
+    )
+    memory.remember_strategy(key, "recommend", asdict(bad), score=0.99, evidence=5, status="active")
+    registry = ToolRegistry(catalog, memory)
+    assert registry.rollback_events and registry.rollback_events[0]["domain"] == "recommend"
+    assert memory.active_config(key, "recommend") is None

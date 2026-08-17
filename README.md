@@ -1,27 +1,28 @@
 <div align="center">
 
-<sub>RECSYS HARNESS</sub>
+<sub>RECSYS HARNESS · AUTONOMOUS SEARCH & RECOMMENDATION CONTROL LAYER</sub>
 
-# Search & recommendation, operated like an agent system.
+# Search & recommendation that can decide, learn, verify and recover.
 
-**把“调算法、跑脚本、看指标、做复盘”收敛成一个可以直接交付目标的搜推执行工作台。**
+**把“发现问题 → 决策 → 实验 → 验证 → 学习 → 回滚”收敛进一套可持续运行的搜推 Agent Harness。**
 
-Goal in · Plan with owned policy · Execute real tools · Verify with evidence
+Goal in · Dynamic replan · Real tools · Persistent memory · Eval-gated evolution · Evidence out
 
 [![CI](https://github.com/jiaweine/recsys-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/jiaweine/recsys-harness/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-1f6f5c?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-Agent%20Runtime-1f6f5c?logo=fastapi&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-Autonomous%20Runtime-1f6f5c?logo=fastapi&logoColor=white)
 ![Core](https://img.shields.io/badge/Core-No%20external%20LLM%20required-c8f06a?labelColor=16231b)
+![Evolution](https://img.shields.io/badge/Evolution-Eval%20gated-c8f06a?labelColor=16231b)
 
-[Product](#product) · [System map](#system-map) · [Quick start](#quick-start) · [Data](#bring-your-own-data) · [API](#api-surface) · [Docs](#documentation)
+[Product](#product) · [Autonomy](#autonomy) · [Self-evolution](#self-evolution) · [System map](#system-map) · [Quick start](#quick-start) · [API](#api-surface)
 
 </div>
 
 <p align="center">
-  <img src="docs/readme-assets/product-run.png" alt="Recsys Harness running a real search experience review with execution trace" width="100%" />
+  <img src="docs/readme-assets/product-run.png" alt="Recsys Harness executing a real search experience task" width="100%" />
 </p>
 
-<p align="center"><sub>真实产品截图 · 画面来自当前前端 DOM/CSS，内容来自一次实际执行的本地“露营灯”搜索复核。</sub></p>
+<p align="center"><sub>真实产品运行截图 · 页面由当前前端实际渲染，任务由当前 Harness 实际执行。</sub></p>
 
 ---
 
@@ -29,168 +30,217 @@ Goal in · Plan with owned policy · Execute real tools · Verify with evidence
 
 **Recsys Harness** 是一个面向搜索与推荐系统的垂直 **Agent Harness**。
 
-它不是“聊天框 + 指标看板”，也不是只返回 ranked list 的算法 Demo。用户描述业务目标后，Harness 会把目标转换成执行计划，调用项目自有的搜索、推荐、评估与实验能力，检查执行结果，再把**结论、证据和下一步动作**留在同一会话中。
+它不是聊天机器人套一个算法接口，也不是只会跑固定工作流的后台。用户给出业务目标后，系统会根据**当前数据、执行结果、风险预算、历史经验和用户约束**持续决定下一步；每执行一个动作都会重新观察并 Replan，直到证据足够、预算耗尽或安全门槛阻止继续。
 
 <table>
 <tr>
-<td width="33%" valign="top">
-<strong>01 · Goal-first</strong><br><br>
-用户说“哪里体验不好、想验证什么”，而不是先决定脚本、接口和参数。
-</td>
-<td width="33%" valign="top">
-<strong>02 · Owned core</strong><br><br>
-搜索、推荐、评估、候选比较和任务路由都由项目自身实现；核心路径不依赖外部 LLM。
-</td>
-<td width="33%" valign="top">
-<strong>03 · Evidence-first</strong><br><br>
-系统只有在真实工具执行和验证器检查之后才形成结论，未验证的推测不会伪装成结果。
-</td>
+<td width="25%" valign="top"><strong>Autonomous</strong><br><br>不是一次性计划。每轮都重新评分下一步动作，并根据新证据改变路径。</td>
+<td width="25%" valign="top"><strong>Self-evolving</strong><br><br>自动生成候选策略，通过探索集、留出集和全量回归后才晋升为长期经验。</td>
+<td width="25%" valign="top"><strong>Memory-native</strong><br><br>保存 episode、策略 skill 与决策收益；后续相似任务会主动召回和复用。</td>
+<td width="25%" valign="top"><strong>Recoverable</strong><br><br>执行过程持续 checkpoint；中断后从已完成动作之后继续，自适应副作用具备幂等保护。</td>
 </tr>
 </table>
 
-### The product surface
+### Product surface
 
-产品界面采用“体验工作台 / 运营控制室”的结构，而不是把内部算法词汇直接暴露给业务用户。
+客户界面仍然保持业务语言，不把内部算法复杂度甩给使用者。
 
 <p align="center">
-  <img src="docs/readme-assets/product-workbench.png" alt="Recsys Harness product workbench" width="49%" />
-  <img src="docs/readme-assets/product-evidence.png" alt="Recsys Harness evidence panel after a completed search review" width="49%" />
+  <img src="docs/readme-assets/product-workbench.png" alt="Recsys Harness experience workbench" width="49%" />
+  <img src="docs/readme-assets/product-evidence.png" alt="Recsys Harness evidence panel" width="49%" />
 </p>
 
-<p align="center"><sub>左：目标驱动的工作台入口 · 右：真实执行完成后的判断依据视图</sub></p>
+<p align="center"><sub>左：目标驱动的体验工作台 · 右：一次真实执行后的判断依据</sub></p>
 
-客户界面使用的是 **搜索体验 / 推荐体验 / 方案复核 / 全局体检 / 执行记录 / 判断依据 / 当前数据**。算法实现细节保留在工程层，不把系统复杂度转嫁给用户。
+用户看到的是 **搜索体验 / 推荐体验 / 方案复核 / 全局体检 / 执行记录 / 判断依据 / 当前数据**；自主决策、候选进化、稳健性门槛和长期记忆留在 Harness 内部。
 
 ---
 
-## What a real run looks like
+## Autonomy
 
-给它一句目标：
+### Not “plan once, execute forever”
 
-> 最近搜索“露营灯”的结果不太准，帮我复现问题并给一个改进方案，但先不要上线。
+当前 Runtime 是一个动态决策循环：
 
-Harness 实际会完成这些动作：
+1. **Observe**：读取工作区、用户目标、硬约束和相关历史经验；
+2. **Decide**：根据当前 observation 对可用工具进行评分；
+3. **Act**：执行风险允许且仍在预算内的真实工具；
+4. **Verify locally**：结构检查、结果证据和异常进入当前状态；
+5. **Replan**：重新计算下一步，而不是继续照着旧计划走；
+6. **Stop**：证据足够、无新增有效动作、预算触顶或风险门槛触发时结束；
+7. **Verify globally**：独立 ResultVerifier 检查最终结论是否真的有证据支持；
+8. **Learn**：把本次 reward、动作收益、episode 和通过门槛的新 skill 写入长期记忆。
 
-1. **读取当前工作区**，确认内容、用户反馈和可复核样本；
-2. **拆解任务**，决定先复现单点，再检查整体稳定性；
-3. **真实运行搜索**，保留当前排序结果；
-4. **执行离线复核**，检查已标注查询的整体表现；
-5. **运行候选方案**，在相同数据上进行 Shadow Compare；
-6. **经过 ResultVerifier**，拒绝空结果、重复结果、异常输出或明显回退；
-7. **形成结论与证据**，并给出可以继续执行的下一步。
+例如一个搜索任务如果复现结果出现空结果或弱匹配，Harness 会自动插入诊断工具；只有整体复核证据足够时，才允许进入策略进化。推荐冷启动也会触发不同的诊断路径。
 
-当前内置样例的一次真实运行中，“露营灯”任务会留下完整的事件轨迹、结果证据和候选方案判断，而不是只输出一段解释文本。
+### Decision budget
+
+每个工具都有真实的：
+
+- `risk`
+- `cost`
+- `side_effect`
+- `input_schema`
+- `repeatable`
+
+Runtime 同时受最大工具数、最大成本和最大运行时间约束。Agent 可以自主选择动作，但不能无限调用工具。
+
+---
+
+## Self-evolution
+
+这里的“自进化”**不是让 Agent 无限制修改自己的源代码**。
+
+Recsys Harness 使用的是 **eval-gated self-evolution**：系统可以自主提出新策略，但新策略只有经过独立验证才能成为长期能力。
+
+### Evolution protocol
+
+<table>
+<tr>
+<td valign="top"><strong>1 · Discovery</strong><br><br>从当前策略、历史可信策略、定向变异和确定性探索中生成多组候选。</td>
+<td valign="top"><strong>2 · Competition</strong><br><br>候选在探索样本上竞争，多代保留 elite，再继续局部变异。</td>
+<td valign="top"><strong>3 · Holdout</strong><br><br>最终候选必须通过未参与选择的留出样本，避免“用同一批数据选又用同一批数据证明”。</td>
+<td valign="top"><strong>4 · Full regression</strong><br><br>再回到完整可复核样本检查质量、覆盖、最差样本和回退比例。</td>
+</tr>
+<tr>
+<td valign="top"><strong>5 · Promote</strong><br><br>只有同时满足安全与优势门槛的候选才写入 procedural memory。</td>
+<td valign="top"><strong>6 · Activate</strong><br><br>只有用户目标明确授权“自动优化 / 允许调整”时，可信策略才可成为当前工作区 active strategy。</td>
+<td valign="top"><strong>7 · Observe drift</strong><br><br>后续启动时会复核 active strategy 与稳健默认策略的差距。</td>
+<td valign="top"><strong>8 · Rollback</strong><br><br>发现质量或覆盖显著回退时自动 retire 已学习策略并恢复稳健策略。</td>
+</tr>
+</table>
+
+### What actually learns
+
+当前会持续进化三类东西：
+
+- **Episodic memory**：类似目标以前发生了什么、执行了哪些动作、最终 reward 如何；
+- **Procedural skills**：通过验证的搜索 / 推荐策略配置、证据规模、胜出次数和状态；
+- **Decision utility**：某类任务里某个工具过去的平均收益，用于未来 Replan 的动作评分。
+
+长期记忆不是无限增长。系统同时保留近期 episode 与高价值 episode，并限制可信 skill 数量，低价值旧经验会被自动淘汰或 retired。
+
+### Adaptation boundaries
+
+下面两句话语义不同：
+
+```text
+给我一个推荐改进方案，先离线，不要上线。
+```
+
+系统可以自主探索并学习可信经验，但**不会改变当前工作区策略**。
+
+```text
+检查推荐体验，自动优化并持续学习。
+```
+
+系统才获得激活可信策略的权限；即使获得权限，候选仍然必须通过 discovery / holdout / full regression / robustness gate。
+
+---
+
+## Durable execution
+
+自主系统不能把“进程不崩”当成可靠性。
+
+当前执行过程持续写入 SQLite checkpoint，包括：
+
+- 已完成 actions；
+- observations；
+- findings / evidence；
+- decisions；
+- spent cost；
+- event trace。
+
+服务重启后会从 checkpoint **精确恢复 RunState**，已完成的非重复工具不会重新执行。
+
+自适应工具还带稳定的 invocation id。一次策略学习即使发生“副作用已经写入、进程随后崩溃”的极端窗口，恢复重放也会复用第一次的结果，不会把一次学习重复计算成多次胜利。
 
 ---
 
 ## System map
 
 <p align="center">
-  <img src="docs/readme-assets/system-map.svg" alt="Detailed architecture map of Recsys Harness" width="100%" />
+  <img src="docs/readme-assets/system-map.svg" alt="Detailed autonomous architecture map of Recsys Harness" width="100%" />
 </p>
 
-这张图对应的是当前代码中的真实边界，不是概念架构：
-
-| Plane | Current responsibility |
+| Plane | Responsibility |
 |---|---|
-| **Experience Plane** | 自然语言目标、任务场景、执行记录、判断依据、数据概况 |
-| **Agent Runtime / Control Plane** | `OwnedPolicy`、计划生成、工具调用、事件流、验证、完成条件 |
-| **Trust Plane** | 工具风险分级、模拟优先、`safe_to_try` 门槛、无自动上线工具 |
-| **Data Plane** | Catalog、用户行为、查询标注、SQLite 会话与运行结果 |
-| **Tool Plane** | `data.inspect`、search / recommend 的 run、audit、compare 工具契约 |
-| **Owned Search + Recommendation Core** | 搜索排序、个性化推荐、离线评估、候选实验 |
-
-### Runtime lifecycle
-
-运行时保持一条明确的主路径：
-
-| Observe | Plan | Execute | Verify | Complete |
-|---|---|---|---|---|
-| 读取工作区和任务约束 | OwnedPolicy 识别任务并生成步骤 | Tool Registry 调用真实 handler | ResultVerifier 检查结果与候选风险 | 汇总 evidence、answer、suggestions |
-
-这也是项目把 **Harness** 放在产品中心的原因：算法负责产生能力，Harness 负责把能力组织成可靠执行。
+| **Experience** | 自然语言业务目标、执行记录、证据、数据概况 |
+| **Autonomous Control** | Goal parsing、dynamic decision、Replan、预算、完成条件 |
+| **Tool Plane** | 风险、成本、schema、side-effect contract 与真实 handlers |
+| **Evolution Lab** | 多候选探索、elite 变异、holdout、full regression、robustness gate |
+| **Memory Plane** | Episodic / procedural / policy memory、召回、容量控制 |
+| **Trust Plane** | 用户约束、独立 verifier、activation gate、drift detection、rollback |
+| **Durability Plane** | Checkpoint、rehydration、adaptive idempotency、持久化 run |
+| **Owned Ranking Core** | 项目自有搜索、推荐、评估与 counterfactual simulation |
 
 ---
 
 ## Built-in capabilities
 
-### Search engine
-
-当前搜索路径由项目自身实现，组合了：
+### Search
 
 - 中英文多粒度文本处理；
-- 字段感知的词项匹配；
-- 稳定哈希语义表征；
+- 稀有具体词证据优先的候选获取；
+- 字段感知匹配；
+- 稳定哈希语义信号，仅用于有真实词项证据的候选重排；
 - 标题、质量、热度、新鲜度等排序信号；
-- 一屏结果多样性控制；
-- 已标注查询的离线质量复核。
+- 一屏结果多样性；
+- prepared feature reuse，使多候选进化不重复计算相同特征；
+- Recall / MRR / NDCG 离线复核。
 
-### Recommendation engine
-
-当前推荐路径组合了：
+### Recommendation
 
 - 隐式反馈与时间衰减；
 - 用户内容偏好画像；
-- item-item 共现关系；
-- 类目兴趣；
-- 质量、新鲜度、热度和新颖度；
-- 稳定探索；
-- 一屏结果多样性优化；
-- 已看内容过滤。
+- 有界历史的 item-item 共现图；
+- 类目兴趣、质量、新鲜度、热度、新颖度；
+- 稳定探索与已看过滤；
+- 一屏多样性优化；
+- prepared user features 与共享不可变图，支持快速多策略评估；
+- Coverage / Diversity / Freshness / Novelty 离线复核。
 
-### Harness runtime
-
-真正把算法能力变成产品的是外层执行系统：
-
-- 持续会话；
-- Goal planning；
-- Typed tool contracts；
-- Runtime event trace；
-- 工具风险分级；
-- Shadow Compare；
-- Result verification；
-- Evidence-backed answer；
-- 可继续追问的客户工作台。
-
-<details>
-<summary><strong>Current tool registry</strong></summary>
-<br>
+### Current tool registry
 
 | Tool | Risk | Purpose |
 |---|---|---|
-| `data.inspect` | `read` | 检查当前工作区是否足够支撑判断 |
-| `search.run` | `read` | 运行指定搜索并保留排序证据 |
-| `search.audit` | `simulation` | 在已标注查询上做离线复核 |
-| `search.compare` | `simulation` | 比较当前搜索方案和候选方案 |
-| `recommend.run` | `read` | 为指定用户生成推荐序列 |
-| `recommend.audit` | `simulation` | 检查推荐覆盖、多样性、新鲜度等表现 |
-| `recommend.compare` | `simulation` | 离线比较当前推荐方案和候选方案 |
-
-</details>
+| `data.inspect` | `read` | 检查数据、记忆、已激活策略和回滚事件 |
+| `search.run` | `read` | 真实复现搜索体验 |
+| `search.diagnose` | `read` | 定位查询证据和候选覆盖问题 |
+| `search.audit` | `simulation` | 在可复核查询上检查整体稳定性 |
+| `search.evolve` | `adaptive` | 自主生成、验证并按权限学习/激活搜索策略 |
+| `recommend.run` | `read` | 真实生成指定用户的一屏推荐 |
+| `recommend.diagnose` | `read` | 检查冷启动、历史证据和候选池 |
+| `recommend.audit` | `simulation` | 检查覆盖、新鲜度和分散度 |
+| `recommend.evolve` | `adaptive` | 自主生成、验证并按权限学习/激活推荐策略 |
 
 ---
 
-## Safe by design
+## Safety model
 
-当前内置工具只有 **`read`** 和 **`simulation`** 两类风险级别。
+`adaptive` 不等于“可随意修改”。
 
-候选策略不会直接覆盖当前搜索 / 推荐逻辑。比较过程在同一份数据上隔离运行，验证器会结合当前结果和候选结果决定是否标记为 `safe_to_try`；如果候选没有稳定优势或出现明显问题，就不会建议进一步放量。
+Recsys Harness 默认把权限分成：
 
-**当前项目默认没有自动上线工具。** 这是刻意的产品边界，而不是缺失的按钮：先让 Agent 学会可靠诊断、比较和验证，再逐步扩展真实变更权限。
+- **read** — 只读取和复现；
+- **simulation** — 离线评估，不改变当前策略；
+- **adaptive** — 可以写入内部策略记忆；只有目标明确授权时才允许激活。
+
+安全链路包括：用户硬约束 → 工具权限检查 → evaluation readiness → holdout → full regression → robustness → trusted promotion → activation permission → future drift check → automatic rollback。
+
+当前项目**没有直接发布到生产流量的工具**。内部策略激活和真实线上发布是两件不同的事。
 
 ---
 
 ## Quick start
 
-### 1. Clone & install
-
 ```bash
 git clone https://github.com/jiaweine/recsys-harness.git
 cd recsys-harness
-
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+make run
 ```
 
 Windows PowerShell:
@@ -198,45 +248,19 @@ Windows PowerShell:
 ```powershell
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-```
-
-### 2. Start the product
-
-```bash
 make run
 ```
 
-Or run the backend directly:
+Open `http://127.0.0.1:8765`.
 
-```bash
-python -m uvicorn lingjing_harness.api:app --host 0.0.0.0 --port 8765
-```
-
-Then open:
-
-```text
-http://127.0.0.1:8765
-```
-
-FastAPI docs:
-
-```text
-http://127.0.0.1:8765/docs
-```
-
-### 3. Run a complete Harness task from CLI
+CLI / smoke run:
 
 ```bash
 make demo
+lingjing-harness '检查用户 u-lin 的推荐体验，自动优化并持续学习'
 ```
 
-Or:
-
-```bash
-python -m lingjing_harness.cli '最近搜索“露营灯”的结果不准，帮我优化，但先不要上线'
-```
-
-### Docker
+Docker:
 
 ```bash
 docker build -t recsys-harness .
@@ -247,7 +271,7 @@ docker run --rm -p 8765:8765 recsys-harness
 
 ## Bring your own data
 
-页面和 API 都支持导入 UTF-8 JSON。当前文件上传上限为 **8 MB**。
+页面和 API 支持导入 UTF-8 JSON，文件上限 **8 MB**。
 
 ```json
 {
@@ -263,23 +287,15 @@ docker run --rm -p 8765:8765 recsys-harness
     }
   ],
   "interactions": [
-    {
-      "user_id": "u01",
-      "item_id": "p01",
-      "event": "click",
-      "timestamp": 12
-    }
+    {"user_id": "u01", "item_id": "p01", "event": "click", "timestamp": 12}
   ],
   "query_labels": [
-    {
-      "query": "露营灯",
-      "relevant": ["p01"]
-    }
+    {"query": "露营灯", "relevant": ["p01"]}
   ]
 }
 ```
 
-完整字段说明见 [`docs/DATA_FORMAT.md`](docs/DATA_FORMAT.md)。
+完整字段见 [`docs/DATA_FORMAT.md`](docs/DATA_FORMAT.md)。导入后的 Catalog 也会持久化，服务重启不会静默退回样例数据。
 
 ---
 
@@ -287,16 +303,15 @@ docker run --rm -p 8765:8765 recsys-harness
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| `GET` | `/api/status` | 当前运行状态与数据概况 |
+| `GET` | `/api/status` | 数据、记忆与自主 Runtime 状态 |
+| `GET` | `/api/capabilities` | Tool manifest 与 autonomy capability discovery |
 | `GET` | `/api/conversations` | 会话列表 |
 | `POST` | `/api/conversations` | 创建体验任务 |
 | `GET` | `/api/conversations/{id}` | 获取单个任务 |
-| `POST` | `/api/conversations/{id}/messages` | 提交目标并启动 Harness |
-| `GET` | `/api/runs/{run_id}` | 获取执行进度、事件与结果 |
+| `POST` | `/api/conversations/{id}/messages` | 提交目标并启动自主执行 |
+| `GET` | `/api/runs/{run_id}` | 获取 checkpointed run 的进度、事件与结果 |
 | `POST` | `/api/data/import` | 导入 JSON payload |
 | `POST` | `/api/data/import-file` | 上传 JSON 数据文件 |
-
-任务执行采用异步 run + polling，前端持续展示阶段变化、执行记录和结果证据。
 
 ---
 
@@ -306,73 +321,64 @@ docker run --rm -p 8765:8765 recsys-harness
 recsys-harness/
 ├── lingjing_harness/
 │   ├── algorithms/
-│   │   ├── search.py          # Search engine
-│   │   ├── recommend.py       # Recommendation engine
-│   │   ├── evaluation.py      # Offline evaluation
-│   │   ├── experiment.py      # Shadow comparison
-│   │   └── text.py            # Text representation
+│   │   ├── search.py          # owned search + prepared features
+│   │   ├── recommend.py       # owned recommender + shared graph/features
+│   │   ├── evaluation.py      # offline evaluation
+│   │   ├── evolution.py       # multi-candidate eval-gated evolution
+│   │   └── text.py
 │   ├── runtime/
-│   │   ├── policy.py          # Goal → execution plan
-│   │   ├── tools.py           # Tool registry
-│   │   ├── verifier.py        # Result verification
-│   │   └── harness.py         # Agent execution loop
-│   ├── api.py                 # FastAPI backend
-│   ├── cli.py                 # CLI entry point
-│   ├── domain.py              # Data contracts
-│   ├── sample_data.py         # Runnable sample workspace
-│   └── store.py               # SQLite session persistence
-├── frontend/
-│   ├── index.html             # Customer workspace
-│   ├── app.css
-│   └── app.js
+│   │   ├── harness.py         # autonomous loop + checkpoint rehydration
+│   │   ├── policy.py          # dynamic decision / replan policy
+│   │   ├── memory.py          # episodic + skill + policy memory
+│   │   ├── tools.py           # risk/cost/schema tool contracts
+│   │   ├── verifier.py        # independent final/evolution gate
+│   │   └── contracts.py
+│   ├── api.py                 # async API + durable run recovery
+│   ├── store.py               # conversations + persistent runs
+│   └── domain.py
+├── frontend/                  # customer workbench
+├── tests/                     # runtime / algorithm / API regression suite
 ├── docs/
-│   ├── readme-assets/         # Real product screenshots + system map
-│   ├── ARCHITECTURE.md
-│   ├── DESIGN.md
-│   ├── DATA_FORMAT.md
-│   └── ACCEPTANCE.md
-├── tests/
-├── scripts/
 ├── Dockerfile
-├── Makefile
 └── pyproject.toml
 ```
 
 ---
 
-## Quality
+## Quality gates
 
 ```bash
 make check
 make test
+make demo
 ```
 
-当前自动化检查覆盖：
+CI additionally validates:
 
-- Python 全量编译；
-- 前端 JavaScript 语法；
-- 搜索关键查询结果；
-- 推荐已看过滤与结果分散度；
-- 搜索 / 推荐离线质量检查；
-- Harness 路由与工具执行；
-- 候选方案比较与安全门槛；
-- 结果证据输出；
-- SQLite 会话持久化；
-- API 基础契约与错误数据拦截。
+- Python compile;
+- complete automated test suite;
+- CLI execution;
+- JavaScript syntax;
+- wheel build + clean install;
+- installed wheel can still serve the real Web product;
+- real Chromium product run used to refresh README screenshots.
 
-GitHub Actions CI 位于 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)。
+The repository also contains regression coverage for dynamic Replan, cold-start diagnosis, adaptation permission, self-evolution, automatic rollback, checkpoint resume and adaptive-tool idempotency.
 
 ---
 
 ## Design principles
 
-1. **Business goals first** — 用户表达业务问题，不要求先懂算法。
-2. **Execution over narration** — 没有真实执行过的动作，不写成“已验证”。
-3. **Evidence over confidence** — 结论必须能回到本次执行结果。
-4. **Simulation before mutation** — 候选方案先隔离比较，不直接改变当前策略。
-5. **Owned ranking core** — 搜索与推荐核心策略掌握在项目自身。
-6. **LLM optionality** — 语言模型可以增强交互，但不是核心排序的单点依赖。
-7. **One clean path** — 保持一套清晰、可运行、可扩展的主路径，不堆积重复实现。
+1. **Business goal first** — 用户提供目标，不需要先学内部算法。
+2. **Replan from evidence** — 新观察可以改变下一步动作。
+3. **Learn only behind evals** — 没有独立验证，就没有策略晋升。
+4. **Permission before activation** — 自主学习不等于未经授权改变当前策略。
+5. **Rollback is part of learning** — 会晋升，也必须会退役和恢复。
+6. **Memory with forgetting** — 经验要召回，也要控制容量和失效。
+7. **Durability over optimism** — checkpoint、恢复与幂等是 Runtime 本身的责任。
+8. **Owned ranking core** — 搜索推荐核心能力由项目自身掌握。
+9. **External model optionality** — 外部模型可以增强交互，但不是核心排序或 Harness 运行的必要依赖。
+10. **One clean product line** — 只维护一套主路径，不通过复制代码制造“新版”。
 
 ---
 
@@ -380,24 +386,18 @@ GitHub Actions CI 位于 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)�
 
 | Document | Contents |
 |---|---|
-| [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Harness、工具、搜推内核、验证器与 Shadow Compare |
-| [`DESIGN.md`](docs/DESIGN.md) | 客户工作台的设计系统与交互原则 |
-| [`DATA_FORMAT.md`](docs/DATA_FORMAT.md) | 数据字段、导入格式与约束 |
-| [`ACCEPTANCE.md`](docs/ACCEPTANCE.md) | 工程验收与检查标准 |
+| [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 自主控制、记忆、自进化、可靠性和搜推核心 |
+| [`DESIGN.md`](docs/DESIGN.md) | 客户工作台设计系统与交互原则 |
+| [`DATA_FORMAT.md`](docs/DATA_FORMAT.md) | 数据字段与导入约束 |
+| [`ACCEPTANCE.md`](docs/ACCEPTANCE.md) | 产品与工程验收标准 |
 
 ---
-
-## Direction
-
-Recsys Harness 的长期目标不是成为另一个“算法后台”，而是成为搜索与推荐系统上方的一层 **agentic operating layer**。
-
-未来可以继续接入更真实的数据源、实验平台、流量控制、人工审批和线上观测；上层 Runtime、工具契约、验证边界和证据机制仍然保持稳定。
 
 <div align="center">
 
 ### Search and recommendation are the capabilities.  
-### The harness is the product.
+### Autonomous, verifiable evolution is the harness.
 
-<sub>Goal in. Evidence out.</sub>
+<sub>Decide. Act. Verify. Learn. Recover.</sub>
 
 </div>
