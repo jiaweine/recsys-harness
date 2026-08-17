@@ -1,0 +1,13 @@
+{
+  "checks": {
+    "compile": true,
+    "js": true,
+    "tests": true,
+    "customer_terms": true,
+    "no_gradients": true,
+    "no_backdrop_blur": true
+  },
+  "forbidden_hits": [],
+  "pytest": "..........                                                               [100%]",
+  "ok": true
+}
