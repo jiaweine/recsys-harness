@@ -92,10 +92,10 @@
   :root{--top:54px}
   body{background:#f5f6f3}
   .shell{grid-template-rows:var(--top) 56px minmax(0,1fr);background:#f5f6f3}
-  .topbar{gap:8px;padding:0 13px;background:rgba(251,250,247,.96);border-bottom:1px solid rgba(213,217,212,.68);backdrop-filter:blur(18px)}
+  .topbar{gap:8px;padding:0 13px;background:#fbfaf7;border-bottom:1px solid rgba(213,217,212,.68)}
   .brand{width:auto;gap:7px}.brand-mark{font-size:18px}.brand-rule,.brand-sub,.top-status,.top-link{display:none}
   .top-actions{gap:8px}
-  .trace-toggle{display:inline-flex;align-items:center;gap:7px;min-height:44px;padding:0 11px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.8);font-size:10px;font-weight:760;color:var(--ink-soft)}
+  .trace-toggle{display:inline-flex;align-items:center;gap:7px;min-height:44px;padding:0 11px;border:1px solid var(--line);border-radius:999px;background:#fff;font-size:10px;font-weight:760;color:var(--ink-soft)}
   .trace-toggle:before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px rgba(47,95,107,.09)}
   .trace-toggle:after{display:none}
   .avatar{display:none}
@@ -116,7 +116,7 @@
   .main-head{display:none}
   .scroll{padding-bottom:158px;scroll-padding-bottom:164px}
   .welcome{padding:27px 18px 24px}
-  .hero-index{margin-bottom:11px;font-size:9px}
+  .hero-index{margin-bottom:11px;font-size:10px}
   .hero-copy h2{font-size:27px;line-height:1.12;letter-spacing:-.04em}
   .hero-copy h2 br{display:none}
   .hero-copy p{margin-top:14px;font-size:12px;line-height:1.68}
@@ -135,7 +135,7 @@
   .message-attachments{gap:6px}.message-attachment{min-width:150px;max-width:100%}
   .running{margin:10px 15px 17px;border-radius:14px;padding:11px 12px 12px}.run-stop{min-width:54px;border-radius:9px}
 
-  .composer-wrap{padding:7px 8px calc(7px + env(safe-area-inset-bottom));background:linear-gradient(180deg,rgba(251,250,247,0) 0,#fbfaf7 18%,#fbfaf7 100%);border-top:0}
+  .composer-wrap{padding:7px 8px calc(7px + env(safe-area-inset-bottom));background:#fbfaf7;border-top:0}
   .composer{border-radius:18px;border-color:rgba(184,192,186,.88);box-shadow:0 10px 32px rgba(29,36,33,.12);overflow:hidden}
   .composer:focus-within{transform:none;box-shadow:0 0 0 3px rgba(47,95,107,.06),0 12px 34px rgba(29,36,33,.13)}
   .composer textarea{min-height:44px;max-height:110px;padding:11px 12px 4px;font-size:12px;line-height:1.5}
@@ -151,7 +151,7 @@
   .inspector.open{opacity:1;visibility:visible;transform:translateY(0)}
   .inspector-head{height:62px;padding:16px 14px 8px;background:#f6f7f4;border-bottom:0;position:relative}
   .inspector-head:before{content:"";position:absolute;top:7px;left:50%;width:34px;height:4px;border-radius:999px;background:#c3c9c3;transform:translateX(-50%)}
-  .inspector-head div{gap:1px}.inspector-head span{font-size:9px}.inspector-head b{font-size:13px}
+  .inspector-head div{gap:1px}.inspector-head span{font-size:10px}.inspector-head b{font-size:13px}
   .inspector-head button{display:grid;place-items:center;width:44px;height:44px;border:1px solid var(--line);border-radius:50%;background:#fff;font-size:19px}
   .tabs{height:44px;margin:0 12px;padding:3px;border:0;border-radius:12px;background:#e8ece7;gap:2px}
   .tab{min-height:38px;border:0;border-radius:9px;padding:0 4px;color:var(--muted);font-size:10px}
@@ -165,7 +165,7 @@
 }
 
 @media (max-width:430px){
-  .hero-copy h2{font-size:26px}.scene b{font-size:9px}.trace-toggle{padding:0 10px}.copy-btn{min-width:52px}
+  .hero-copy h2{font-size:26px}.scene b{font-size:10px}.trace-toggle{padding:0 10px}.copy-btn{min-width:52px}
   .network-btn{font-size:0;width:44px;padding:0;justify-content:center}.network-light{width:8px;height:8px}
   .tool-btn:not(.network-btn){font-size:10px}.send-btn{min-width:64px}
 }
