@@ -1,173 +1,334 @@
 # Vertical Self-Evolution
 
-This document defines how Recsys Harness evolves **search and recommendation systems** without turning the product into a generic code-writing agent.
+Recsys Harness evolves **search and recommendation systems**, not arbitrary repository code.
 
-The vertical boundary is deliberate: evolution may change a declared search/recommendation strategy genome, but promotion authority remains owned by domain evaluation, holdout isolation, robustness checks, permissions, and durable strategy memory.
+The vertical boundary is intentional: the system is allowed to change a typed Search/RecSys strategy genome, including both numeric ranking parameters and registered domain capabilities. Promotion authority remains owned by domain evaluation, independent holdout, robustness checks, permissions, verifier semantics and durable strategy memory.
 
 ## Research lineage
 
 The implementation is a clean-room synthesis of ideas from recent open research. No third-party source code is vendored into this repository.
 
-- **RecHarness** — `6lyc/RecHarness`, MIT. The useful idea is to separate *which direction to explore* from *how to instantiate a candidate*, and to update a bandit-style routing state from experiment feedback. We do **not** copy its fixed mutation-arm taxonomy; our arms are generated from the current domain schema.
-- **AFlow** — `FoundationAgents/AFlow`, MIT, ICLR 2025 Oral. The useful idea is feedback-driven workflow search rather than a permanently fixed execution recipe. We keep the search space vertical and typed instead of evolving arbitrary agent code.
-- **ADAS** — `ShengranHu/ADAS`, Apache-2.0, ICLR 2025. The useful idea is that an agent architecture can itself be searched and improved. Recsys Harness applies this principle only inside explicit search/recommendation capability contracts.
-- **GEPA** — `gepa-ai/gepa`, MIT, ICLR 2026. The useful idea is to use rich execution feedback as an optimization signal. Here, the equivalent feedback is domain response surfaces, regression slices, robustness outcomes, and validated strategy memory.
+- **RecHarness** — useful for separating exploration direction from concrete candidate generation and for updating routing state from experimental feedback. Recsys Harness does not inherit a fixed arm taxonomy.
+- **AFlow / ADAS** — useful for treating workflow or agent structure as something that can be searched rather than permanently frozen. Here that search is restricted to typed Search/RecSys capabilities.
+- **GEPA-style reflective optimization** — useful for turning rich execution feedback into an optimization signal. Here credit comes from domain metrics, robustness slices and verified strategy memory rather than free-form self-judgement.
 
-The result is intentionally not a reproduction of any one paper. It combines bandit routing, response-surface measurement, quality-diversity retention, independent holdout credit assignment, and durable domain memory under the existing Harness safety contract.
+The result is deliberately not a reproduction of one paper. It combines mixed-genome search, measured response surfaces, posterior-guided routing, quality-diversity retention, isolated holdout credit assignment and durable domain memory under the Harness governance contract.
 
-## What was wrong with the old evolver
+## Why parameter-only evolution was still not enough
 
-The previous implementation contained expert-authored recipes such as “increase lexical weight, decrease semantic weight” or “increase freshness and novelty”. Those recipes can be useful as a baseline, but they have three structural problems:
+The previous evolver removed expert-authored mutation recipes such as “increase lexical weight” or “increase freshness”, then learned numeric directions from the current dataset. That was a necessary step, but it still left the **pipeline topology fixed**.
 
-1. they encode yesterday's expert intuition in source code;
-2. a new ranking signal requires editing the evolver itself;
-3. the same mutation direction is tried even when the current catalog says the opposite.
+A vertical system should also be able to answer questions such as:
 
-That is optimization **by rule**, not self-evolution.
+- should this search workload use literal query evidence or catalog-derived expansion?
+- should candidate generation stay lexical-only or add bounded semantic rescue?
+- should slate diversity be category-based, semantic or hybrid?
+- should recommendation profiles emphasize recent intent or long-horizon preference?
+- which cold-start prior and exploration policy work for this catalog?
 
-## 1. A self-describing vertical genome
+Hard-coding those answers in `evolution.py` would simply move the old problem one level up.
 
-`SearchConfig` and `RecommendConfig` are the strategy genomes. Evolvable fields declare metadata next to the field itself:
+The current design therefore evolves a **mixed vertical genome**.
+
+## 1. Mixed genome: numbers + capabilities
+
+`SearchConfig` and `RecommendConfig` are executable strategy genomes.
+
+### Continuous genes
+
+Continuous fields declare:
 
 ```text
 evolve_group · min · max · relative_step
 ```
 
-The evolution engine discovers dimensions with dataclass reflection. There is no second list of search parameters or recommendation parameters in `evolution.py`.
+They cover ranking/blending pressures such as lexical, semantic, graph, freshness, novelty, diversity and exploration weights. Group constraints are projected after mutation so blend mass and bounds remain valid.
 
-Two constraint types are currently sufficient for the owned rankers:
+### Capability genes
 
-- `blend` — weights are projected back to the original group mass after mutation;
-- `independent` — bounded parameters such as slate-diversity pressure can move independently.
-
-If a new owned ranker adds a signal and gives it evolution metadata, the response-surface engine sees it automatically.
-
-## 2. Measure before proposing
-
-Before a population search starts, the evolver measures a local response surface on the **discovery split**.
-
-For every discovered dimension `d`, it evaluates:
+Structural fields declare:
 
 ```text
-current config
-  ├─ d ↑ one schema-derived step
-  └─ d ↓ one schema-derived step
+capability_group
 ```
 
-The step size comes from the field's current magnitude and declared bounds; it is not a hand-authored search/recommendation recipe.
+Their legal values are discovered from `CapabilityRegistry` at runtime. The central evolver contains no list such as “query rewrite options” or “cold-start arms”.
 
-Search responses are scored with the owned ranking objective built from NDCG/recall plus robustness penalties. Recommendation responses use the owned coverage/diversity/freshness/novelty objective plus robustness penalties.
-
-This produces a vertical semantic gradient:
+Current structural search genome:
 
 ```text
-(field, direction, objective_delta, robustness)
+query_strategy
+candidate_strategy
+rerank_strategy
 ```
 
-“Semantic” here means the mutation has domain meaning (`freshness:up`, `graph:down`, etc.); the credit still comes from real recommender/search evaluation rather than model prose.
-
-## 3. Dynamic posterior-routed arms
-
-Mutation arms are generated at runtime:
+Current structural recommendation genome:
 
 ```text
-<field>:up
-<field>:down
+profile_strategy
+candidate_strategy
+cold_start_strategy
+exploration_strategy
+rerank_strategy
 ```
 
-There is no fixed `ARMS = {...}` taxonomy.
+The important separation is:
 
-Validated strategy memory contributes a Beta-style prior. If previously trusted configurations repeatedly moved a field in one direction, that direction receives a stronger prior. The current catalog's measured response remains dominant, so historical memory cannot override new evidence.
+> **Registry says what implementations exist. Evaluation decides what wins.**
 
-Routing combines:
+Adding a registered implementation expands the search space without adding a preference branch to the optimizer.
+
+## 2. Real vertical capabilities
+
+The structural genes are not labels stored only for reporting. They execute inside the owned search/recommendation pipeline.
+
+### Search
+
+`search.query`
+
+- `rare_focus` — discriminative query evidence; owned default.
+- `literal` — tokenized user query without retrieval rewriting.
+- `catalog_expand` — current-catalog, high-IDF expansion learned from anchored items.
+
+`search.candidate`
+
+- `postings_union` — owned lexical/category postings only.
+- `semantic_rescue` — bounded semantic candidates, but only after lexical/catalog evidence anchors the query.
+
+`search.rerank`
+
+- `category_mmr`
+- `semantic_mmr`
+- `hybrid_mmr`
+
+Semantic rescue intentionally cannot turn an unknown query into a result solely because of hash-vector collision. The safety property of “no evidence, no retrieval” remains intact.
+
+### Recommendation
+
+`recommend.profile`
+
+- `recency_balanced`
+- `recent_intent`
+- `long_horizon`
+
+`recommend.candidate`
+
+- `full_pool`
+- `evidence_union`
+
+`recommend.cold_start`
+
+- `quality_freshness`
+- `discovery_prior`
+- `fresh_explore`
+
+`recommend.exploration`
+
+- `stable_fresh`
+- `novelty_seek`
+- `coverage_seek`
+
+`recommend.rerank`
+
+- `category_mmr`
+- `semantic_mmr`
+- `hybrid_mmr`
+
+These are bounded domain components, not arbitrary generated code. Their selection is evolvable; their execution semantics remain inspectable and testable.
+
+## 3. Measure every gene before trusting it
+
+Before population search, the evolver measures a local response surface on the **discovery split**.
+
+For a continuous gene:
 
 ```text
-current discovery response
-+ sampled historical posterior
+current genome
+  ├─ field ↑ schema-derived step
+  └─ field ↓ schema-derived step
 ```
 
-The router therefore learns across runs while remaining data-sensitive on every new run.
+For a capability gene:
 
-## 4. Quality-diversity instead of one scalar lineage
+```text
+current genome
+  ├─ capability = registered alternative A
+  ├─ capability = registered alternative B
+  └─ ...
+```
 
-Keeping only the single best candidate makes evolution brittle: many distinct mechanisms collapse into one local optimum.
+Every alternative executes the full pipeline. Search capability mutations re-run query processing, candidate generation and ranking. Recommendation capability mutations re-run profile construction, candidate generation, cold-start/exploration logic and ranking.
 
-The engine therefore maintains a small archive keyed by **mutation signature**. Examples:
+This matters: a structural mutation cannot receive credit merely because its config string changed.
+
+Each measured arm records:
+
+```text
+field · kind · direction/choice
+objective_delta · robustness
+historical_prior · posterior_sample · routing_score
+```
+
+## 4. No central preference table
+
+There is no fixed list like:
+
+```text
+GOOD_SEARCH_ARMS = {...}
+GOOD_REC_ARMS = {...}
+```
+
+and no source-code rule saying a particular workload should choose semantic reranking, novelty exploration or recent-intent profiling.
+
+The optimizer only understands generic gene semantics:
+
+```text
+continuous gene → perturb within schema
+capability gene → try registered alternative
+```
+
+Search/RecSys expertise lives where it belongs:
+
+- capability implementation;
+- domain metrics;
+- evaluation slices;
+- constraints and safety invariants.
+
+Preference emerges from measured performance.
+
+## 5. Posterior-guided mixed routing
+
+Trusted historical strategies contribute bounded Beta-style priors.
+
+For numeric genes, memory learns directional tendencies:
+
+```text
+lexical:up
+freshness:down
+```
+
+For capability genes, memory learns validated choices:
+
+```text
+rerank_strategy=hybrid_mmr
+cold_start_strategy=discovery_prior
+```
+
+Routing combines current discovery evidence with a sampled historical posterior. Current-domain evidence remains dominant, so yesterday's winner cannot override today's measurements.
+
+Historical memory therefore changes **where exploration budget goes**, not authority, holdout membership or verifier rules.
+
+## 6. Quality-diversity across mechanisms
+
+A single scalar lineage quickly collapses to one local mechanism. The evolver instead keeps a bounded archive keyed by mutation signature.
+
+Examples:
 
 ```text
 lexical:up + semantic:down
-freshness:up + popularity:down
-profile:up + graph:up
+query_strategy=catalog_expand
+candidate_strategy=semantic_rescue + rerank_strategy=hybrid_mmr
+profile_strategy=recent_intent + exploration_strategy=novelty_seek
 ```
 
-Only the best candidate for a signature survives in that archive. The next generation can draw parents from multiple mechanisms rather than only the global scalar winner.
+Only the strongest candidate for a signature survives. Later generations may draw parents from several distinct mechanisms.
 
-This is a compact quality-diversity mechanism, not an unbounded archive.
+This keeps structural diversity without turning memory into an unbounded experiment log.
 
-## 5. Stagnation triggers wider exploration
+## 7. Stagnation can widen both numeric and structural search
 
-If every one-dimensional response is effectively flat, the system treats the current configuration as a local basin. Candidate generation then increases mutation radius across automatically discovered dimensions.
+If the local response surface is effectively flat, the system treats the current strategy as a local basin.
 
-The important distinction from a hard-coded “architecture jump” list is that the jump surface is still generated from the current vertical schema. Future structural capabilities can expose their own typed genome instead of adding special cases to the central evolver.
+The next population increases mutation radius and is more willing to switch registered capability genes. There is still no special-case “architecture jump list”; available structural moves come from the current registry/schema.
 
-## 6. Credit assignment remains isolated
+## 8. Evaluation slices must match the behavior
 
-Self-evolution never gets to grade itself on the same evidence used to propose changes.
+A behavior cannot receive valid credit from a dataset slice that never exercises it.
+
+That is especially important for recommendation cold start. Warm-user evaluation alone cannot tell whether a cold-start policy is better.
+
+The current recommendation evolver therefore adds an explicit cold-start quality slice. Discovery and holdout use different synthetic cold-user identities so exploration/cold-start behavior is measured without leaking the holdout identity into search-time routing.
+
+The full flow is:
 
 ```text
-discovery split
-  → response surface
-  → dynamic routing
-  → candidate population / QD archive
-  → candidate selection
+discovery warm users / queries
++ discovery cold-start slice
+        ↓
+mixed response surface
+        ↓
+posterior-guided routing
+        ↓
+population + QD archive
+        ↓
+discovery winner
 
 independent holdout
-  → regression checks
-  → robustness gate
-  → trusted strategy memory
-  → optional activation (permissioned separately)
++ separate cold-start holdout identity
+        ↓
+regression / robustness gates
+        ↓
+trusted strategy memory
+        ↓
+optional activation (separate user authority)
 ```
 
-The held-out set is never used to route mutation arms or pick the discovery winner.
+Holdout results never route arms or choose the discovery winner.
 
-A candidate can be interesting without being trusted. A trusted candidate can be stored without being activated. Activation is a separate authority decision.
+## 9. Backward-safe evolution
 
-## 7. What evolves, and what does not
+Stored trusted strategies may outlive a capability implementation.
 
-### Evolves
+If a persisted config references a capability that is no longer registered, runtime execution fails closed to the owned default. It does not dynamically import an unknown implementation and does not silently expand the trusted execution surface.
 
-- search/recommendation strategy configuration;
-- which domain dimensions receive exploration budget;
-- historical directional priors from validated strategies;
-- retained mutation mechanisms in the bounded archive;
-- task-level procedural memory after independent validation.
+Older numeric-only strategies also remain loadable: newly introduced capability fields use owned defaults when absent.
 
-### Does not evolve implicitly
+## 10. What evolves
+
+- continuous Search/RecSys ranking configuration;
+- query processing strategy;
+- candidate generation strategy;
+- slate reranking strategy;
+- recommendation profile horizon;
+- cold-start policy;
+- exploration policy;
+- which dimensions receive experiment budget;
+- posterior priors from independently validated strategies;
+- bounded quality-diversity mechanisms;
+- procedural strategy memory after verification.
+
+## 11. What does not evolve implicitly
 
 - user permissions;
 - network authority;
-- holdout data membership;
-- trust thresholds and verifier semantics;
+- holdout membership;
+- verifier semantics;
+- trust thresholds;
 - tool risk classes;
-- durable recovery/fencing rules.
+- durable checkpoint / recovery / fencing rules;
+- arbitrary source-code execution.
 
-Those are Harness governance, not optimization parameters.
+Those are Harness governance, not optimization genes.
 
-## 8. Extension contract
+## 12. Extension contract
 
-A new vertical capability should not require a new central-agent branch.
+A new vertical capability should not require a new central-agent branch or a new optimizer preference table.
 
-For a new owned ranker or policy:
+A new capability should:
 
-1. expose a typed configuration genome;
-2. declare evolvable field metadata and bounds;
-3. provide a discovery evaluator and an independent holdout evaluator;
-4. define robustness/regression invariants;
-5. let the generic response-surface/router/archive machinery generate mutations;
-6. promote only through the existing verifier and permission boundary.
+1. belong to a typed Search/RecSys capability group;
+2. be registered with a deterministic owned implementation;
+3. be referenced by a `capability_group` field in a domain config when it is evolvable;
+4. execute in the real pipeline under evaluation;
+5. have a discovery metric that can exercise it;
+6. have an independent holdout slice and regression invariants;
+7. enter trusted memory only after verification;
+8. remain separately permissioned before activation.
 
-This is the direction for future reranking, query rewriting, cold-start policies, exploration policies, and segment-specific ranking strategies.
+This is the mechanism for extending query rewriting, retrieval, reranking, cold-start, exploration and future segment-specific policies without making the central Harness a pile of special cases.
 
 ## Non-goal
 
-The project is **not** trying to become a general autonomous software engineer. Arbitrary repository edits are intentionally outside the trusted self-evolution path. The product is a vertical Search/RecSys Harness whose autonomy is strongest exactly where its evidence and evaluation contracts are strongest.
+Recsys Harness is **not** a general autonomous software engineer. It does not grant the optimizer permission to invent arbitrary Python, edit governance code or rewrite its own verifier.
+
+Its autonomy is deliberately strongest inside the Search/RecSys domain where evidence, metrics, experiments and rollback semantics are strongest.
