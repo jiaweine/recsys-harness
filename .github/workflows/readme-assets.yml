@@ -167,3 +167,4 @@ jobs:
             git push
           else
             echo "README asset URLs are already pinned."
+          fi
