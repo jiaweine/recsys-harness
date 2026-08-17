@@ -19,7 +19,7 @@
 ## 真实产品
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@65453ad0536e8320f045ff7ff358a57a5b0283fc/docs/readme-assets/overview.png" alt="Recsys Harness 真实运行界面" width="100%">
+  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@27b2d3977d451b4093687f5d728d89d3942e890a/docs/readme-assets/overview.png" alt="Recsys Harness 真实运行界面" width="100%">
 </p>
 <p align="center">
   <sub>完整任务视图 · 对话、运行状态与检查面板在同一工作区。</sub>
@@ -31,11 +31,11 @@
   <tr>
     <td width="50%" valign="top">
       <p><strong>工作台</strong><br><sub>任务输入、附件和运行入口集中在主工作区。</sub></p>
-      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@65453ad0536e8320f045ff7ff358a57a5b0283fc/docs/readme-assets/workbench.png" alt="Recsys Harness 工作台" width="100%">
+      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@27b2d3977d451b4093687f5d728d89d3942e890a/docs/readme-assets/workbench.png" alt="Recsys Harness 工作台" width="100%">
     </td>
     <td width="50%" valign="top">
       <p><strong>执行轨迹与判断依据</strong><br><sub>证据、轨迹和结论保持在同一检查视图。</sub></p>
-      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@65453ad0536e8320f045ff7ff358a57a5b0283fc/docs/readme-assets/evidence.png" alt="Recsys Harness 证据面板" width="100%">
+      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@27b2d3977d451b4093687f5d728d89d3942e890a/docs/readme-assets/evidence.png" alt="Recsys Harness 证据面板" width="100%">
     </td>
   </tr>
 </table>
@@ -45,7 +45,7 @@
   <sub>窄屏保留主流程，并把检查区收束为更适合触控的面板。</sub>
 </p>
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@65453ad0536e8320f045ff7ff358a57a5b0283fc/docs/readme-assets/mobile.png" alt="Recsys Harness 移动端" width="280">
+  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@27b2d3977d451b4093687f5d728d89d3942e890a/docs/readme-assets/mobile.png" alt="Recsys Harness 移动端" width="280">
 </p>
 
 产品界面只呈现业务语言：搜索体验、推荐体验、自主优化、全局体检、执行轨迹、判断依据、图片感知和联网研究。内部算法与可选后端不会暴露在客户界面。
@@ -337,7 +337,7 @@ SQLite 也承担共享运行协调：
 
 ## 系统架构
 
-![Recsys Harness system architecture](https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@65453ad0536e8320f045ff7ff358a57a5b0283fc/docs/readme-assets/architecture.svg)
+![Recsys Harness system architecture](https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@27b2d3977d451b4093687f5d728d89d3942e890a/docs/readme-assets/architecture.svg)
 
 | 层 | 职责 |
 |---|---|
