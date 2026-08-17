@@ -1,0 +1,96 @@
+name: Apply screenshot-driven visual polish
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/apply-visual-polish.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  polish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      LINGJING_DATA_DIR: /tmp/recsys-visual-polish
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Apply screenshot-driven corrections
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('frontend/app.css')
+          s=p.read_text('utf-8')
+          repls={
+            '--canvas:#f2f3f1;':'--canvas:#f4f3ef;',
+            '--surface:#fbfbf8;':'--surface:#fcfbf8;',
+            '--surface-2:#ecefeb;':'--surface-2:#edf0ed;',
+            '--surface-3:#e3e7e3;':'--surface-3:#e2e6e2;',
+            '--ink:#202624;':'--ink:#1d2421;',
+            '--ink-soft:#303936;':'--ink-soft:#2b3531;',
+            '--muted:#6c756f;':'--muted:#657069;',
+            '--muted-2:#8b938e;':'--muted-2:#7d8881;',
+            '--line:#d5dad6;':'--line:#d5d9d4;',
+            '--line-strong:#b9c1bc;':'--line-strong:#b8c0ba;',
+            '--accent:#355e68;':'--accent:#2f5f6b;',
+            '--accent-strong:#274a53;':'--accent-strong:#234953;',
+            '--accent-faint:#edf3f3;':'--accent-faint:#eef4f4;',
+            '--warm:#a96443;':'--warm:#9d5d42;',
+            'body.ready .shell{animation:shellIn .42s var(--ease) forwards}':'body.ready .shell{animation:shellIn .34s var(--ease) forwards}',
+            'animation:heroIn .42s var(--ease) .05s both':'animation:heroIn .32s var(--ease) .03s both',
+            'font-size:clamp(31px,3.05vw,42px);line-height:1.08;letter-spacing:-.045em;margin:0;max-width:650px;animation:heroIn .48s var(--ease) .10s both':'font-size:clamp(29px,2.65vw,38px);line-height:1.1;letter-spacing:-.04em;margin:0;max-width:630px;animation:heroIn .36s var(--ease) .06s both',
+            'animation:heroIn .48s var(--ease) .16s both':'animation:heroIn .36s var(--ease) .10s both',
+            'animation:heroIn .48s var(--ease) .22s both':'animation:heroIn .36s var(--ease) .14s both',
+            'animation:heroIn .5s var(--ease) .28s both':'animation:heroIn .38s var(--ease) .18s both',
+            '.hero-copy h2{font-size:36px}':'.hero-copy h2{font-size:34px}',
+            '.hero-copy h2{font-size:31px;line-height:1.11;letter-spacing:-.04em}':'.hero-copy h2{font-size:28px;line-height:1.13;letter-spacing:-.035em}',
+            '.inspector{position:fixed;top:var(--top);right:0;bottom:0;width:min(370px,94vw);':'.inspector{position:fixed;top:var(--top);right:0;bottom:0;width:min(370px,92vw);',
+            '  .trace-toggle{font-size:10px}\n  .sidebar{height:66px;':'  .trace-toggle{font-size:10px}\n  .inspector{width:100vw}\n  .sidebar{height:66px;',
+          }
+          for old,new in repls.items():
+              if old not in s:
+                  raise SystemExit(f'expected CSS token missing: {old}')
+              s=s.replace(old,new)
+          p.write_text(s,'utf-8')
+
+          p=Path('scripts/capture_readme_assets.py')
+          s=p.read_text('utf-8')
+          old='page.wait_for_timeout(180)\n        page.screenshot(path=str(ASSET_DIR / "product-workbench.png"))'
+          new='page.wait_for_timeout(650)\n        page.screenshot(path=str(ASSET_DIR / "product-workbench.png"))'
+          if old not in s:
+              raise SystemExit('expected screenshot timing token missing')
+          p.write_text(s.replace(old,new),'utf-8')
+          PY
+      - name: Verify polish
+        run: |
+          pip install -r requirements.txt
+          pip install -e . --no-deps
+          python -m compileall -q lingjing_harness tests scripts
+          node --check frontend/app.js
+          pytest -q
+          python scripts/demo_smoke.py > /dev/null
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          css=Path('frontend/app.css').read_text('utf-8')
+          vals=[int(v) for d in re.findall(r'font-size:\s*([^;}\n]+)',css) for v in re.findall(r'(\d+)px',d)]
+          assert vals and min(vals)>=10 and max(vals)<=38, (min(vals),max(vals))
+          assert 'gradient(' not in css and 'backdrop-filter' not in css and 'fonts.googleapis' not in css
+          frontend='\n'.join(Path('frontend',p).read_text('utf-8').lower() for p in ['index.html','app.css','app.js'])
+          forbidden=['deepseek','claude','chatgpt','openai','qwen','searxng','bm25','ndcg','mrr','mmr','向量','召回','重排']
+          assert not [x for x in forbidden if x in frontend]
+          print('polish hygiene', min(vals), max(vals))
+          PY
+      - name: Commit product polish
+        run: |
+          rm -rf build dist .pytest_cache ./*.egg-info lingjing_harness/**/__pycache__ tests/__pycache__ scripts/__pycache__
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/app.css scripts/capture_readme_assets.py
+          git commit -m "Polish visual hierarchy from screenshot review"
+          git push
