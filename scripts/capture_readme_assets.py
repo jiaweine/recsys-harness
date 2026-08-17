@@ -20,6 +20,7 @@ SCREENSHOTS = (
     "mobile-progress.png",
     "mobile-evidence.png",
 )
+MOBILE_VIEWPORT = {"width": 393, "height": 852}
 
 
 def post_json(path: str, payload: dict) -> dict:
@@ -90,19 +91,30 @@ def main() -> None:
         page.wait_for_timeout(120)
         page.screenshot(path=str(ASSET_DIR / "evidence.png"))
 
-        # Capture a real mobile gallery instead of forcing one tall screenshot to
-        # represent every responsive state. Each image shows a distinct product
-        # surface at the same viewport so the README can present them as a set.
-        page.set_viewport_size({"width": 430, "height": 900})
-        page.wait_for_timeout(180)
+        # Mobile QA uses a modern phone viewport and captures three distinct states.
+        # The evidence inspector is intentionally a bottom sheet: the underlying task
+        # must remain visible so mobile never regresses into a full-screen desktop rail.
+        page.set_viewport_size(MOBILE_VIEWPORT)
+        page.wait_for_timeout(220)
         if page.locator("#inspector").evaluate("el => el.classList.contains('open')"):
             page.locator("#inspectorClose").click()
-            page.wait_for_timeout(100)
+            page.wait_for_timeout(120)
         page.locator("#scrollArea").evaluate("el => { el.scrollTop = 0; }")
         page.screenshot(path=str(ASSET_DIR / "mobile-workspace.png"), full_page=False)
 
         page.locator("#inspectorToggle").click()
         page.wait_for_selector("#inspector.open", timeout=5_000)
+        page.wait_for_timeout(180)
+        sheet_box = page.locator("#inspector").bounding_box()
+        if not sheet_box:
+            raise RuntimeError("Mobile evidence sheet has no bounding box")
+        if sheet_box["height"] >= MOBILE_VIEWPORT["height"] * 0.86:
+            raise RuntimeError(f"Mobile evidence sheet is too tall: {sheet_box}")
+        if sheet_box["y"] <= MOBILE_VIEWPORT["height"] * 0.10:
+            raise RuntimeError(f"Mobile evidence sheet must preserve task context above it: {sheet_box}")
+        if sheet_box["x"] < 6 or sheet_box["x"] + sheet_box["width"] > MOBILE_VIEWPORT["width"] - 6:
+            raise RuntimeError(f"Mobile evidence sheet must keep visible page margins: {sheet_box}")
+
         page.locator(".tab[data-tab='progress']").click()
         page.wait_for_timeout(150)
         page.screenshot(path=str(ASSET_DIR / "mobile-progress.png"), full_page=False)
