@@ -45,6 +45,9 @@ def main() -> None:
             viewport={"width": 1600, "height": 1000},
             device_scale_factor=1,
         )
+        browser_errors: list[str] = []
+        page.on("pageerror", lambda exc: browser_errors.append(f"pageerror: {exc}"))
+        page.on("console", lambda msg: browser_errors.append(f"console: {msg.text}") if msg.type == "error" else None)
         page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30_000)
         page.wait_for_function(
             "document.getElementById('dataMeta').textContent.includes('内容')",
@@ -67,6 +70,8 @@ def main() -> None:
         page.locator("#scrollArea").evaluate("el => { el.scrollTop = 95; }")
         page.wait_for_timeout(150)
         page.screenshot(path=str(ASSET_DIR / "product-evidence.png"))
+        if browser_errors:
+            raise RuntimeError("Browser errors during product smoke test: " + " | ".join(browser_errors))
         browser.close()
 
     for name in ("product-workbench.png", "product-run.png", "product-evidence.png"):

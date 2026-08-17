@@ -16,7 +16,7 @@
 - 每次任务必须有 Observe / Plan / Execute / Verify / Complete 记录；
 - 每个工具必须有风险等级；
 - 用户结论必须来自 tool result；
-- 第一版没有直接线上写操作。
+- 当前实现没有直接线上写操作。
 
 ## UI
 
@@ -31,4 +31,5 @@
 
 - `python -m compileall -q lingjing_harness tests` 通过；
 - `node --check frontend/app.js` 通过；
-- `pytest -q` 全部通过。
+- `pytest -q` 全部通过；
+- 构建 wheel 后在干净目录安装，Web API 与前端首页仍可正常加载。

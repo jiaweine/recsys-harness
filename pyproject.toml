@@ -20,3 +20,14 @@ lingjing-harness = "lingjing_harness.cli:main"
 pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-q"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["lingjing_harness*", "frontend"]
+exclude = ["tests*", "scripts*", "docs*", "data*"]
+
+[tool.setuptools.package-data]
+frontend = ["*.html", "*.css", "*.js"]

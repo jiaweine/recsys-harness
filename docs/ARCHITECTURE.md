@@ -43,7 +43,7 @@ flowchart LR
 - 风险级别；
 - 真实 handler。
 
-当前只有 `read` 与 `simulation`。没有任何会直接写线上排序策略的工具，因此第一版不会出现“Agent 误操作直接改线上”的风险。
+当前只有 `read` 与 `simulation`。没有任何会直接写线上排序策略的工具，因此当前实现不会出现“Agent 误操作直接改线上”的风险。
 
 ### 3. Search Engine
 
@@ -86,7 +86,7 @@ flowchart LR
 3. 计算 delta；
 4. 通过安全门槛后，才标记为 `safe_to_try`。
 
-第一版没有“自动上线”工具。
+当前实现没有“自动上线”工具。
 
 ### 7. Verifier
 

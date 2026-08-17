@@ -22,15 +22,22 @@ class SearchConfig:
 class SearchEngine:
     """Project-owned hybrid search: field-aware lexical + hashed semantic + slate rerank."""
 
+    GENERIC_QUERY_TOKENS = {"装备", "用品", "商品", "产品", "东西", "好物"}
+
     def __init__(self, catalog: Catalog, config: SearchConfig | None = None) -> None:
         self.catalog = catalog
         self.config = config or SearchConfig()
         self._doc_tokens: dict[str, list[str]] = {}
+        self._field_tokens: dict[str, tuple[list[str], list[str], list[str]]] = {}
         self._df: Counter[str] = Counter()
         self._vectors: dict[str, dict[int, float]] = {}
         for item in catalog.items:
             body = " ".join([item.title, item.text, *item.categories])
-            toks = tokenize(body)
+            title_tokens = tokenize(item.title)
+            text_tokens = tokenize(item.text)
+            category_tokens = tokenize(" ".join(item.categories))
+            toks = [*title_tokens, *text_tokens, *category_tokens]
+            self._field_tokens[item.item_id] = (title_tokens, text_tokens, category_tokens)
             self._doc_tokens[item.item_id] = toks
             self._df.update(set(toks))
             self._vectors[item.item_id] = hashed_vector(body)
@@ -41,12 +48,17 @@ class SearchEngine:
         return log(1 + (n - df + 0.5) / (df + 0.5))
 
     def _bm25(self, item: Item, qtokens: list[str]) -> float:
-        toks = self._doc_tokens[item.item_id]; tf = Counter(toks); dl = max(1, len(toks)); score = 0.0
+        toks = self._doc_tokens[item.item_id]
+        title_tokens, text_tokens, category_tokens = self._field_tokens[item.item_id]
+        title_tf, text_tf, category_tf = Counter(title_tokens), Counter(text_tokens), Counter(category_tokens)
+        dl = max(1, len(toks)); score = 0.0
         k1, b = 1.45, 0.72
         for token in qtokens:
-            f = tf.get(token, 0)
+            # Field-aware term frequency: title > body text > broad category tags.
+            f = 2.1*title_tf.get(token, 0) + text_tf.get(token, 0) + .75*category_tf.get(token, 0)
             if f <= 0: continue
-            score += self._idf(token) * (f*(k1+1)) / (f + k1*(1-b+b*dl/max(1.0, self._avg_len)))
+            query_weight = .45 if token in self.GENERIC_QUERY_TOKENS else 1.0
+            score += query_weight * self._idf(token) * (f*(k1+1)) / (f + k1*(1-b+b*dl/max(1.0, self._avg_len)))
         return score
 
     @staticmethod
@@ -55,7 +67,7 @@ class SearchEngine:
         return len(aa & bb) / max(1, len(aa | bb))
 
     def search(self, query: str, *, limit: int = 10) -> list[dict]:
-        query = query.strip(); qtokens = tokenize(query)
+        query = query.strip(); qtokens = list(dict.fromkeys(tokenize(query)))
         if not qtokens: return []
         qvec = hashed_vector(query)
         rows: list[dict] = []
@@ -71,7 +83,9 @@ class SearchEngine:
             item = row["item"]; lex = row["lex"]/max_lex; pop = self.catalog.popularity_norm(item)
             row["base"] = self.config.lexical*lex + self.config.semantic*row["sem"] + self.config.title*row["title"] + self.config.quality*item.quality + self.config.popularity*pop + self.config.freshness*item.freshness
             row["signals"] = {"match": round(.65*lex+.35*row["sem"],4), "quality": round(item.quality,4), "freshness": round(item.freshness,4), "popularity": round(pop,4)}
-        rows = [x for x in rows if x["lex"] > 0 or x["sem"] > .08 or x["title"] > 0]
+        # Hashed similarity is a reranking signal, not a standalone retrieval source.
+        # Requiring lexical/title evidence prevents hash collisions from surfacing unrelated items.
+        rows = [x for x in rows if x["lex"] > 0 or x["title"] > 0]
         rows.sort(key=lambda x: (-x["base"], x["item"].item_id))
         pool = rows[:max(30, limit*6)]; selected: list[dict] = []
         while pool and len(selected) < limit:

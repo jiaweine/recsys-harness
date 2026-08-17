@@ -12,6 +12,23 @@ jobs:
           python-version: '3.11'
           cache: pip
       - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
       - run: python -m compileall -q lingjing_harness tests
       - run: pytest -q
+      - run: python scripts/demo_smoke.py > /dev/null
+      - run: lingjing-harness '做一次全局体检' > /dev/null
+      - name: Verify wheel contains the web product
+        run: |
+          rm -rf /tmp/recsys-wheel /tmp/recsys-installed
+          mkdir -p /tmp/recsys-wheel /tmp/recsys-installed
+          python -m pip wheel . --no-deps -w /tmp/recsys-wheel
+          python -m pip install /tmp/recsys-wheel/*.whl --no-deps --target /tmp/recsys-installed
+          cd /tmp
+          PYTHONPATH=/tmp/recsys-installed python - <<'PY'
+          from fastapi.testclient import TestClient
+          from lingjing_harness.api import app
+          response = TestClient(app).get('/')
+          assert response.status_code == 200
+          assert '灵境体验工作台' in response.text
+          PY
       - run: node --check frontend/app.js

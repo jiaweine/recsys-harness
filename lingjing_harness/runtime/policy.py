@@ -47,5 +47,5 @@ class OwnedPolicy:
     @staticmethod
     def _extract_user(text:str,catalog:Catalog)->str:
         users=RecommendationEngine(catalog).known_users(); m=re.search(r"(?:用户|user)\s*[:：]?\s*([\w-]+)",text,re.I)
-        if m and m.group(1) in users: return m.group(1)
+        if m: return m.group(1)
         return users[0] if users else "new-user"

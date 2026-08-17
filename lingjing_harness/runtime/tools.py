@@ -30,7 +30,9 @@ class ToolRegistry:
     def inspect_data(self)->dict[str,Any]:
         s=self.catalog.summary(); issues=[]
         if s["interactions"]==0: issues.append("缺少用户行为记录，个性化结果会更多依赖内容本身")
+        elif s["users"]<3: issues.append("可复核用户太少，推荐候选方案暂时不会通过离线安全门槛")
         if s["queries"]==0: issues.append("缺少人工复核查询，搜索只能做结构性检查")
+        elif s["queries"]<3: issues.append("人工复核查询太少，搜索候选方案暂时不会通过离线安全门槛")
         if s["items"]<12: issues.append("内容规模较小，离线结论的稳定性有限")
         dup=len(self.catalog.items)-len({x.title.strip().lower() for x in self.catalog.items})
         if dup: issues.append(f"发现 {dup} 条重复标题")

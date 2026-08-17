@@ -25,7 +25,7 @@
 - `item_id`
 - `event`: view / click / favorite / cart / purchase
 - `weight`: 可覆盖默认事件权重
-- `timestamp`: 递增数值即可，第一版用于相对时间衰减
+- `timestamp`: 递增数值即可，当前实现用于相对时间衰减
 
 不存在的 item 会被自动过滤。
 

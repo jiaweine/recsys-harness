@@ -25,6 +25,8 @@ class RecommendConfig:
 class RecommendationEngine:
     """Project-owned implicit-feedback recommender with graph + semantic profile + slate optimization."""
 
+    MAX_GRAPH_HISTORY = 120
+
     def __init__(self, catalog: Catalog, config: RecommendConfig | None = None) -> None:
         self.catalog = catalog; self.config = config or RecommendConfig()
         self._vectors = {x.item_id: hashed_vector(" ".join([x.title, x.text, *x.categories])) for x in catalog.items}
@@ -32,7 +34,8 @@ class RecommendationEngine:
         for e in catalog.interactions: self._by_user[e.user_id].append(e)
         self._co: dict[str, Counter[str]] = defaultdict(Counter)
         for events in self._by_user.values():
-            ids = list(dict.fromkeys(e.item_id for e in events))
+            # Bound pair generation for users with very long histories and favor recent evidence.
+            ids = list(dict.fromkeys(e.item_id for e in reversed(events)))[: self.MAX_GRAPH_HISTORY]
             for i,a in enumerate(ids):
                 for b in ids[i+1:]:
                     self._co[a][b] += 1; self._co[b][a] += 1
