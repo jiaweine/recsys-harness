@@ -1,22 +1,43 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, fields, is_dataclass
 from hashlib import blake2b
 from random import Random
 from statistics import mean
 from typing import Any, Callable, Iterable, TypeVar
 
 from lingjing_harness.domain import Catalog
-from .evaluation import audit_recommend, audit_search, ndcg_at_k, recall_at_k, reciprocal_rank
+from .evaluation import ndcg_at_k, recall_at_k, reciprocal_rank
 from .recommend import RecommendConfig, RecommendationEngine
 from .search import SearchConfig, SearchEngine
 
 MIN_SEARCH_EVIDENCE = 3
 MIN_RECOMMEND_EVIDENCE = 3
 MAX_GENERATIONS = 2
-POPULATION_SIZE = 7
+POPULATION_SIZE = 9
 MAX_EVOLUTION_SAMPLES = 36
+MAX_RESPONSE_DIMENSIONS = 12
 T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class EvolutionDimension:
+    """One mutable domain parameter discovered from the config schema."""
+
+    name: str
+    group: str
+    low: float
+    high: float
+    relative_step: float
+
+    def dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "group": self.group,
+            "min": self.low,
+            "max": self.high,
+            "relative_step": self.relative_step,
+        }
 
 
 def _seed(catalog: Catalog, domain: str) -> int:
@@ -32,8 +53,6 @@ def _stable_split(rows: list[T], key: Callable[[T], str]) -> tuple[list[T], list
     ranked = sorted(rows, key=lambda row: blake2b(key(row).encode("utf-8"), digest_size=8).digest())
     holdout_size = max(1, min(len(ranked) // 3, len(ranked) - 2))
     return ranked[holdout_size:], ranked[:holdout_size]
-
-
 
 
 def _stable_limit(rows: list[T], key: Callable[[T], str], limit: int = MAX_EVOLUTION_SAMPLES) -> list[T]:
@@ -90,26 +109,102 @@ def _audit_recommend_cached(catalog: Catalog, engine: RecommendationEngine, user
     }
 
 
-def _normalize(values: dict[str, float], keys: tuple[str, ...]) -> dict[str, float]:
-    clipped = {key: max(0.005, min(0.75, float(values[key]))) for key in keys}
-    total = sum(clipped.values()) or 1.0
-    return {**values, **{key: clipped[key] / total for key in keys}}
+def _evolution_schema(config: Any) -> tuple[list[EvolutionDimension], dict[str, float]]:
+    """Discover the mutable domain genome from dataclass field metadata.
+
+    There is intentionally no search/recommend parameter list here. A new field
+    joins evolution by declaring ``evolve_group`` metadata in its config class.
+    """
+    if not is_dataclass(config):
+        raise TypeError("evolution config must be a dataclass instance")
+    dimensions: list[EvolutionDimension] = []
+    group_totals: dict[str, float] = {}
+    for config_field in fields(config):
+        metadata = config_field.metadata
+        group = str(metadata.get("evolve_group") or "")
+        if not group:
+            continue
+        value = float(getattr(config, config_field.name))
+        low = float(metadata.get("min", 0.0))
+        high = float(metadata.get("max", max(1.0, value * 3.0)))
+        relative_step = max(0.02, float(metadata.get("relative_step", 0.15)))
+        dimensions.append(EvolutionDimension(config_field.name, group, low, high, relative_step))
+        if group != "independent":
+            group_totals[group] = group_totals.get(group, 0.0) + value
+    if not dimensions:
+        raise ValueError("config exposes no evolvable dimensions")
+    return dimensions[:MAX_RESPONSE_DIMENSIONS], group_totals
+
+
+def _clip(value: float, dimension: EvolutionDimension) -> float:
+    return max(dimension.low, min(dimension.high, float(value)))
+
+
+def _project(values: dict[str, float], dimensions: list[EvolutionDimension], group_totals: dict[str, float]) -> dict[str, float]:
+    row = {key: float(value) for key, value in values.items()}
+    by_group: dict[str, list[EvolutionDimension]] = {}
+    for dimension in dimensions:
+        row[dimension.name] = _clip(row[dimension.name], dimension)
+        if dimension.group != "independent":
+            by_group.setdefault(dimension.group, []).append(dimension)
+    for group, members in by_group.items():
+        target = max(1e-9, group_totals.get(group, sum(row[d.name] for d in members)))
+        total = sum(row[d.name] for d in members) or 1.0
+        for dimension in members:
+            row[dimension.name] = _clip(row[dimension.name] * target / total, dimension)
+        # Small bound clipping can perturb the total; renormalise free mass once.
+        total = sum(row[d.name] for d in members) or 1.0
+        if abs(total - target) > 1e-8:
+            free = [d for d in members if d.low + 1e-8 < row[d.name] < d.high - 1e-8]
+            if free:
+                correction = (target - total) / len(free)
+                for dimension in free:
+                    row[dimension.name] = _clip(row[dimension.name] + correction, dimension)
+    return row
+
+
+def _dimension_step(base: dict[str, float], dimension: EvolutionDimension, scale: float = 1.0) -> float:
+    value = abs(float(base[dimension.name]))
+    floor = max(0.008, (dimension.high - dimension.low) * 0.018)
+    return max(floor, value * dimension.relative_step) * max(0.25, float(scale))
+
+
+def _perturb(
+    base: dict[str, float],
+    dimension: EvolutionDimension,
+    direction: int,
+    dimensions: list[EvolutionDimension],
+    group_totals: dict[str, float],
+    *,
+    scale: float = 1.0,
+) -> dict[str, float]:
+    row = dict(base)
+    row[dimension.name] = row[dimension.name] + (1 if direction >= 0 else -1) * _dimension_step(base, dimension, scale)
+    return _project(row, dimensions, group_totals)
 
 
 def _mutate_config(
     base: dict[str, float],
     *,
-    keys: tuple[str, ...],
-    diversity_key: str,
+    dimensions: list[EvolutionDimension],
+    group_totals: dict[str, float],
     rng: Random,
     scale: float,
 ) -> dict[str, float]:
     row = dict(base)
-    for key in keys:
-        row[key] = row[key] * (1.0 + rng.uniform(-scale, scale))
-    row = _normalize(row, keys)
-    row[diversity_key] = max(0.0, min(0.32, float(base[diversity_key]) + rng.uniform(-0.06, 0.06)))
-    return row
+    touched = 0
+    for dimension in dimensions:
+        if rng.random() > 0.56:
+            continue
+        touched += 1
+        direction = 1 if rng.random() >= 0.5 else -1
+        amplitude = rng.uniform(0.45, 1.15) * scale
+        row[dimension.name] += direction * _dimension_step(base, dimension, amplitude)
+    if not touched:
+        dimension = dimensions[rng.randrange(len(dimensions))]
+        direction = 1 if rng.random() >= 0.5 else -1
+        row[dimension.name] += direction * _dimension_step(base, dimension, scale)
+    return _project(row, dimensions, group_totals)
 
 
 def _unique_configs(rows: Iterable[dict[str, float]]) -> list[dict[str, float]]:
@@ -117,7 +212,7 @@ def _unique_configs(rows: Iterable[dict[str, float]]) -> list[dict[str, float]]:
     out = []
     for row in rows:
         try:
-            rounded = {key: round(float(value), 6) for key, value in row.items()}
+            rounded = {key: round(float(value), 7) for key, value in row.items()}
         except (TypeError, ValueError):
             continue
         sig = tuple(sorted(rounded.items()))
@@ -126,6 +221,212 @@ def _unique_configs(rows: Iterable[dict[str, float]]) -> list[dict[str, float]]:
         seen.add(sig)
         out.append(rounded)
     return out
+
+
+def _config_signature(base: dict[str, float], row: dict[str, float], dimensions: list[EvolutionDimension]) -> tuple[str, ...]:
+    signature = []
+    for dimension in dimensions:
+        before = float(base[dimension.name])
+        after = float(row[dimension.name])
+        epsilon = max(1e-5, abs(before) * 0.025)
+        if after > before + epsilon:
+            signature.append(f"{dimension.name}:up")
+        elif after < before - epsilon:
+            signature.append(f"{dimension.name}:down")
+    return tuple(signature) or ("local:neutral",)
+
+
+def _history_posteriors(
+    base: dict[str, float],
+    remembered: list[dict[str, Any]],
+    dimensions: list[EvolutionDimension],
+) -> dict[str, tuple[float, float]]:
+    """Turn validated strategy memory into dynamic Beta priors for mutation arms."""
+    posterior = {f"{d.name}:{direction}": [1.0, 1.0] for d in dimensions for direction in ("up", "down")}
+    for memory in remembered:
+        config = memory.get("config") if isinstance(memory, dict) else None
+        if not isinstance(config, dict):
+            continue
+        wins = max(1.0, min(6.0, float(memory.get("wins", 1) or 1)))
+        for dimension in dimensions:
+            if dimension.name not in config:
+                continue
+            before = float(base[dimension.name])
+            after = float(config[dimension.name])
+            epsilon = max(1e-5, abs(before) * 0.025)
+            if after > before + epsilon:
+                posterior[f"{dimension.name}:up"][0] += wins
+                posterior[f"{dimension.name}:down"][1] += wins
+            elif after < before - epsilon:
+                posterior[f"{dimension.name}:down"][0] += wins
+                posterior[f"{dimension.name}:up"][1] += wins
+    return {key: (values[0], values[1]) for key, values in posterior.items()}
+
+
+def _response_surface(
+    *,
+    base_config: dict[str, float],
+    dimensions: list[EvolutionDimension],
+    group_totals: dict[str, float],
+    remembered: list[dict[str, Any]],
+    evaluate: Callable[[dict[str, float]], tuple[dict[str, Any], dict[str, float], float]],
+    base_objective: float,
+    rng: Random,
+) -> tuple[list[dict[str, Any]], dict[tuple[tuple[str, float], ...], dict[str, Any]]]:
+    priors = _history_posteriors(base_config, remembered, dimensions)
+    rows: list[dict[str, Any]] = []
+    cache: dict[tuple[tuple[str, float], ...], dict[str, Any]] = {}
+    for dimension in dimensions:
+        for direction, sign in (("up", 1), ("down", -1)):
+            config = _perturb(base_config, dimension, sign, dimensions, group_totals)
+            report, robust, objective = evaluate(config)
+            delta = float(objective) - float(base_objective)
+            arm = f"{dimension.name}:{direction}"
+            alpha, beta = priors[arm]
+            prior_mean = alpha / (alpha + beta)
+            sampled = rng.betavariate(alpha, beta)
+            # Current-domain evidence dominates; validated history only breaks ties
+            # and steers exploration when local deltas are weak.
+            local_signal = max(0.05, min(0.95, 0.5 + delta / 0.04))
+            routing_score = 0.72 * local_signal + 0.28 * sampled
+            entry = {
+                "arm": arm,
+                "field": dimension.name,
+                "direction": direction,
+                "objective": round(float(objective), 7),
+                "objective_delta": round(delta, 7),
+                "prior_mean": round(prior_mean, 4),
+                "posterior_sample": round(sampled, 4),
+                "routing_score": round(routing_score, 5),
+                "config": config,
+                "report": report,
+                "robustness": robust,
+            }
+            rows.append(entry)
+            sig = tuple(sorted((key, round(float(value), 7)) for key, value in config.items()))
+            cache[sig] = {
+                "config": config,
+                "report": report,
+                "robustness": robust,
+                "objective": round(float(objective), 7),
+                "generation": 0,
+                "source": "response_surface",
+            }
+    rows.sort(key=lambda row: (-row["routing_score"], -row["objective_delta"], row["arm"]))
+    return rows, cache
+
+
+def _surface_seeds(
+    *,
+    base_config: dict[str, float],
+    surface: list[dict[str, Any]],
+    remembered: list[dict[str, Any]],
+    dimensions: list[EvolutionDimension],
+    group_totals: dict[str, float],
+    rng: Random,
+) -> tuple[list[dict[str, float]], bool]:
+    population: list[dict[str, float]] = []
+    for row in surface[: min(5, len(surface))]:
+        population.append(dict(row["config"]))
+
+    positive = [row for row in surface if row["objective_delta"] > 0][:3]
+    if positive:
+        combined = dict(base_config)
+        by_name = {dimension.name: dimension for dimension in dimensions}
+        for row in positive:
+            dimension = by_name[row["field"]]
+            sign = 1 if row["direction"] == "up" else -1
+            combined[dimension.name] += sign * _dimension_step(base_config, dimension, 0.72)
+        population.append(_project(combined, dimensions, group_totals))
+
+    for memory in remembered:
+        config = memory.get("config") if isinstance(memory, dict) else None
+        if isinstance(config, dict) and all(d.name in config for d in dimensions):
+            try:
+                population.append(_project({key: float(value) for key, value in config.items()}, dimensions, group_totals))
+            except (TypeError, ValueError):
+                pass
+
+    best_local = max((float(row["objective_delta"]) for row in surface), default=-1.0)
+    basin_jump = best_local < 0.001
+    while len(population) < POPULATION_SIZE:
+        population.append(
+            _mutate_config(
+                base_config,
+                dimensions=dimensions,
+                group_totals=group_totals,
+                rng=rng,
+                scale=1.9 if basin_jump else 0.85,
+            )
+        )
+    return _unique_configs(population)[:POPULATION_SIZE], basin_jump
+
+
+def _quality_diversity_archive(
+    base_config: dict[str, float],
+    rows: Iterable[dict[str, Any]],
+    dimensions: list[EvolutionDimension],
+) -> list[dict[str, Any]]:
+    archive: dict[tuple[str, ...], dict[str, Any]] = {}
+    for row in rows:
+        signature = _config_signature(base_config, row["config"], dimensions)
+        current = archive.get(signature)
+        if current is None or float(row["objective"]) > float(current["objective"]):
+            archive[signature] = {**row, "mutation_signature": list(signature)}
+    return sorted(archive.values(), key=lambda row: (-float(row["objective"]), tuple(row["mutation_signature"])))
+
+
+def _evolution_loop(
+    *,
+    base_config: dict[str, float],
+    population: list[dict[str, float]],
+    dimensions: list[EvolutionDimension],
+    group_totals: dict[str, float],
+    evaluate: Callable[[dict[str, float]], tuple[dict[str, Any], dict[str, float], float]],
+    rng: Random,
+    cache: dict[tuple[tuple[str, float], ...], dict[str, Any]] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    evaluated = dict(cache or {})
+    population = _unique_configs(population)[:POPULATION_SIZE]
+    for generation in range(MAX_GENERATIONS):
+        generation_rows = []
+        for config in population:
+            try:
+                sig = tuple(sorted((key, round(float(value), 7)) for key, value in config.items()))
+                if sig not in evaluated:
+                    report, robust, objective = evaluate(config)
+                    evaluated[sig] = {
+                        "config": config,
+                        "report": report,
+                        "robustness": robust,
+                        "objective": round(float(objective), 7),
+                        "generation": generation + 1,
+                        "source": "population",
+                    }
+                generation_rows.append(evaluated[sig])
+            except (TypeError, ValueError, KeyError):
+                continue
+        if not generation_rows or generation + 1 >= MAX_GENERATIONS:
+            break
+        archive = _quality_diversity_archive(base_config, evaluated.values(), dimensions)
+        parents = archive[: min(4, len(archive))]
+        population = [dict(row["config"]) for row in parents]
+        while len(population) < POPULATION_SIZE:
+            parent = parents[rng.randrange(len(parents))]["config"] if parents else base_config
+            population.append(
+                _mutate_config(
+                    parent,
+                    dimensions=dimensions,
+                    group_totals=group_totals,
+                    rng=rng,
+                    scale=0.72,
+                )
+            )
+        population = _unique_configs(population)
+
+    rows = sorted(evaluated.values(), key=lambda row: (-float(row["objective"]), tuple(sorted(row["config"].items()))))
+    archive = _quality_diversity_archive(base_config, rows, dimensions)
+    return rows, archive
 
 
 def _search_robustness(reference: dict[str, Any], trial: dict[str, Any]) -> dict[str, float]:
@@ -182,91 +483,48 @@ def _recommend_objective(report: dict[str, Any], robust: dict[str, float] | None
     )
 
 
-def _search_targeted(base: dict[str, float]) -> list[dict[str, float]]:
-    keys = ("lexical", "semantic", "title", "quality", "popularity", "freshness")
-    rows = []
-    deltas = (
-        {"lexical": 0.06, "semantic": -0.035, "title": 0.025},
-        {"title": 0.07, "lexical": -0.035, "semantic": -0.035},
-        {"semantic": 0.055, "lexical": -0.035, "title": -0.02},
-        {"freshness": 0.045, "popularity": -0.025, "quality": 0.015},
-    )
-    for delta in deltas:
-        row = dict(base)
-        for key, value in delta.items():
-            row[key] = max(0.005, row[key] + value)
-        row = _normalize(row, keys)
-        if "freshness" in delta:
-            row["diversity"] = min(0.30, row["diversity"] + 0.025)
-        rows.append(row)
-    return rows
-
-
-def _recommend_targeted(base: dict[str, float]) -> list[dict[str, float]]:
-    keys = ("profile", "graph", "category", "quality", "freshness", "popularity", "novelty", "exploration")
-    rows = []
-    deltas = (
-        {"profile": 0.045, "graph": 0.02, "popularity": -0.025},
-        {"freshness": 0.055, "novelty": 0.025, "popularity": -0.035},
-        {"quality": 0.035, "category": 0.02, "exploration": -0.015},
-        {"exploration": 0.035, "novelty": 0.025, "profile": -0.025},
-    )
-    for delta in deltas:
-        row = dict(base)
-        for key, value in delta.items():
-            row[key] = max(0.005, row[key] + value)
-        row = _normalize(row, keys)
-        if "freshness" in delta or "novelty" in delta:
-            row["diversity"] = min(0.30, row["diversity"] + 0.025)
-        rows.append(row)
-    return rows
-
-
-def _evolution_loop(
+def _evolution_metadata(
     *,
+    dimensions: list[EvolutionDimension],
+    surface: list[dict[str, Any]],
+    best: dict[str, Any],
     base_config: dict[str, float],
+    archive: list[dict[str, Any]],
+    basin_jump: bool,
     remembered: list[dict[str, Any]],
-    targeted: list[dict[str, float]],
-    keys: tuple[str, ...],
-    diversity_key: str,
-    evaluate: Callable[[dict[str, float]], tuple[dict[str, Any], dict[str, float], float]],
-    rng: Random,
-) -> list[dict[str, Any]]:
-    remembered_configs = [row["config"] for row in remembered if isinstance(row.get("config"), dict)]
-    population = [*targeted, *remembered_configs]
-    while len(population) < POPULATION_SIZE:
-        population.append(_mutate_config(base_config, keys=keys, diversity_key=diversity_key, rng=rng, scale=0.16))
-    population = _unique_configs(population)[:POPULATION_SIZE]
-    evaluated: dict[tuple[tuple[str, float], ...], dict[str, Any]] = {}
-    elite = dict(base_config)
-    for generation in range(MAX_GENERATIONS):
-        generation_rows = []
-        for config in population:
-            try:
-                sig = tuple(sorted((key, round(float(value), 6)) for key, value in config.items()))
-                if sig not in evaluated:
-                    report, robust, objective = evaluate(config)
-                    evaluated[sig] = {
-                        "config": config,
-                        "report": report,
-                        "robustness": robust,
-                        "objective": round(objective, 6),
-                        "generation": generation + 1,
-                    }
-                generation_rows.append(evaluated[sig])
-            except (TypeError, ValueError, KeyError):
-                continue
-        if not generation_rows:
-            break
-        generation_rows.sort(key=lambda row: (-row["objective"], tuple(sorted(row["config"].items()))))
-        elite = dict(generation_rows[0]["config"])
-        if generation + 1 >= MAX_GENERATIONS:
-            break
-        population = [elite]
-        while len(population) < POPULATION_SIZE:
-            population.append(_mutate_config(elite, keys=keys, diversity_key=diversity_key, rng=rng, scale=0.10))
-        population = _unique_configs(population)
-    return sorted(evaluated.values(), key=lambda row: (-row["objective"], tuple(sorted(row["config"].items()))))
+) -> dict[str, Any]:
+    selected_signature = list(_config_signature(base_config, best["config"], dimensions))
+    return {
+        "method": "schema_response_surface",
+        "router": "posterior_guided_dynamic_arms",
+        "domain_driven": True,
+        "handwritten_mutation_recipes": False,
+        "schema": [dimension.dict() for dimension in dimensions],
+        "response_surface": [
+            {
+                "arm": row["arm"],
+                "field": row["field"],
+                "direction": row["direction"],
+                "objective_delta": row["objective_delta"],
+                "prior_mean": row["prior_mean"],
+                "posterior_sample": row["posterior_sample"],
+                "routing_score": row["routing_score"],
+            }
+            for row in surface
+        ],
+        "semantic_gradient": [
+            {"arm": row["arm"], "objective_delta": row["objective_delta"]}
+            for row in sorted(surface, key=lambda item: -abs(float(item["objective_delta"])))[:6]
+        ],
+        "selected_signature": selected_signature,
+        "basin_jump": basin_jump,
+        "archive_size": len(archive),
+        "archive": [
+            {"signature": row["mutation_signature"], "objective": row["objective"]}
+            for row in archive[:8]
+        ],
+        "remembered_trusted_strategies": len(remembered),
+    }
 
 
 def evolve_search(
@@ -279,13 +537,14 @@ def evolve_search(
     labels = _stable_limit(list(catalog.query_labels), lambda row: row.query)
     discovery_labels, holdout_labels = _stable_split(labels, lambda row: row.query)
     base_config = asdict(current.config)
+    dimensions, group_totals = _evolution_schema(current.config)
     prepared = {label.query: current.prepare(label.query) for label in labels}
     reference = _audit_search_cached(catalog, current, labels, prepared, current.config)
     reference_discovery = _audit_search_cached(catalog, current, discovery_labels, prepared, current.config)
     reference_holdout = _audit_search_cached(catalog, current, holdout_labels, prepared, current.config) if holdout_labels else None
     evidence = int(reference.get("queries", 0))
     if evidence < MIN_SEARCH_EVIDENCE:
-        return _not_ready_search(reference, base_config)
+        return _not_ready_search(reference, base_config, dimensions)
 
     def evaluate(config: dict[str, float]):
         cfg = SearchConfig(**config)
@@ -293,17 +552,36 @@ def evolve_search(
         robust = _search_robustness(reference_discovery, report)
         return report, robust, _search_objective(report, robust)
 
-    rows = _evolution_loop(
+    rng = Random(_seed(catalog, "search"))
+    base_objective = _search_objective(reference_discovery)
+    surface, cache = _response_surface(
         base_config=base_config,
+        dimensions=dimensions,
+        group_totals=group_totals,
         remembered=remembered,
-        targeted=_search_targeted(base_config),
-        keys=("lexical", "semantic", "title", "quality", "popularity", "freshness"),
-        diversity_key="diversity",
         evaluate=evaluate,
-        rng=Random(_seed(catalog, "search")),
+        base_objective=base_objective,
+        rng=rng,
+    )
+    population, basin_jump = _surface_seeds(
+        base_config=base_config,
+        surface=surface,
+        remembered=remembered,
+        dimensions=dimensions,
+        group_totals=group_totals,
+        rng=rng,
+    )
+    rows, archive = _evolution_loop(
+        base_config=base_config,
+        population=population,
+        dimensions=dimensions,
+        group_totals=group_totals,
+        evaluate=evaluate,
+        rng=rng,
+        cache=cache,
     )
     if not rows:
-        return _not_ready_search(reference, base_config)
+        return _not_ready_search(reference, base_config, dimensions)
     best = rows[0]
     candidate_config = SearchConfig(**best["config"])
     trial = _audit_search_cached(catalog, current, labels, prepared, candidate_config)
@@ -312,7 +590,7 @@ def evolve_search(
     holdout_robust = _search_robustness(reference_holdout, holdout) if holdout and reference_holdout else None
     quality_delta = float(trial.get("quality", 0.0)) - float(reference.get("quality", 0.0))
     recall_delta = float(trial.get("recall", 0.0)) - float(reference.get("recall", 0.0))
-    discovery_delta = float(best["objective"]) - _search_objective(reference_discovery)
+    discovery_delta = float(best["objective"]) - base_objective
     holdout_quality_delta = (
         float(holdout.get("quality", 0.0)) - float(reference_holdout.get("quality", 0.0))
         if holdout and reference_holdout else 0.0
@@ -359,9 +637,19 @@ def evolve_search(
                 "quality": row["report"].get("quality", 0.0),
                 "recall": row["report"].get("recall", 0.0),
                 "worse_share": row["robustness"].get("worse_share", 0.0),
+                "signature": list(_config_signature(base_config, row["config"], dimensions)),
             }
             for row in rows[:3]
         ],
+        "evolution": _evolution_metadata(
+            dimensions=dimensions,
+            surface=surface,
+            best=best,
+            base_config=base_config,
+            archive=archive,
+            basin_jump=basin_jump,
+            remembered=remembered,
+        ),
     }
 
 
@@ -375,13 +663,14 @@ def evolve_recommend(
     users = _stable_limit(current.known_users(), lambda user: user)
     discovery_users, holdout_users = _stable_split(users, lambda user: user)
     base_config = asdict(current.config)
+    dimensions, group_totals = _evolution_schema(current.config)
     prepared = {user: current.prepare(user) for user in users}
     reference = _audit_recommend_cached(catalog, current, users, prepared, current.config)
     reference_discovery = _audit_recommend_cached(catalog, current, discovery_users, prepared, current.config)
     reference_holdout = _audit_recommend_cached(catalog, current, holdout_users, prepared, current.config) if holdout_users else None
     evidence = int(reference.get("users", 0))
     if evidence < MIN_RECOMMEND_EVIDENCE:
-        return _not_ready_recommend(reference, base_config)
+        return _not_ready_recommend(reference, base_config, dimensions)
 
     def evaluate(config: dict[str, float]):
         cfg = RecommendConfig(**config)
@@ -389,17 +678,36 @@ def evolve_recommend(
         robust = _recommend_robustness(reference_discovery, report)
         return report, robust, _recommend_objective(report, robust)
 
-    rows = _evolution_loop(
+    rng = Random(_seed(catalog, "recommend"))
+    base_objective = _recommend_objective(reference_discovery)
+    surface, cache = _response_surface(
         base_config=base_config,
+        dimensions=dimensions,
+        group_totals=group_totals,
         remembered=remembered,
-        targeted=_recommend_targeted(base_config),
-        keys=("profile", "graph", "category", "quality", "freshness", "popularity", "novelty", "exploration"),
-        diversity_key="diversity",
         evaluate=evaluate,
-        rng=Random(_seed(catalog, "recommend")),
+        base_objective=base_objective,
+        rng=rng,
+    )
+    population, basin_jump = _surface_seeds(
+        base_config=base_config,
+        surface=surface,
+        remembered=remembered,
+        dimensions=dimensions,
+        group_totals=group_totals,
+        rng=rng,
+    )
+    rows, archive = _evolution_loop(
+        base_config=base_config,
+        population=population,
+        dimensions=dimensions,
+        group_totals=group_totals,
+        evaluate=evaluate,
+        rng=rng,
+        cache=cache,
     )
     if not rows:
-        return _not_ready_recommend(reference, base_config)
+        return _not_ready_recommend(reference, base_config, dimensions)
     best = rows[0]
     candidate_config = RecommendConfig(**best["config"])
     trial = _audit_recommend_cached(catalog, current, users, prepared, candidate_config)
@@ -410,7 +718,7 @@ def evolve_recommend(
     fresh_delta = float(trial.get("freshness", 0.0)) - float(reference.get("freshness", 0.0))
     cov_delta = float(trial.get("coverage", 0.0)) - float(reference.get("coverage", 0.0))
     div_delta = float(trial.get("diversity", 0.0)) - float(reference.get("diversity", 0.0))
-    discovery_delta = float(best["objective"]) - _recommend_objective(reference_discovery)
+    discovery_delta = float(best["objective"]) - base_objective
     holdout_q_delta = (
         float(holdout.get("quality", 0.0)) - float(reference_holdout.get("quality", 0.0))
         if holdout and reference_holdout else 0.0
@@ -464,12 +772,23 @@ def evolve_recommend(
                 "coverage": row["report"].get("coverage", 0.0),
                 "freshness": row["report"].get("freshness", 0.0),
                 "worse_share": row["robustness"].get("worse_share", 0.0),
+                "signature": list(_config_signature(base_config, row["config"], dimensions)),
             }
             for row in rows[:3]
         ],
+        "evolution": _evolution_metadata(
+            dimensions=dimensions,
+            surface=surface,
+            best=best,
+            base_config=base_config,
+            archive=archive,
+            basin_jump=basin_jump,
+            remembered=remembered,
+        ),
     }
 
-def _not_ready_search(reference: dict[str, Any], base_config: dict[str, float]) -> dict[str, Any]:
+
+def _not_ready_search(reference: dict[str, Any], base_config: dict[str, float], dimensions: list[EvolutionDimension] | None = None) -> dict[str, Any]:
     return {
         "reference": reference,
         "candidate": reference,
@@ -483,10 +802,18 @@ def _not_ready_search(reference: dict[str, Any], base_config: dict[str, float]) 
         "robustness": {"worse_share": 0.0, "worst_delta": 0.0, "mean_delta": 0.0},
         "objective_delta": 0.0,
         "validation": {"discovery": {"samples": 0}, "holdout": {"samples": 0}},
+        "evolution": {
+            "method": "schema_response_surface",
+            "domain_driven": True,
+            "handwritten_mutation_recipes": False,
+            "schema": [dimension.dict() for dimension in (dimensions or [])],
+            "response_surface": [],
+            "reason": "insufficient_evaluation_evidence",
+        },
     }
 
 
-def _not_ready_recommend(reference: dict[str, Any], base_config: dict[str, float]) -> dict[str, Any]:
+def _not_ready_recommend(reference: dict[str, Any], base_config: dict[str, float], dimensions: list[EvolutionDimension] | None = None) -> dict[str, Any]:
     return {
         "reference": reference,
         "candidate": reference,
@@ -500,4 +827,12 @@ def _not_ready_recommend(reference: dict[str, Any], base_config: dict[str, float
         "robustness": {"worse_share": 0.0, "worst_delta": 0.0, "mean_delta": 0.0},
         "objective_delta": 0.0,
         "validation": {"discovery": {"samples": 0}, "holdout": {"samples": 0}},
+        "evolution": {
+            "method": "schema_response_surface",
+            "domain_driven": True,
+            "handwritten_mutation_recipes": False,
+            "schema": [dimension.dict() for dimension in (dimensions or [])],
+            "response_surface": [],
+            "reason": "insufficient_evaluation_evidence",
+        },
     }
