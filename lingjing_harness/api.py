@@ -63,6 +63,7 @@ RUN_LOCK = threading.RLock()
 ATTACHMENT_LOCK = threading.RLock()
 WORKER_ID = os.environ.get("LINGJING_WORKER_ID") or f"worker-{uuid.uuid4().hex[:10]}"
 RUN_LEASE_SECONDS = max(6.0, float(os.environ.get("LINGJING_RUN_LEASE_SECONDS", "30")))
+WORKSPACE_UPDATE_LEASE_SECONDS = max(30.0, float(os.environ.get("LINGJING_WORKSPACE_UPDATE_LEASE_SECONDS", "120")))
 MAX_RUNS = 200
 MAX_IMPORT_BYTES = 8 * 1024 * 1024
 MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024
@@ -93,6 +94,12 @@ async def _lease_heartbeat_loop() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     _gc_attachments()
+    for _ in range(50):
+        if _sync_workspace():
+            break
+        await asyncio.sleep(0.1)
+    else:
+        raise RuntimeError("工作区 revision 与 Catalog 文件不一致")
     await _recover_on_startup()
     lease_task = asyncio.create_task(_lease_heartbeat_loop())
     try:
@@ -158,6 +165,55 @@ class ImportPayload(BaseModel):
         if not value:
             raise ValueError("name 不能为空")
         return value
+
+
+def _sync_workspace() -> bool:
+    global catalog, harness, CATALOG_REVISION
+    shared = store.ensure_workspace_revision(CATALOG_REVISION)
+    if not shared or shared == CATALOG_REVISION:
+        return True
+    with WORKSPACE_LOCK:
+        shared = store.workspace_revision()
+        if not shared or shared == CATALOG_REVISION:
+            return True
+        candidate = _load_catalog()
+        revision = catalog_fingerprint(candidate)
+        if revision != shared:
+            return False
+        catalog = candidate
+        harness = AgentHarness(catalog, memory=memory)
+        CATALOG_REVISION = revision
+    return True
+
+
+def _require_workspace_ready() -> None:
+    if not _sync_workspace():
+        raise HTTPException(503, "工作区数据正在同步，请稍后重试")
+
+
+def _activate_catalog(new: Catalog) -> str:
+    global catalog, harness, CATALOG_REVISION
+    with RUN_LOCK:
+        if any(row.get("status") in ACTIVE_RUN_STATUSES for row in RUNS.values()):
+            raise HTTPException(409, "仍有任务在执行，请停止或等待完成后再更换工作区数据")
+    if not store.begin_workspace_update(
+        WORKER_ID, lease_seconds=WORKSPACE_UPDATE_LEASE_SECONDS
+    ):
+        raise HTTPException(409, "工作区正在执行任务或更新数据，请稍后重试")
+    revision = catalog_fingerprint(new)
+    try:
+        new_harness = AgentHarness(new, memory=memory)
+        with WORKSPACE_LOCK:
+            _persist_catalog(new)
+            catalog = new
+            harness = new_harness
+            CATALOG_REVISION = revision
+        if not store.commit_workspace_revision(WORKER_ID, revision):
+            raise RuntimeError("工作区 revision 提交失败")
+    except Exception:
+        store.abort_workspace_update(WORKER_ID)
+        raise
+    return revision
 
 
 def _prune_runs_locked() -> None:
@@ -310,7 +366,8 @@ def index():
 
 @app.get("/api/status")
 def status():
-    key = catalog_fingerprint(catalog)
+    _require_workspace_ready()
+    key = CATALOG_REVISION
     return {
         "status": "ok",
         "data": catalog.summary(),
@@ -347,6 +404,7 @@ def status():
 
 @app.get("/api/capabilities")
 def capabilities():
+    _require_workspace_ready()
     return {
         "tools": harness.tools.manifest(),
         "autonomy": {
@@ -609,6 +667,9 @@ async def _recover_on_startup() -> None:
 
 @app.post("/api/conversations/{cid}/messages")
 async def add_message(cid: str, req: ChatRequest):
+    _require_workspace_ready()
+    if store.workspace_update_active():
+        raise HTTPException(409, "工作区数据正在更新，请稍后再开始任务")
     try:
         store.get_conversation(cid)
     except KeyError as exc:
@@ -703,24 +764,16 @@ def get_run(run_id: str):
 
 @app.post("/api/data/import")
 def import_data(req: ImportPayload):
-    global catalog, harness, CATALOG_REVISION
     try:
         new = Catalog.from_payload(req.data, name=req.name)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    with WORKSPACE_LOCK, RUN_LOCK:
-        if any(row.get("status") in ACTIVE_RUN_STATUSES for row in RUNS.values()) or store.active_conversation_ids():
-            raise HTTPException(409, "仍有任务在执行，请停止或等待完成后再更换工作区数据")
-        _persist_catalog(new)
-        catalog = new
-        harness = AgentHarness(catalog, memory=memory)
-        CATALOG_REVISION = catalog_fingerprint(catalog)
-    return {"ok": True, "data": catalog.summary(), "catalog_revision": CATALOG_REVISION}
+    revision = _activate_catalog(new)
+    return {"ok": True, "data": new.summary(), "catalog_revision": revision}
 
 
 @app.post("/api/data/import-file")
 async def import_file(file: UploadFile = File(...)):
-    global catalog, harness, CATALOG_REVISION
     raw = await file.read(MAX_IMPORT_BYTES + 1)
     if len(raw) > MAX_IMPORT_BYTES:
         raise HTTPException(413, "文件不能超过 8MB")
@@ -732,11 +785,5 @@ async def import_file(file: UploadFile = File(...)):
         new = Catalog.from_payload(payload, name=file.filename or "导入数据")
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    with WORKSPACE_LOCK, RUN_LOCK:
-        if any(row.get("status") in ACTIVE_RUN_STATUSES for row in RUNS.values()) or store.active_conversation_ids():
-            raise HTTPException(409, "仍有任务在执行，请停止或等待完成后再更换工作区数据")
-        _persist_catalog(new)
-        catalog = new
-        harness = AgentHarness(catalog, memory=memory)
-        CATALOG_REVISION = catalog_fingerprint(catalog)
-    return {"ok": True, "data": catalog.summary(), "catalog_revision": CATALOG_REVISION}
+    revision = _activate_catalog(new)
+    return {"ok": True, "data": new.summary(), "catalog_revision": revision}

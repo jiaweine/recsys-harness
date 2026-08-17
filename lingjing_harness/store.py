@@ -42,6 +42,13 @@ class WorkspaceStore:
         );
         create index if not exists idx_runs_status on runs(status,updated_at);
         create index if not exists idx_runs_conversation_status on runs(conversation_id,status,updated_at);
+        create table if not exists workspace_state(
+          id integer primary key check(id=1),
+          catalog_revision text not null default '',
+          update_owner text,
+          update_until real,
+          updated_at real not null
+        );
         """
         with self._lock, self._connect() as connection:
             connection.executescript(sql)
@@ -50,6 +57,10 @@ class WorkspaceStore:
                 connection.execute("alter table runs add column owner_id text")
             if "lease_until" not in columns:
                 connection.execute("alter table runs add column lease_until real")
+            connection.execute(
+                "insert or ignore into workspace_state(id,catalog_revision,updated_at) values(1,'',?)",
+                (time.time(),),
+            )
             connection.commit()
 
     @staticmethod
@@ -156,6 +167,108 @@ class WorkspaceStore:
             "created_at": now,
         }
 
+    def ensure_workspace_revision(self, revision: str) -> str:
+        revision = str(revision or "").strip()
+        with self._lock, self._connect() as connection:
+            connection.execute("begin immediate")
+            row = connection.execute(
+                "select catalog_revision from workspace_state where id=1"
+            ).fetchone()
+            current = str(row["catalog_revision"] or "") if row else ""
+            if not current and revision:
+                connection.execute(
+                    "update workspace_state set catalog_revision=?,updated_at=? where id=1",
+                    (revision, time.time()),
+                )
+                current = revision
+            connection.commit()
+        return current
+
+    def workspace_revision(self) -> str:
+        with self._connect() as connection:
+            row = connection.execute(
+                "select catalog_revision from workspace_state where id=1"
+            ).fetchone()
+        return str(row["catalog_revision"] or "") if row else ""
+
+    def workspace_update_active(self, now: float | None = None) -> bool:
+        now = time.time() if now is None else float(now)
+        with self._connect() as connection:
+            row = connection.execute(
+                "select update_owner,update_until from workspace_state where id=1"
+            ).fetchone()
+        return bool(
+            row
+            and row["update_owner"]
+            and float(row["update_until"] or 0.0) > now
+        )
+
+    def begin_workspace_update(
+        self, owner_id: str, *, lease_seconds: float = 120.0, now: float | None = None
+    ) -> bool:
+        now = time.time() if now is None else float(now)
+        until = now + max(5.0, float(lease_seconds))
+        with self._lock, self._connect() as connection:
+            connection.execute("begin immediate")
+            active = connection.execute(
+                "select 1 from runs where status in ('running','interrupted','cancel_requested') limit 1"
+            ).fetchone()
+            if active:
+                connection.rollback()
+                return False
+            row = connection.execute(
+                "select update_owner,update_until from workspace_state where id=1"
+            ).fetchone()
+            if (
+                row
+                and row["update_owner"]
+                and row["update_owner"] != owner_id
+                and float(row["update_until"] or 0.0) > now
+            ):
+                connection.rollback()
+                return False
+            connection.execute(
+                "update workspace_state set update_owner=?,update_until=?,updated_at=? where id=1",
+                (owner_id, until, now),
+            )
+            connection.commit()
+        return True
+
+    def commit_workspace_revision(self, owner_id: str, revision: str) -> bool:
+        revision = str(revision or "").strip()
+        if not revision:
+            return False
+        now = time.time()
+        with self._lock, self._connect() as connection:
+            connection.execute("begin immediate")
+            row = connection.execute(
+                "select update_owner from workspace_state where id=1"
+            ).fetchone()
+            if not row or row["update_owner"] != owner_id:
+                connection.rollback()
+                return False
+            connection.execute(
+                """
+                update workspace_state
+                set catalog_revision=?,update_owner=null,update_until=null,updated_at=?
+                where id=1
+                """,
+                (revision, now),
+            )
+            connection.commit()
+        return True
+
+    def abort_workspace_update(self, owner_id: str) -> None:
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                update workspace_state
+                set update_owner=null,update_until=null,updated_at=?
+                where id=1 and update_owner=?
+                """,
+                (time.time(), owner_id),
+            )
+
     def reserve_run(
         self,
         run_id: str,
@@ -181,6 +294,16 @@ class WorkspaceStore:
         )
         with self._lock, self._connect() as connection:
             connection.execute("begin immediate")
+            workspace = connection.execute(
+                "select update_owner,update_until from workspace_state where id=1"
+            ).fetchone()
+            if (
+                workspace
+                and workspace["update_owner"]
+                and float(workspace["update_until"] or 0.0) > now
+            ):
+                connection.rollback()
+                return False
             active = connection.execute(
                 """
                 select run_id from runs

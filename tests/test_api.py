@@ -290,3 +290,33 @@ def test_cancel_can_land_on_a_different_worker():
         assert api_module.store.run_status(run_id) == 'cancel_requested'
         final = {**snapshot, "status":"cancelled", "updated_at":time.time()}
         api_module.store.save_run(run_id, conv["id"], "remote", "cancelled", final)
+
+
+def test_worker_sync_reloads_catalog_after_shared_revision_changes():
+    from lingjing_harness.domain import Catalog
+    from lingjing_harness.runtime import catalog_fingerprint
+
+    original_payload = api_module.catalog.to_payload()
+    original_name = api_module.catalog.name
+    original_revision = api_module.CATALOG_REVISION
+    changed_payload = api_module.catalog.to_payload()
+    changed_payload["items"][0]["title"] = changed_payload["items"][0]["title"] + " 同步检查"
+    changed = Catalog.from_payload(changed_payload, name="跨进程同步数据")
+    changed_revision = catalog_fingerprint(changed)
+    owner = "simulated-other-worker"
+    try:
+        assert api_module.store.begin_workspace_update(owner, lease_seconds=30)
+        api_module._persist_catalog(changed)
+        assert api_module.store.commit_workspace_revision(owner, changed_revision)
+        assert api_module.CATALOG_REVISION == original_revision
+        assert api_module._sync_workspace() is True
+        assert api_module.CATALOG_REVISION == changed_revision
+        assert api_module.catalog.name == "跨进程同步数据"
+    finally:
+        restored = Catalog.from_payload(original_payload, name=original_name)
+        restore_owner = "restore-worker"
+        assert api_module.store.begin_workspace_update(restore_owner, lease_seconds=30)
+        api_module._persist_catalog(restored)
+        assert api_module.store.commit_workspace_revision(restore_owner, original_revision)
+        assert api_module._sync_workspace() is True
+        assert api_module.CATALOG_REVISION == original_revision

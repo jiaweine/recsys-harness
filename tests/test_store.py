@@ -75,3 +75,34 @@ def test_stale_worker_cannot_commit_terminal_result_after_lease_takeover(tmp_pat
     current = new_worker.get_run("run-fence")
     assert current["status"] == "running"
     assert current["owner_id"] == "new-worker"
+
+
+def test_workspace_update_lock_blocks_other_worker_and_new_runs(tmp_path):
+    import time
+    path = tmp_path / "workspace-revision.db"
+    one = WorkspaceStore(path)
+    two = WorkspaceStore(path)
+    assert one.ensure_workspace_revision("rev-a") == "rev-a"
+    assert two.workspace_revision() == "rev-a"
+    assert one.begin_workspace_update("worker-one", lease_seconds=30) is True
+    assert two.begin_workspace_update("worker-two", lease_seconds=30) is False
+    conversation = two.create_conversation()
+    now = time.time()
+    snapshot = {"run_id":"blocked","conversation_id":conversation["id"],"goal":"blocked","status":"running","events":[],"created_at":now,"updated_at":now}
+    assert two.reserve_run("blocked", conversation["id"], "blocked", snapshot, owner_id="worker-two", lease_seconds=30) is False
+    assert one.commit_workspace_revision("worker-one", "rev-b") is True
+    assert two.workspace_revision() == "rev-b"
+    assert two.reserve_run("allowed", conversation["id"], "allowed", {**snapshot,"run_id":"allowed"}, owner_id="worker-two", lease_seconds=30) is True
+
+
+def test_active_run_blocks_distributed_workspace_update(tmp_path):
+    import time
+    path = tmp_path / "workspace-active.db"
+    one = WorkspaceStore(path)
+    two = WorkspaceStore(path)
+    one.ensure_workspace_revision("rev-a")
+    conversation = one.create_conversation()
+    now = time.time()
+    snapshot = {"run_id":"active","conversation_id":conversation["id"],"goal":"active","status":"running","events":[],"created_at":now,"updated_at":now}
+    assert one.reserve_run("active", conversation["id"], "active", snapshot, owner_id="worker-one", lease_seconds=30)
+    assert two.begin_workspace_update("worker-two", lease_seconds=30) is False
