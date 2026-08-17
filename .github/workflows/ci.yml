@@ -44,6 +44,21 @@ jobs:
           type_values = [int(value) for declaration in declarations for value in re.findall(r'(\d+)px', declaration)]
           assert not [value for value in type_values if value > 38], 'product type scale exceeds 38px'
 
+          readme = Path('README.md').read_text(encoding='utf-8')
+          assert 'raw.githubusercontent.com' not in readme, 'README must not depend on GitHub Raw CDN'
+          assert '/raw/main/' not in readme, 'README must not depend on GitHub raw/main route'
+          asset_names = ('overview.png', 'workbench.png', 'evidence.png', 'mobile.png', 'architecture.svg')
+          refs = re.findall(
+              r'https://cdn\.jsdelivr\.net/gh/jiaweine/recsys-harness@([0-9a-f]{40})/docs/readme-assets/([^\s)]+)',
+              readme,
+          )
+          matched = {name: sha for sha, name in refs if name in asset_names}
+          assert set(matched) == set(asset_names), f'README asset refs incomplete: {matched}'
+          assert len(set(matched.values())) == 1, f'README assets must pin one immutable commit: {matched}'
+          for name in asset_names:
+              asset = Path('docs/readme-assets', name)
+              assert asset.is_file() and asset.stat().st_size > 100, f'missing README asset: {asset}'
+
           control_files = [
               Path('lingjing_harness/api.py'),
               Path('lingjing_harness/algorithms/evolution.py'),
