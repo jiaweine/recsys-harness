@@ -13,25 +13,88 @@ permissions:
 jobs:
   apply:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
 
       - name: Verify and apply upgrade bundle
         shell: bash
         run: |
           set -euo pipefail
-          cat .upgrade/part-* | base64 -d > /tmp/recsys-frontier-upgrade.tar.gz
+          cat \
+            .upgrade/part-00 \
+            .upgrade/part-01 \
+            .upgrade/part-02 \
+            .upgrade/part-03 \
+            .upgrade/part-04 \
+            .upgrade/part-06 \
+            .upgrade/part-08 \
+            | base64 -d > /tmp/recsys-frontier-upgrade.tar.gz
           echo "3b3772d74cec01228793baeaaec813ac484154250d7696a1629c2d1f674166af  /tmp/recsys-frontier-upgrade.tar.gz" | sha256sum -c -
           tar -xzf /tmp/recsys-frontier-upgrade.tar.gz
           rm -f lingjing_harness/algorithms/experiment.py
-          rm -rf .upgrade
-          rm -f .github/workflows/apply-frontier-upgrade.yml
+
+      - name: Validate upgraded source
+        shell: bash
+        run: |
+          set -euo pipefail
+          pip install -r requirements.txt
+          pip install -e . --no-deps
+          python -m compileall -q lingjing_harness tests
+          pytest -q
+          python scripts/demo_smoke.py > /dev/null
+          lingjing-harness '检查用户 u-lin 的推荐体验，自动优化并持续学习' > /dev/null
+          node --check frontend/app.js
+
+      - name: Verify wheel contains the web product
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/recsys-wheel /tmp/recsys-installed
+          mkdir -p /tmp/recsys-wheel /tmp/recsys-installed
+          python -m pip wheel . --no-deps -w /tmp/recsys-wheel
+          python -m pip install /tmp/recsys-wheel/*.whl --no-deps --target /tmp/recsys-installed
+          cd /tmp
+          PYTHONPATH=/tmp/recsys-installed python - <<'PY'
+          from fastapi.testclient import TestClient
+          from lingjing_harness.api import app
+          response = TestClient(app).get('/')
+          assert response.status_code == 200
+          assert '灵境体验工作台' in response.text
+          status = TestClient(app).get('/api/status').json()
+          assert status['agent']['dynamic_replan'] is True
+          assert status['agent']['self_evolving'] is True
+          assert status['agent']['checkpoint_resume'] is True
+          PY
+
+      - name: Validate real Chromium product flow
+        shell: bash
+        run: |
+          set -euo pipefail
+          pip install playwright
+          python -m playwright install chromium --with-deps
+          python -m uvicorn lingjing_harness.api:app --host 127.0.0.1 --port 8765 > /tmp/recsys-harness.log 2>&1 &
+          server_pid=$!
+          trap 'kill $server_pid || true' EXIT
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8765/api/status > /dev/null; then break; fi
+            sleep 1
+          done
+          python scripts/capture_readme_assets.py
+          test -s docs/readme-assets/product-run.png
+          test -s docs/readme-assets/product-workbench.png
+          test -s docs/readme-assets/product-evidence.png
 
       - name: Commit autonomous self-evolving harness
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf .upgrade
+          rm -f .github/workflows/apply-frontier-upgrade.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
