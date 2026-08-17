@@ -25,6 +25,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo "expected chunks:"
+          echo "00 7dd47862cd27f63fca2b450254c41d268ae3d7b1e74e8bc64e48a786fcd20723"
+          echo "01 1e41fcb31aec34f944cfab8c7a8c7572902f9d7e22dc68ca4cc9a2e6242e90b1"
+          echo "02 1a06db83337c7e29be8be98b102c32965820ce0ee85f110b3adee8580887c361"
+          echo "03 aac948be236f92b8071286f317a9657974b3a207a0d772491bdaf308693755f8"
+          echo "04 6d4887ef83ed837d0f2ecf33bf83f8f6b62921e004c594200c911b7e65133748"
+          echo "05 9e2f1e27d05585d0d6652d390db7ebc973fc02b3c60e31f5ca6cc0d4717ecb75"
+          echo "06 523e7fe62e5e50c19bfb170c9c974597b0ae92b94a0580ab75c8e26ae1e75565"
+          echo "07 b412201bd291438b995230c528c89da3bbbff0abddd4ccdd816fec5fe17631e9"
+          echo "08 f8f6b0cfa3c85ed1c13ed27fdad84d3de53bc34bc6159be69ad04c9fdae827cd"
+          echo "actual chunks:"
+          for p in 00 01 02 03 08; do printf '%s ' "$p"; sha256sum ".upgrade/part-$p"; done
+          printf '04-first '; head -c 8000 .upgrade/part-04 | sha256sum
+          printf '04-last  '; tail -c 8000 .upgrade/part-04 | sha256sum
+          printf '05-file  '; sha256sum .upgrade/part-05
+          printf '06-first '; head -c 8000 .upgrade/part-06 | sha256sum
+          printf '06-last  '; tail -c 8000 .upgrade/part-06 | sha256sum
+          printf '07-file  '; sha256sum .upgrade/part-07
           cat \
             .upgrade/part-00 \
             .upgrade/part-01 \
@@ -34,6 +52,7 @@ jobs:
             .upgrade/part-06 \
             .upgrade/part-08 \
             | base64 -d > /tmp/recsys-frontier-upgrade.tar.gz
+          sha256sum /tmp/recsys-frontier-upgrade.tar.gz
           echo "3b3772d74cec01228793baeaaec813ac484154250d7696a1629c2d1f674166af  /tmp/recsys-frontier-upgrade.tar.gz" | sha256sum -c -
           tar -xzf /tmp/recsys-frontier-upgrade.tar.gz
           rm -f lingjing_harness/algorithms/experiment.py
@@ -62,10 +81,11 @@ jobs:
           PYTHONPATH=/tmp/recsys-installed python - <<'PY'
           from fastapi.testclient import TestClient
           from lingjing_harness.api import app
-          response = TestClient(app).get('/')
+          client = TestClient(app)
+          response = client.get('/')
           assert response.status_code == 200
           assert '灵境体验工作台' in response.text
-          status = TestClient(app).get('/api/status').json()
+          status = client.get('/api/status').json()
           assert status['agent']['dynamic_replan'] is True
           assert status['agent']['self_evolving'] is True
           assert status['agent']['checkpoint_resume'] is True
