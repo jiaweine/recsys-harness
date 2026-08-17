@@ -17,6 +17,7 @@ jobs:
       - run: python -m compileall -q lingjing_harness tests
       - run: pytest -q
       - run: python scripts/demo_smoke.py > /dev/null
+      - run: python scripts/probe_harness_contract.py > /dev/null
       - run: lingjing-harness '做一次全局体检' > /dev/null
       - name: Product hygiene gates
         run: |
