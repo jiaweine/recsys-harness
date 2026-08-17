@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="940" viewBox="0 0 1600 940" role="img" aria-labelledby="title desc">
+  <title id="title">Recsys Harness system map</title>
+  <desc id="desc">A layered architecture map showing the experience plane, agent runtime control plane, safety plane, data plane, tool registry, and owned search and recommendation core.</desc>
+  <defs>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#223227" stroke-width="1" opacity="0.42"/>
+    </pattern>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 z" fill="#C8F06A"/>
+    </marker>
+    <style>
+      .sans{font-family:Arial,'Noto Sans SC',sans-serif}.mono{font-family:'SFMono-Regular',Consolas,'Liberation Mono',monospace}
+      .kicker{font-size:15px;letter-spacing:2.4px;font-weight:700}.h1{font-size:34px;font-weight:700}.h2{font-size:22px;font-weight:700}
+      .body{font-size:16px}.small{font-size:13px}.tiny{font-size:11px;letter-spacing:1.2px}.muted{fill:#93A096}.ink{fill:#142219}.paper{fill:#F3F0E7}.accent{fill:#C8F06A}.white{fill:#F8FAF4}
+      .line{stroke:#34443A;stroke-width:1}.line2{stroke:#57665C;stroke-width:1}.flow{stroke:#C8F06A;stroke-width:2;fill:none;marker-end:url(#arrow)}
+    </style>
+  </defs>
+
+  <rect width="1600" height="940" fill="#0E1711"/>
+  <rect width="1600" height="940" fill="url(#grid)"/>
+
+  <text x="70" y="62" class="sans kicker accent">SYSTEM MAP / SEARCH + RECOMMENDATION</text>
+  <text x="70" y="103" class="sans h1 white">The harness is the control layer. The ranking core stays owned.</text>
+  <text x="70" y="132" class="sans body muted">One execution surface for goals, tools, algorithms, evidence and safety — without turning the product into an algorithm dashboard.</text>
+
+  <rect x="70" y="176" width="360" height="232" rx="4" fill="#15241A" stroke="#3A4D40"/>
+  <text x="92" y="204" class="sans tiny accent">01 / EXPERIENCE PLANE</text>
+  <text x="92" y="237" class="sans h2 white">Business goal in.</text>
+  <text x="92" y="261" class="sans body muted">Natural-language tasks, not parameter panels.</text>
+  <line x1="92" y1="282" x2="408" y2="282" class="line"/>
+  <text x="92" y="310" class="sans small white">SEARCH EXPERIENCE</text><text x="279" y="310" class="sans small muted">query / quality / compare</text>
+  <text x="92" y="340" class="sans small white">RECOMMENDATION</text><text x="279" y="340" class="sans small muted">user / slate / freshness</text>
+  <text x="92" y="370" class="sans small white">AUDIT &amp; REVIEW</text><text x="279" y="370" class="sans small muted">trace / evidence / next step</text>
+  <circle cx="404" cy="204" r="7" fill="#C8F06A"/><circle cx="404" cy="204" r="2" fill="#15241A"/>
+
+  <rect x="478" y="176" width="654" height="232" rx="4" class="paper"/>
+  <text x="502" y="204" class="sans tiny ink">02 / AGENT RUNTIME · CONTROL PLANE</text>
+  <text x="502" y="237" class="sans h2 ink">Observe → Plan → Execute → Verify</text>
+  <text x="502" y="261" class="sans body" fill="#5F6C63">The runtime owns orchestration, contracts, event trace and completion criteria.</text>
+
+  <g transform="translate(502 294)">
+    <rect width="140" height="76" rx="3" fill="#E4E3DA"/>
+    <text x="14" y="24" class="sans tiny ink">OBSERVE</text><text x="14" y="47" class="sans small" fill="#58655D">workspace · state</text><text x="14" y="64" class="sans small" fill="#58655D">task constraints</text>
+  </g>
+  <g transform="translate(654 294)">
+    <rect width="140" height="76" rx="3" fill="#E4E3DA"/>
+    <text x="14" y="24" class="sans tiny ink">PLAN</text><text x="14" y="47" class="sans small" fill="#58655D">OwnedPolicy</text><text x="14" y="64" class="sans small" fill="#58655D">tool steps</text>
+  </g>
+  <g transform="translate(806 294)">
+    <rect width="140" height="76" rx="3" fill="#D9E8BE"/>
+    <text x="14" y="24" class="sans tiny ink">EXECUTE</text><text x="14" y="47" class="sans small" fill="#42553F">Tool Registry</text><text x="14" y="64" class="sans small" fill="#42553F">real handlers</text>
+  </g>
+  <g transform="translate(958 294)">
+    <rect width="150" height="76" rx="3" fill="#E4E3DA"/>
+    <text x="14" y="24" class="sans tiny ink">VERIFY</text><text x="14" y="47" class="sans small" fill="#58655D">ResultVerifier</text><text x="14" y="64" class="sans small" fill="#58655D">evidence gate</text>
+  </g>
+  <rect x="502" y="380" width="606" height="8" rx="4" fill="#C8F06A"/>
+
+  <rect x="1180" y="176" width="350" height="232" rx="4" fill="#17271C" stroke="#3A4D40"/>
+  <text x="1204" y="204" class="sans tiny accent">03 / TRUST PLANE</text>
+  <text x="1204" y="237" class="sans h2 white">Safe by default.</text>
+  <text x="1204" y="262" class="sans body muted">Simulation comes before mutation.</text>
+  <line x1="1204" y1="282" x2="1506" y2="282" class="line"/>
+  <text x="1204" y="309" class="mono small accent">READ</text><text x="1272" y="309" class="sans small white">inspect / search / recommend</text>
+  <text x="1204" y="340" class="mono small accent">SIM</text><text x="1272" y="340" class="sans small white">audit / shadow compare</text>
+  <text x="1204" y="371" class="mono small accent">GATE</text><text x="1272" y="371" class="sans small white">safe_to_try / reject</text>
+  <text x="1204" y="394" class="sans tiny muted">NO BUILT-IN AUTO DEPLOY TOOL</text>
+
+  <rect x="70" y="462" width="360" height="382" rx="4" fill="#F3F0E7"/>
+  <text x="92" y="492" class="sans tiny ink">04 / DATA PLANE</text>
+  <text x="92" y="525" class="sans h2 ink">Workspace context</text>
+  <text x="92" y="548" class="sans body" fill="#5F6C63">One context for reproduction, audit</text><text x="92" y="568" class="sans body" fill="#5F6C63">and candidate comparison.</text>
+  <line x1="92" y1="585" x2="408" y2="585" stroke="#C8CCC5"/>
+
+  <g transform="translate(92 610)">
+    <text x="0" y="0" class="sans tiny" fill="#6A756D">CATALOG</text><text x="0" y="28" class="sans h2 ink">24</text><text x="48" y="27" class="sans small" fill="#6A756D">items</text>
+    <line x1="0" y1="46" x2="145" y2="46" stroke="#D1D3CC"/>
+  </g>
+  <g transform="translate(250 610)">
+    <text x="0" y="0" class="sans tiny" fill="#6A756D">USERS</text><text x="0" y="28" class="sans h2 ink">5</text><text x="29" y="27" class="sans small" fill="#6A756D">profiles</text>
+    <line x1="0" y1="46" x2="158" y2="46" stroke="#D1D3CC"/>
+  </g>
+  <g transform="translate(92 686)">
+    <text x="0" y="0" class="sans tiny" fill="#6A756D">INTERACTIONS</text><text x="0" y="28" class="sans h2 ink">21</text><text x="48" y="27" class="sans small" fill="#6A756D">events</text>
+    <line x1="0" y1="46" x2="145" y2="46" stroke="#D1D3CC"/>
+  </g>
+  <g transform="translate(250 686)">
+    <text x="0" y="0" class="sans tiny" fill="#6A756D">LABELED QUERIES</text><text x="0" y="28" class="sans h2 ink">6</text><text x="29" y="27" class="sans small" fill="#6A756D">checks</text>
+    <line x1="0" y1="46" x2="158" y2="46" stroke="#D1D3CC"/>
+  </g>
+  <rect x="92" y="769" width="316" height="58" rx="3" fill="#17271C"/>
+  <text x="108" y="792" class="sans tiny accent">WORKSPACE STORE</text><text x="108" y="813" class="sans small white">sessions · messages · run results</text>
+
+  <rect x="478" y="462" width="432" height="382" rx="4" fill="#142219" stroke="#3A4D40"/>
+  <text x="502" y="492" class="sans tiny accent">05 / TOOL PLANE</text>
+  <text x="502" y="525" class="sans h2 white">Typed capability registry</text>
+  <text x="502" y="550" class="sans body muted">The agent acts through bounded tools, not hidden side effects.</text>
+  <line x1="502" y1="573" x2="886" y2="573" class="line"/>
+
+  <text x="502" y="604" class="sans tiny muted">DATA</text>
+  <rect x="502" y="618" width="384" height="42" rx="3" fill="#1E3024"/><text x="518" y="644" class="mono small white">data.inspect</text><text x="808" y="644" class="mono tiny accent">READ</text>
+  <text x="502" y="690" class="sans tiny muted">SEARCH</text>
+  <text x="502" y="716" class="mono small white">search.run</text><text x="632" y="716" class="mono small white">search.audit</text><text x="770" y="716" class="mono small white">search.compare</text>
+  <line x1="502" y1="732" x2="886" y2="732" class="line"/>
+  <text x="502" y="762" class="sans tiny muted">RECOMMENDATION</text>
+  <text x="502" y="788" class="mono small white">recommend.run</text><text x="640" y="788" class="mono small white">recommend.audit</text><text x="790" y="788" class="mono small white">compare</text>
+  <text x="502" y="820" class="sans tiny accent">TOOL CONTRACT → RISK CLASS → HANDLER → EVIDENCE</text>
+
+  <rect x="958" y="462" width="572" height="382" rx="4" fill="#142219" stroke="#3A4D40"/>
+  <text x="982" y="492" class="sans tiny accent">06 / OWNED SEARCH + RECOMMENDATION CORE</text>
+  <text x="982" y="525" class="sans h2 white">Algorithms stay inside the project.</text>
+  <text x="982" y="550" class="sans body muted">No external model is required for the ranking core or task routing.</text>
+
+  <g transform="translate(982 590)">
+    <rect width="252" height="104" rx="3" fill="#F3F0E7"/>
+    <text x="16" y="27" class="sans tiny ink">SEARCH ENGINE</text>
+    <text x="16" y="54" class="sans small" fill="#526058">field-aware matching · semantic hash</text>
+    <text x="16" y="77" class="sans small" fill="#526058">quality · freshness · diversity</text>
+    <rect x="16" y="88" width="70" height="4" fill="#C8F06A"/><rect x="92" y="88" width="42" height="4" fill="#9CB85B"/><rect x="140" y="88" width="93" height="4" fill="#D6D8D0"/>
+  </g>
+  <g transform="translate(1252 590)">
+    <rect width="254" height="104" rx="3" fill="#F3F0E7"/>
+    <text x="16" y="27" class="sans tiny ink">RECOMMENDATION ENGINE</text>
+    <text x="16" y="54" class="sans small" fill="#526058">implicit feedback · co-occurrence</text>
+    <text x="16" y="77" class="sans small" fill="#526058">preference · novelty · exploration</text>
+    <rect x="16" y="88" width="54" height="4" fill="#C8F06A"/><rect x="76" y="88" width="92" height="4" fill="#9CB85B"/><rect x="174" y="88" width="61" height="4" fill="#D6D8D0"/>
+  </g>
+
+  <g transform="translate(982 716)">
+    <rect width="524" height="98" rx="3" fill="#1E3024"/>
+    <text x="16" y="25" class="sans tiny accent">EVALUATION + SHADOW EXPERIMENT</text>
+    <text x="16" y="51" class="sans small white">same data · baseline vs candidate · deterministic checks · safe_to_try gate</text>
+    <text x="16" y="76" class="sans small muted">Search: labeled-query quality checks · Recommendation: coverage / diversity / freshness / novelty</text>
+  </g>
+
+  <path d="M430 292 C452 292,454 292,478 292" class="flow"/>
+  <path d="M1132 292 C1152 292,1158 292,1180 292" class="flow"/>
+  <path d="M805 408 L805 444 L694 444 L694 462" class="flow"/>
+  <path d="M910 653 C930 653,938 653,958 653" class="flow"/>
+  <path d="M430 653 C450 653,458 653,478 653" class="flow"/>
+  <path d="M1242 462 L1242 438 C1242 426,1226 420,1212 420 L1064 420 C1035 420,1024 408,1024 390" class="flow"/>
+
+  <text x="444" y="280" class="mono tiny accent">GOAL</text>
+  <text x="1144" y="280" class="mono tiny accent">GATE</text>
+  <text x="712" y="438" class="mono tiny accent">CALL</text>
+  <text x="919" y="643" class="mono tiny accent">EXEC</text>
+  <text x="440" y="643" class="mono tiny accent">CTX</text>
+  <text x="1082" y="430" class="mono tiny accent">RESULT + EVIDENCE</text>
+
+  <text x="70" y="892" class="sans tiny muted">RECSYS HARNESS · CURRENT IMPLEMENTATION MAP</text>
+  <text x="1530" y="892" text-anchor="end" class="mono tiny accent">GOAL IN / EVIDENCE OUT</text>
+</svg>
