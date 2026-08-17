@@ -17,6 +17,48 @@ jobs:
       - run: pytest -q
       - run: python scripts/demo_smoke.py > /dev/null
       - run: lingjing-harness '做一次全局体检' > /dev/null
+      - name: Product hygiene gates
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          frontend_paths = [Path('frontend/index.html'), Path('frontend/app.css'), Path('frontend/app.js')]
+          frontend = '\n'.join(path.read_text(encoding='utf-8') for path in frontend_paths)
+          lower = frontend.lower()
+          forbidden_ui = [
+              'deepseek', 'claude', 'chatgpt', 'openai', 'qwen', 'searxng',
+              'bm25', 'embedding', '向量', '召回', '重排', 'ndcg', 'mrr', 'mmr', 'policy model',
+          ]
+          hits = [term for term in forbidden_ui if term in lower]
+          assert not hits, f'customer UI leaked internal/third-party terms: {hits}'
+
+          css = Path('frontend/app.css').read_text(encoding='utf-8')
+          css_lower = css.lower()
+          assert '@import' not in css_lower and 'fonts.googleapis' not in css_lower, 'remote font dependency detected'
+          assert 'gradient(' not in css_lower, 'generic gradient styling detected'
+          assert 'backdrop-filter' not in css_lower, 'glass blur styling detected'
+          sizes = [int(value) for value in re.findall(r'font-size:\s*(\d+)px', css)]
+          assert not [value for value in sizes if value < 10], 'font size below 10px detected'
+
+          control_files = [
+              Path('lingjing_harness/api.py'),
+              Path('lingjing_harness/algorithms/evolution.py'),
+              *Path('lingjing_harness/runtime').glob('*.py'),
+              *Path('tests').glob('test_*.py'),
+          ]
+          control = '\n'.join(path.read_text(encoding='utf-8') for path in control_files if path.exists())
+          assert not re.search(r'(?i)(^|[^a-z0-9])v[1-4]([^a-z0-9]|$)|api/v[1-4]|_v[1-4]', control), 'numbered historical product path detected'
+          legacy_terms = [('base' + 'line'), ('com' + 'pare'), ('shadow_' + 'compare')]
+          legacy_hits = [term for term in legacy_terms if term in control.lower()]
+          assert not legacy_hits, f'legacy decision-path terminology detected: {legacy_hits}'
+
+          tracked = set(Path('.').glob('*'))
+          import subprocess
+          names = subprocess.check_output(['git', 'ls-files'], text=True).splitlines()
+          generated = [name for name in names if name.startswith(('build/', 'dist/')) or '.egg-info/' in name]
+          assert not generated, f'generated packaging artifacts are tracked: {generated[:5]}'
+          PY
       - name: Verify wheel contains the web product
         run: |
           rm -rf /tmp/recsys-wheel /tmp/recsys-installed
@@ -27,8 +69,13 @@ jobs:
           PYTHONPATH=/tmp/recsys-installed python - <<'PY'
           from fastapi.testclient import TestClient
           from lingjing_harness.api import app
-          response = TestClient(app).get('/')
-          assert response.status_code == 200
-          assert '灵境体验工作台' in response.text
+          with TestClient(app) as client:
+              page = client.get('/')
+              status = client.get('/api/status')
+              capabilities = client.get('/api/capabilities')
+          assert page.status_code == 200
+          assert '灵境' in page.text
+          assert status.status_code == 200 and status.json()['runtime']['evidence_utility_controller'] is True
+          assert capabilities.status_code == 200 and capabilities.json()['multimodal']['attachments'] is True
           PY
       - run: node --check frontend/app.js
