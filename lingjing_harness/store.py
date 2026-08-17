@@ -409,6 +409,13 @@ class WorkspaceStore:
             existing = connection.execute(
                 "select status,owner_id,lease_until from runs where run_id=?", (run_id,)
             ).fetchone()
+            # Terminal run states are monotonic. Once a run has completed, failed, or
+            # been cancelled, no late checkpoint from any worker may resurrect or
+            # overwrite that terminal result. This is the final fencing boundary for
+            # workers that outlive their lease and return after a takeover finishes.
+            if existing and existing["status"] not in ACTIVE_RUN_STATUSES:
+                connection.rollback()
+                return str(existing["status"])
             if (
                 owner_id
                 and existing

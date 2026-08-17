@@ -77,6 +77,41 @@ def test_stale_worker_cannot_commit_terminal_result_after_lease_takeover(tmp_pat
     assert current["owner_id"] == "new-worker"
 
 
+def test_terminal_run_cannot_be_overwritten_after_takeover_finishes(tmp_path):
+    import time
+    path = tmp_path / "terminal-fencing.db"
+    old_worker = WorkspaceStore(path)
+    new_worker = WorkspaceStore(path)
+    conversation = old_worker.create_conversation()
+    started = time.time()
+    snapshot = {"run_id":"run-terminal-fence","conversation_id":conversation["id"],"goal":"fence terminal","status":"running","events":[],"created_at":started,"updated_at":started}
+    assert old_worker.reserve_run("run-terminal-fence", conversation["id"], "fence terminal", snapshot, owner_id="old-worker", lease_seconds=2)
+    claimed = new_worker.claim_recoverable_runs(owner_id="new-worker", lease_seconds=30, now=started + 3)
+    assert [row["run_id"] for row in claimed] == ["run-terminal-fence"]
+
+    completed = {**snapshot, "status":"completed", "answer":"new owner result", "updated_at":started + 3.1}
+    assert new_worker.save_run(
+        "run-terminal-fence", conversation["id"], "fence terminal", "completed", completed,
+        owner_id="new-worker", lease_seconds=30,
+    ) == "completed"
+
+    stale_failed = {**snapshot, "status":"failed", "error":"stale owner result", "updated_at":started + 3.2}
+    assert old_worker.save_run(
+        "run-terminal-fence", conversation["id"], "fence terminal", "failed", stale_failed,
+        owner_id="old-worker", lease_seconds=30,
+    ) == "completed"
+    stale_running = {**snapshot, "status":"running", "updated_at":started + 3.3}
+    assert old_worker.save_run(
+        "run-terminal-fence", conversation["id"], "fence terminal", "running", stale_running,
+        owner_id="old-worker", lease_seconds=30,
+    ) == "completed"
+
+    current = new_worker.get_run("run-terminal-fence")
+    assert current["status"] == "completed"
+    assert current["answer"] == "new owner result"
+    assert "error" not in current
+
+
 def test_workspace_update_lock_blocks_other_worker_and_new_runs(tmp_path):
     import time
     path = tmp_path / "workspace-revision.db"
