@@ -70,14 +70,16 @@ jobs:
           PYTHONPATH=/tmp/recsys-installed python - <<'PY'
           from fastapi.testclient import TestClient
           from lingjing_harness.api import app
-          client = TestClient(app)
-          response = client.get('/')
-          assert response.status_code == 200
-          assert '灵境体验工作台' in response.text
-          status = client.get('/api/status').json()
-          assert status['agent']['dynamic_replan'] is True
-          assert status['agent']['self_evolving'] is True
-          assert status['agent']['checkpoint_resume'] is True
+          with TestClient(app) as client:
+              response = client.get('/')
+              assert response.status_code == 200, response.text
+              assert '灵境体验工作台' in response.text
+              status_response = client.get('/api/status')
+              assert status_response.status_code == 200, status_response.text
+              status = status_response.json()
+              assert status['agent']['dynamic_replan'] is True
+              assert status['agent']['self_evolving'] is True
+              assert status['agent']['checkpoint_resume'] is True
           PY
 
       - name: Validate real Chromium product flow
