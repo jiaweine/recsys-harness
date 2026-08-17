@@ -6,7 +6,9 @@ The README explains the product; this file defines what the runtime **must** do.
 The contract is intentionally stricter than “an agent can call tools”. A compliant
 run must preserve authority boundaries, maintain inspectable deliberation state,
 collect enough evidence to justify closure, and remain recoverable after process
-interruption.
+interruption. A compliant evolution run must additionally preserve evaluation
+identity isolation, effective-strategy consistency, and behavior-matched holdout
+gates.
 
 ## Runtime model
 
@@ -24,16 +26,17 @@ The runtime implementation lives primarily in:
 - `lingjing_harness/runtime/harness.py`
 - `lingjing_harness/runtime/policy.py`
 - `lingjing_harness/runtime/deliberation.py`
-- `lingjing_harness/runtime/tools.py`
+- `lingjing_harness/runtime/tools.py` / `tools_core.py`
 - `lingjing_harness/runtime/verifier.py`
 - `lingjing_harness/runtime/memory.py`
 
 Vertical strategy evolution additionally lives in:
 
 - `lingjing_harness/algorithms/capabilities.py`
-- `lingjing_harness/algorithms/evolution.py`
+- `lingjing_harness/algorithms/evolution.py` / `evolution_core.py`
 - `lingjing_harness/algorithms/search.py`
-- `lingjing_harness/algorithms/recommend.py`
+- `lingjing_harness/algorithms/recommend.py` / `recommend_core.py`
+- `lingjing_harness/algorithms/evaluation.py`
 
 ## Normative rules
 
@@ -138,9 +141,9 @@ A structural capability participating in trusted evolution **MUST**:
 - remain separately permissioned before activation.
 
 The registry defines **what implementations exist**. The evaluator decides **which
-implementation wins**. A previously persisted capability that is no longer
-registered **MUST** fail closed to an owned safe default rather than execute an
-unknown implementation.
+implementation wins**. An unknown capability **MUST NOT** execute. A durable active
+strategy whose capability choice is no longer registered is governed by H15 and
+must be retired rather than silently retaining its old trusted fingerprint.
 
 ### H14 — Evaluation slices must match the evolved behavior
 
@@ -149,9 +152,54 @@ that behavior. In particular, cold-start and exploration policies require explic
 cold-start evaluation evidence rather than being inferred solely from warm-user
 metrics.
 
+Cold-start evidence **MUST** participate in the safety/trust decision, not merely be
+reported as an auxiliary metric. A material cold-start regression on the
+independent holdout **MUST** block promotion even when aggregate warm metrics improve.
+Conversely, a cold-start-only improvement **MAY** receive trust when the independent
+cold holdout confirms it and all other safety gates remain satisfied.
+
 Discovery and holdout identities for synthetic evaluation slices **MUST** remain
 separate. Holdout outcomes **MUST NOT** be used to route mutation arms or select the
 discovery winner.
+
+### H15 — Stored strategy and effective strategy must agree
+
+Procedural memory is durable state, not trusted executable input. Before an active
+strategy reaches a Search/RecSys engine, the runtime **MUST** validate it against
+the current typed schema.
+
+At minimum:
+
+- numeric genes **MUST** be finite and within declared bounds;
+- capability genes **MUST** resolve to currently registered implementations;
+- canonicalization **MUST** happen before execution;
+- if canonicalization changes the effective active strategy, the old active
+  fingerprint **MUST** be retired rather than continue to describe a different
+  strategy;
+- invalid active strategies **MUST** fall back to the owned default and require new
+  evidence before future activation.
+
+Active recommendation revalidation **MUST** include cold-start quality in addition
+to aggregate quality/coverage so a warm-metric aggregate cannot hide a cold-start
+regression.
+
+### H16 — Evaluation identity is the unit of isolation
+
+Independent holdout is an identity property, not merely a row-list property.
+The same evaluation identity **MUST NOT** occur on both discovery and holdout sides.
+
+For Search:
+
+- duplicate labels for the same query **MUST** be canonicalized before splitting;
+- their eligible relevance sets **MUST** be merged;
+- the splitter **MUST** defensively unique by query identity.
+
+For Recommendation:
+
+- warm-user splits **MUST** be unique by user identity;
+- synthetic cold-start identities **MUST** be disjoint across discovery/holdout;
+- synthetic identities **MUST** avoid collision with real user IDs so they cannot
+  accidentally inherit warm history.
 
 ## Decision utility
 
@@ -182,29 +230,39 @@ The optimizer operates on a mixed domain genome:
 
 ```text
 continuous genes
+  → schema bounds
+  → semantic grouping
+  → exact bounded projection where normalization is required
   → measured up/down response surface
 
 capability genes
   → registered alternative implementation
 
 both
+  → identity-isolated discovery
   → posterior-guided routing
   → quality-diversity archive
-  → independent holdout / robustness
+  → independent warm/cold holdout
+  → regression / robustness / behavior-matched gates
   → trusted strategy memory
   → optional activation
+  → schema validation + periodic active revalidation
 ```
 
+Only genes with the same semantic normalization scope may share a normalized blend.
+A cold-start-only pressure gene, for example, **MUST NOT** silently rescale warm-user
+ranking weights.
+
 Trusted historical strategies may contribute bounded priors to future numeric
-directions and capability choices. Those priors **MUST NOT** override current-domain
-evidence, trust gates or user authority.
+directions and capability choices. Malformed/legacy memory rows **MUST NOT** crash a
+new evolution run and **MUST NOT** override current-domain evidence, trust gates or
+user authority.
 
 ## Contract probes
 
 `python scripts/probe_harness_contract.py`
 
-The probe is intentionally small and deterministic. It verifies the high-value
-behavioral invariants without relying on README prose:
+The runtime probe verifies high-value agent invariants without relying on README prose:
 
 - task-specific mission compilation;
 - evidence-targeted decision records;
@@ -213,6 +271,15 @@ behavioral invariants without relying on README prose:
 - full-run reflection traces;
 - permission isolation.
 
-The pytest suite adds deeper regression, resilience and mixed-genome evolution
-coverage, including capability discovery, real stage switching, holdout isolation
-and backward-safe fallback behavior.
+The pytest suite adds deeper failure-oriented evolution coverage, including:
+
+- capability discovery and real stage switching;
+- duplicate-identity isolation;
+- exact bounded blend projection under extreme clipping;
+- warm/cold gene separation;
+- malformed durable-memory tolerance;
+- cold synthetic-identity collision avoidance;
+- cold-only trust and cold-holdout regression blocking;
+- invalid active-strategy retirement;
+- active cold-start rollback;
+- full regression/resilience compatibility.

@@ -134,7 +134,10 @@ class QueryLabel:
             relevant = [x.strip() for x in relevant.split(",") if x.strip()]
         elif not isinstance(relevant, (list, tuple, set)):
             raise ValueError("relevant 必须是字符串或数组")
-        return cls(query=str(row.get("query") or "").strip(), relevant=[str(x).strip() for x in relevant if str(x).strip()])
+        return cls(
+            query=str(row.get("query") or "").strip(),
+            relevant=[str(x).strip() for x in relevant if str(x).strip()],
+        )
 
 
 @dataclass
@@ -145,7 +148,7 @@ class Catalog:
     name: str = "演示数据"
 
     def __post_init__(self) -> None:
-        self.items = [x for x in self.items if x.item_id and x.title]
+        self.items = [item for item in self.items if item.item_id and item.title]
         seen: set[str] = set()
         deduped: list[Item] = []
         for item in self.items:
@@ -154,17 +157,34 @@ class Catalog:
             seen.add(item.item_id)
             deduped.append(item)
         self.items = deduped
-        self.item_by_id = {x.item_id: x for x in self.items}
-        self.interactions = [x for x in self.interactions if x.user_id and x.item_id in self.item_by_id]
-        self.interactions.sort(key=lambda x: (x.user_id, x.timestamp, x.item_id))
+        self.item_by_id = {item.item_id: item for item in self.items}
+        self.interactions = [
+            event
+            for event in self.interactions
+            if event.user_id and event.item_id in self.item_by_id
+        ]
+        self.interactions.sort(key=lambda event: (event.user_id, event.timestamp, event.item_id))
 
-        eligible_ids = {x.item_id for x in self.items if x.eligible}
-        labels: list[QueryLabel] = []
+        # Query text is the evaluation unit. Duplicate rows for the same query
+        # must never be allowed to land on opposite sides of discovery/holdout.
+        # Merge their relevance sets here so every downstream evaluator sees one
+        # canonical label per query.
+        eligible_ids = {item.item_id for item in self.items if item.eligible}
+        merged: dict[str, list[str]] = {}
         for label in self.query_labels:
-            relevant = list(dict.fromkeys(x for x in label.relevant if x in eligible_ids))
-            if label.query and relevant:
-                labels.append(QueryLabel(label.query, relevant))
-        self.query_labels = labels
+            query = str(label.query or "").strip()
+            relevant = [item_id for item_id in label.relevant if item_id in eligible_ids]
+            if not query or not relevant:
+                continue
+            bucket = merged.setdefault(query, [])
+            for item_id in relevant:
+                if item_id not in bucket:
+                    bucket.append(item_id)
+        self.query_labels = [
+            QueryLabel(query, relevant)
+            for query, relevant in merged.items()
+            if relevant
+        ]
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any], *, name: str = "导入数据") -> "Catalog":
@@ -177,9 +197,9 @@ class Catalog:
             raise ValueError("数据中至少需要一条包含 id 与 title 的有效内容")
 
         catalog = cls(
-            items=[Item.from_dict(x) for x in item_rows],
-            interactions=[Interaction.from_dict(x) for x in interaction_rows],
-            query_labels=[QueryLabel.from_dict(x) for x in query_rows],
+            items=[Item.from_dict(row) for row in item_rows],
+            interactions=[Interaction.from_dict(row) for row in interaction_rows],
+            query_labels=[QueryLabel.from_dict(row) for row in query_rows],
             name=str(name or "导入数据").strip() or "导入数据",
         )
         if not catalog.items:
@@ -219,17 +239,17 @@ class Catalog:
         }
 
     def summary(self) -> dict[str, Any]:
-        users = {x.user_id for x in self.interactions}
-        cats = {c for item in self.items for c in item.categories}
+        users = {event.user_id for event in self.interactions}
+        categories = {category for item in self.items for category in item.categories}
         return {
             "name": self.name,
             "items": len(self.items),
             "users": len(users),
             "interactions": len(self.interactions),
             "queries": len(self.query_labels),
-            "categories": len(cats),
+            "categories": len(categories),
         }
 
     def popularity_norm(self, item: Item) -> float:
-        top = max((x.popularity for x in self.items), default=1.0)
+        top = max((row.popularity for row in self.items), default=1.0)
         return log1p(item.popularity) / max(1e-9, log1p(max(1.0, top)))
