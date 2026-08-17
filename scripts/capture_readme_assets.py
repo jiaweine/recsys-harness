@@ -52,7 +52,7 @@ def main() -> None:
             "buffer": json.dumps({"query": "露营灯", "note": "首屏结果相关性需要复核"}, ensure_ascii=False).encode("utf-8"),
         })
         page.wait_for_selector(".attachment-card", timeout=10_000)
-        page.wait_for_timeout(180)
+        page.wait_for_timeout(650)
         page.screenshot(path=str(ASSET_DIR / "product-workbench.png"))
 
         page.locator("#input").fill(PROMPT)
