@@ -196,8 +196,8 @@ class DeliberationEngine:
             )
             hypothesize("recommend_cold_start", "当前用户缺少足够行为或可展示证据", "recommend", 0.34)
 
-        need_search_audit = audit_scope or plan.explore or plan.mode == "both"
-        need_recommend_audit = audit_scope or plan.explore or plan.mode == "both"
+        need_search_audit = audit_scope or plan.mode == "both" or (plan.explore and search_scope)
+        need_recommend_audit = audit_scope or plan.mode == "both" or (plan.explore and recommend_scope)
 
         if need_search_audit:
             require(
@@ -221,7 +221,7 @@ class DeliberationEngine:
             )
             hypothesize("recommend_systemic_gap", "问题可能是整体推荐质量缺口而非单用户异常", "recommend", 0.32)
 
-        if plan.explore and plan.mode in {"search", "both", "audit"}:
+        if plan.explore and (search_scope or audit_scope):
             require(
                 "search_candidate_validation",
                 "探索并验证搜索候选策略",
@@ -230,7 +230,7 @@ class DeliberationEngine:
                 "high",
                 prerequisites=("search_global_quality",),
             )
-        if plan.explore and plan.mode in {"recommend", "both", "audit"}:
+        if plan.explore and (recommend_scope or audit_scope):
             require(
                 "recommend_candidate_validation",
                 "探索并验证推荐候选策略",
@@ -304,6 +304,7 @@ class DeliberationEngine:
                 previous = str(state.actions[-1].get("tool") or "")
                 if previous.split(".", 1)[0] != req.tool.split(".", 1)[0]:
                     domain_novelty = 0.05
+            stagnation_pressure = min(0.12, 0.04 * state.stagnation)
 
             score = (
                 0.30 * priority
@@ -316,6 +317,7 @@ class DeliberationEngine:
                 - 0.07 * cost_pressure
                 - 0.05 * risk_pressure
                 - 0.16 * failure_pressure
+                - stagnation_pressure * (0.5 if domain_novelty else 1.0)
             )
             utility = {
                 "priority": round(priority, 4),
@@ -326,6 +328,7 @@ class DeliberationEngine:
                 "cost_pressure": round(cost_pressure, 4),
                 "risk_pressure": round(risk_pressure, 4),
                 "domain_novelty": round(domain_novelty, 4),
+                "stagnation_pressure": round(stagnation_pressure, 4),
                 "learned_bonus": round(learned, 4),
             }
             step = self._step_for_requirement(plan, req)
@@ -494,16 +497,20 @@ class DeliberationEngine:
                 req.status = "blocked"
                 req.reason = "required capability is not configured in this runtime"
                 continue
-            if req.tool == "search.evolve" and mission.requirements.get("search_global_quality", EvidenceRequirement("", "", "", "")).status == "satisfied":
-                audit = state.observations.get("search.audit") or {}
-                if int(audit.get("queries", 0) or 0) < 3:
-                    req.status = "blocked"
-                    req.reason = "fewer than 3 searchable evaluation queries"
-            if req.tool == "recommend.evolve" and mission.requirements.get("recommend_global_quality", EvidenceRequirement("", "", "", "")).status == "satisfied":
-                audit = state.observations.get("recommend.audit") or {}
-                if int(audit.get("users", 0) or 0) < 3:
-                    req.status = "blocked"
-                    req.reason = "fewer than 3 evaluable recommendation users"
+            if req.tool == "search.evolve":
+                audit_req = mission.requirements.get("search_global_quality")
+                if audit_req and audit_req.status == "satisfied":
+                    audit = state.observations.get("search.audit") or {}
+                    if int(audit.get("queries", 0) or 0) < 3:
+                        req.status = "blocked"
+                        req.reason = "fewer than 3 searchable evaluation queries"
+            if req.tool == "recommend.evolve":
+                audit_req = mission.requirements.get("recommend_global_quality")
+                if audit_req and audit_req.status == "satisfied":
+                    audit = state.observations.get("recommend.audit") or {}
+                    if int(audit.get("users", 0) or 0) < 3:
+                        req.status = "blocked"
+                        req.reason = "fewer than 3 evaluable recommendation users"
 
     @staticmethod
     def _step_for_requirement(plan: AgentPlan, req: EvidenceRequirement) -> PlanStep:
