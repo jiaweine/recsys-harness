@@ -16,48 +16,110 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Replace broken README image URLs
+      - name: Normalize README image references
         run: |
           python - <<'PY'
           from pathlib import Path
           p = Path('README.md')
           text = p.read_text(encoding='utf-8')
-          replacements = {
-              '](/docs/readme-assets/overview.png)': '](https://raw.githubusercontent.com/jiaweine/recsys-harness/main/docs/readme-assets/overview.png)',
-              '](/docs/readme-assets/workbench.png)': '](https://raw.githubusercontent.com/jiaweine/recsys-harness/main/docs/readme-assets/workbench.png)',
-              '](/docs/readme-assets/evidence.png)': '](https://raw.githubusercontent.com/jiaweine/recsys-harness/main/docs/readme-assets/evidence.png)',
-              '](/docs/readme-assets/mobile.png)': '](https://raw.githubusercontent.com/jiaweine/recsys-harness/main/docs/readme-assets/mobile.png)',
-              '](/docs/readme-assets/architecture.svg)': '](https://raw.githubusercontent.com/jiaweine/recsys-harness/main/docs/readme-assets/architecture.svg)',
+          targets = {
+              'overview.png': 'Recsys Harness 真实运行界面',
+              'workbench.png': 'Recsys Harness 工作台',
+              'evidence.png': 'Recsys Harness 证据面板',
+              'mobile.png': 'Recsys Harness 移动端',
+              'architecture.svg': 'Recsys Harness system architecture',
           }
-          for old, new in replacements.items():
-              if old not in text:
-                  raise SystemExit(f'missing expected README image reference: {old}')
-              text = text.replace(old, new)
+          for name, alt in targets.items():
+              candidates = [
+                  f'![{alt}](/docs/readme-assets/{name})',
+                  f'![{alt}](./docs/readme-assets/{name})',
+                  f'![{alt}](https://raw.githubusercontent.com/jiaweine/recsys-harness/main/docs/readme-assets/{name})',
+                  f'![{alt}](https://github.com/jiaweine/recsys-harness/blob/main/docs/readme-assets/{name}?raw=1)',
+              ]
+              canonical = f'![{alt}](docs/readme-assets/{name})'
+              found = False
+              for candidate in candidates:
+                  if candidate in text:
+                      text = text.replace(candidate, canonical)
+                      found = True
+              if canonical in text:
+                  found = True
+              if not found:
+                  raise SystemExit(f'missing README image reference for {name}')
+              asset = Path('docs/readme-assets', name)
+              if not asset.is_file() or asset.stat().st_size < 100:
+                  raise SystemExit(f'missing or empty README asset: {asset}')
+          if '](/docs/readme-assets/' in text:
+              raise SystemExit('site-root README image path is forbidden')
           p.write_text(text if text.endswith('\n') else text + '\n', encoding='utf-8')
-          PY
-      - name: Verify README image targets
-        run: |
-          for name in overview.png workbench.png evidence.png mobile.png architecture.svg; do
-            test -s "docs/readme-assets/$name"
-            curl -fsSL --retry 3 "https://raw.githubusercontent.com/jiaweine/recsys-harness/main/docs/readme-assets/$name" -o "/tmp/$name"
-            test -s "/tmp/$name"
-          done
-          python - <<'PY'
-          from pathlib import Path
-          for name in ('overview.png','workbench.png','evidence.png','mobile.png'):
-              data = Path('/tmp', name).read_bytes()
-              assert data.startswith(b'\x89PNG\r\n\x1a\n'), name
-          svg = Path('/tmp/architecture.svg').read_text(encoding='utf-8')
-          assert '<svg' in svg
           PY
       - name: Commit README fix
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add README.md
-          if git diff --cached --quiet; then
-            echo "README image references already fixed."
-            exit 0
+          if ! git diff --cached --quiet; then
+            git commit -m "Fix README image URLs"
+            git push
+          else
+            echo "README image references already normalized."
           fi
-          git commit -m "Fix README image URLs"
-          git push
+      - name: Verify rendered GitHub README images
+        run: |
+          python - <<'PY'
+          from html.parser import HTMLParser
+          from urllib.parse import urljoin
+          from urllib.request import Request, urlopen
+          import time
+
+          REPO = 'https://github.com/jiaweine/recsys-harness'
+          EXPECTED = {
+              'Recsys Harness 真实运行界面',
+              'Recsys Harness 工作台',
+              'Recsys Harness 证据面板',
+              'Recsys Harness 移动端',
+              'Recsys Harness system architecture',
+          }
+
+          class Images(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.items = {}
+              def handle_starttag(self, tag, attrs):
+                  if tag != 'img':
+                      return
+                  attrs = dict(attrs)
+                  alt = attrs.get('alt', '')
+                  if alt in EXPECTED and attrs.get('src'):
+                      self.items[alt] = attrs['src']
+
+          headers = {'User-Agent': 'Mozilla/5.0 README-render-check'}
+          last_error = None
+          for attempt in range(12):
+              try:
+                  with urlopen(Request(REPO, headers=headers), timeout=20) as response:
+                      html = response.read().decode('utf-8', 'replace')
+                  parser = Images()
+                  parser.feed(html)
+                  missing = EXPECTED - parser.items.keys()
+                  if missing:
+                      raise RuntimeError(f'rendered README is missing images: {sorted(missing)}')
+                  for alt, src in parser.items.items():
+                      image_url = urljoin(REPO, src)
+                      with urlopen(Request(image_url, headers=headers), timeout=20) as response:
+                          content_type = (response.headers.get('Content-Type') or '').lower()
+                          body = response.read(32)
+                      if not content_type.startswith('image/'):
+                          raise RuntimeError(f'{alt} did not return an image: {content_type} {image_url}')
+                      if not body:
+                          raise RuntimeError(f'{alt} returned an empty image: {image_url}')
+                  print('Rendered repository README images are loadable.')
+                  break
+              except Exception as exc:
+                  last_error = exc
+                  if attempt == 11:
+                      raise
+                  time.sleep(5)
+          else:
+              raise last_error or RuntimeError('README render check failed')
+          PY
