@@ -49,6 +49,17 @@ jobs:
       - name: Capture real product screenshots
         run: python scripts/capture_readme_assets.py
 
+      - name: Upload visual QA bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-qa
+          path: |
+            docs/readme-assets/product-workbench.png
+            docs/readme-assets/product-run.png
+            docs/readme-assets/product-evidence.png
+            docs/readme-assets/product-mobile.png
+          retention-days: 5
+
       - name: Commit refreshed screenshots
         run: |
           git config user.name "github-actions[bot]"
