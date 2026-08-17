@@ -1,3 +1,4 @@
+from .deliberation import DeliberationEngine, TrajectoryCritic
 from .harness import AgentHarness, RunCancelled
 from .memory import AgentMemory, catalog_fingerprint
 from .network import NetworkResearch
@@ -10,6 +11,7 @@ __all__ = [
     "AgentHarness", "RunCancelled",
     "AgentMemory",
     "catalog_fingerprint",
+    "DeliberationEngine", "TrajectoryCritic",
     "NetworkResearch",
     "PerceptionEngine",
     "OwnedPolicy",

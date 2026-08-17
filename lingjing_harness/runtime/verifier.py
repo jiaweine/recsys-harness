@@ -5,7 +5,7 @@ from typing import Any
 
 
 class ResultVerifier:
-    """Independent structural, evidence and evolution gate for every autonomous run."""
+    """Independent structural, evidence, trajectory and evolution gate for every autonomous run."""
 
     @staticmethod
     def search(rows: list[dict[str, Any]]) -> list[str]:
@@ -44,22 +44,42 @@ class ResultVerifier:
         return []
 
     @staticmethod
-    def final(actions: list[dict[str, Any]], findings: list[str], evidence: list[dict[str, Any]], *, allow_adaptation: bool) -> dict[str, Any]:
+    def final(
+        actions: list[dict[str, Any]],
+        findings: list[str],
+        evidence: list[dict[str, Any]],
+        *,
+        allow_adaptation: bool,
+        critic: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        critic = critic or {}
         checks = {
             "executed_tools": bool(actions),
             "no_failed_tools": not any(row.get("status") == "failed" for row in actions),
             "evidence_backed": bool(evidence) or any(row.get("tool", "").endswith("audit") for row in actions),
             "adaptation_respected": allow_adaptation or not any(row.get("result", {}).get("activated") for row in actions),
+            "mission_terminal": bool(critic.get("ready", True)),
+            "contradictions_resolved": not bool(critic.get("unresolved_contradictions")),
         }
         severe = [x for x in findings if "非有限" in x or "重复内容" in x or "权限" in x]
-        confidence = 0.52
-        confidence += 0.16 if checks["no_failed_tools"] else -0.18
-        confidence += 0.18 if checks["evidence_backed"] else -0.12
+        confidence = 0.46
+        confidence += 0.14 if checks["no_failed_tools"] else -0.18
+        confidence += 0.16 if checks["evidence_backed"] else -0.12
         confidence += 0.08 if checks["adaptation_respected"] else -0.30
+        confidence += 0.10 if checks["mission_terminal"] else -0.18
+        confidence += 0.06 if checks["contradictions_resolved"] else -0.16
+        confidence += 0.08 * float(critic.get("evidence_coverage", 0.0) or 0.0)
         confidence -= min(0.18, 0.05 * len(severe))
         return {
             "passed": all(checks.values()) and not severe,
             "confidence": round(max(0.0, min(0.99, confidence)), 3),
             "checks": checks,
             "severe_findings": severe,
+            "trajectory": {
+                "evidence_coverage": critic.get("evidence_coverage"),
+                "terminal_coverage": critic.get("terminal_coverage"),
+                "blocked": critic.get("blocked", []),
+                "unresolved": critic.get("unresolved", []),
+                "contradictions": critic.get("contradictions", []),
+            },
         }
