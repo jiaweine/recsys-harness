@@ -1,22 +1,32 @@
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import log
 
 from lingjing_harness.domain import Catalog, Item
 from .text import cosine, hashed_vector, tokenize
 
 
+_BLEND = {"evolve_group": "blend", "min": 0.005, "max": 0.75, "relative_step": 0.16}
+_INDEPENDENT = {"evolve_group": "independent", "min": 0.0, "max": 0.32, "relative_step": 0.18}
+
+
 @dataclass(frozen=True)
 class SearchConfig:
-    lexical: float = 0.47
-    semantic: float = 0.25
-    title: float = 0.10
-    quality: float = 0.07
-    popularity: float = 0.04
-    freshness: float = 0.07
-    diversity: float = 0.08
+    """Search weights with a declarative evolution schema.
+
+    Evolution code discovers mutable dimensions from field metadata instead of
+    maintaining a separate hard-coded list of search tuning arms.
+    """
+
+    lexical: float = field(default=0.47, metadata=_BLEND)
+    semantic: float = field(default=0.25, metadata=_BLEND)
+    title: float = field(default=0.10, metadata=_BLEND)
+    quality: float = field(default=0.07, metadata=_BLEND)
+    popularity: float = field(default=0.04, metadata=_BLEND)
+    freshness: float = field(default=0.07, metadata=_BLEND)
+    diversity: float = field(default=0.08, metadata=_INDEPENDENT)
 
 
 class SearchEngine:
@@ -77,7 +87,6 @@ class SearchEngine:
         dl = max(1, len(toks)); score = 0.0
         k1, b = 1.45, 0.72
         for token in qtokens:
-            # Field-aware term frequency: title > body text > broad category tags.
             f = 2.1*title_tf.get(token, 0) + text_tf.get(token, 0) + .75*category_tf.get(token, 0)
             if f <= 0: continue
             query_weight = .45 if token in self.GENERIC_QUERY_TOKENS else 1.0
@@ -97,8 +106,6 @@ class SearchEngine:
         rows: list[dict] = []
         max_lex = 1e-9
         n = max(1, len(self.catalog.items))
-        # Retrieval uses the rarest concrete query evidence first. This avoids scanning the
-        # full catalog for every request while preserving the same lexical eligibility rule.
         concrete = [token for token in qtokens if self._df.get(token, 0) <= max(64, int(n * .35))]
         retrieval_tokens = concrete or qtokens
         candidate_ids = set()
