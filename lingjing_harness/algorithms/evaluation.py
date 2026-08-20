@@ -6,6 +6,7 @@ from statistics import mean
 from typing import TypeVar
 
 from lingjing_harness.domain import Catalog
+from lingjing_harness.production import evaluate_logged_policy, request_groups
 from .search import SearchEngine
 from .recommend import RecommendationEngine
 
@@ -42,6 +43,28 @@ def ndcg_at_k(ranked: list[str], relevant: set[str], k: int = 10) -> float:
     return dcg / max(1e-9, idcg)
 
 
+def _business_search(catalog: Catalog, engine: SearchEngine) -> dict | None:
+    if catalog.reward_spec is None or not request_groups(catalog.events, surface="search"):
+        return None
+    return evaluate_logged_policy(
+        catalog.events,
+        surface="search",
+        reward_spec=catalog.reward_spec,
+        search_engine=engine,
+    )
+
+
+def _business_recommend(catalog: Catalog, engine: RecommendationEngine) -> dict | None:
+    if catalog.reward_spec is None or not request_groups(catalog.events, surface="recommend"):
+        return None
+    return evaluate_logged_policy(
+        catalog.events,
+        surface="recommend",
+        reward_spec=catalog.reward_spec,
+        recommend_engine=engine,
+    )
+
+
 def audit_search(catalog: Catalog, engine: SearchEngine, *, labels_override=None) -> dict:
     source_labels = list(catalog.query_labels) if labels_override is None else list(labels_override)
     labels = _stable_sample(source_labels, MAX_AUDIT_QUERIES, lambda row: row.query)
@@ -58,26 +81,44 @@ def audit_search(catalog: Catalog, engine: SearchEngine, *, labels_override=None
                 "top": ranked[:3],
             }
         )
+    business = _business_search(catalog, engine)
     if not rows:
-        probes = catalog.items[: min(12, len(catalog.items))]
-        empty = sum(1 for item in probes if not engine.search(item.title, limit=3))
-        return {
+        result = {
             "queries": 0,
             "available_queries": 0,
             "sampled": False,
             "quality": 0.0,
-            "empty_rate": round(empty / max(1, len(probes)), 4),
+            "proxy_quality": 0.0,
+            "empty_rate": round(
+                sum(1 for item in catalog.items[: min(12, len(catalog.items))] if not engine.search(item.title, limit=3))
+                / max(1, min(12, len(catalog.items))),
+                4,
+            ),
             "details": [],
         }
-    return {
-        "queries": len(rows),
-        "available_queries": len(source_labels),
-        "sampled": len(rows) < len(source_labels),
-        "quality": round(mean(row["ndcg"] for row in rows), 4),
-        "recall": round(mean(row["recall"] for row in rows), 4),
-        "mrr": round(mean(row["mrr"] for row in rows), 4),
-        "details": rows,
-    }
+    else:
+        proxy_quality = round(mean(row["ndcg"] for row in rows), 4)
+        result = {
+            "queries": len(rows),
+            "available_queries": len(source_labels),
+            "sampled": len(rows) < len(source_labels),
+            "quality": proxy_quality,
+            "proxy_quality": proxy_quality,
+            "recall": round(mean(row["recall"] for row in rows), 4),
+            "mrr": round(mean(row["mrr"] for row in rows), 4),
+            "details": rows,
+        }
+    result["business_reward_available"] = business is not None
+    if business is not None:
+        result.update(
+            {
+                "business_reward": business["reward"],
+                "business_reward_coverage": business["reward_coverage"],
+                "business_requests": business["requests"],
+                "business_estimator": business["estimator"],
+            }
+        )
+    return result
 
 
 def _category_diversity(result: list[dict]) -> float:
@@ -158,13 +199,15 @@ def audit_recommend(catalog: Catalog, engine: RecommendationEngine, *, users_ove
     all_users = known_users if users_override is None else [user for user in users_override if user in known_set]
     users = _stable_sample(all_users, MAX_AUDIT_USERS, lambda user: user)
     cold = audit_cold_start(catalog, engine, slice_key="audit", samples=3)
+    business = _business_recommend(catalog, engine)
 
     if not users:
-        return {
+        result = {
             "users": 0,
             "available_users": 0,
             "sampled": False,
             "quality": 0.0,
+            "proxy_quality": 0.0,
             "coverage": 0.0,
             "diversity": 0.0,
             "freshness": 0.0,
@@ -173,52 +216,67 @@ def audit_recommend(catalog: Catalog, engine: RecommendationEngine, *, users_ove
             "cold_start_samples": cold["samples"],
             "details": [],
         }
+    else:
+        exposed: set[str] = set()
+        diversities: list[float] = []
+        freshness_values: list[float] = []
+        novelty_values: list[float] = []
+        details = []
+        for user in users:
+            slate = engine.recommend(user, limit=8)
+            exposed.update(row["id"] for row in slate)
+            diversity = _category_diversity(slate)
+            freshness = mean([row["freshness"] for row in slate]) if slate else 0.0
+            novelty = mean([row["signals"]["novelty"] for row in slate]) if slate else 0.0
+            diversities.append(diversity)
+            freshness_values.append(freshness)
+            novelty_values.append(novelty)
+            details.append(
+                {
+                    "user_id": user,
+                    "diversity": round(diversity, 4),
+                    "freshness": round(freshness, 4),
+                    "top": [row["id"] for row in slate[:4]],
+                }
+            )
 
-    exposed: set[str] = set()
-    diversities: list[float] = []
-    freshness_values: list[float] = []
-    novelty_values: list[float] = []
-    details = []
-    for user in users:
-        result = engine.recommend(user, limit=8)
-        exposed.update(row["id"] for row in result)
-        diversity = _category_diversity(result)
-        freshness = mean([row["freshness"] for row in result]) if result else 0.0
-        novelty = mean([row["signals"]["novelty"] for row in result]) if result else 0.0
-        diversities.append(diversity)
-        freshness_values.append(freshness)
-        novelty_values.append(novelty)
-        details.append(
+        eligible_count = sum(1 for item in catalog.items if item.eligible)
+        coverage = len(exposed) / max(1, eligible_count)
+        diversity = mean(diversities)
+        freshness = mean(freshness_values)
+        novelty = mean(novelty_values)
+        # This remains a descriptive offline guardrail composite for backward
+        # compatibility. It is intentionally exposed as proxy_quality and is not
+        # treated as business value when RewardSpec + production logs exist.
+        proxy_quality = (
+            0.41 * coverage
+            + 0.23 * diversity
+            + 0.18 * freshness
+            + 0.08 * novelty
+            + 0.10 * float(cold["quality"])
+        )
+        result = {
+            "users": len(users),
+            "available_users": len(all_users),
+            "sampled": len(users) < len(all_users),
+            "quality": round(proxy_quality, 4),
+            "proxy_quality": round(proxy_quality, 4),
+            "coverage": round(coverage, 4),
+            "diversity": round(diversity, 4),
+            "freshness": round(freshness, 4),
+            "novelty": round(novelty, 4),
+            "cold_start_quality": cold["quality"],
+            "cold_start_samples": cold["samples"],
+            "details": details,
+        }
+    result["business_reward_available"] = business is not None
+    if business is not None:
+        result.update(
             {
-                "user_id": user,
-                "diversity": round(diversity, 4),
-                "freshness": round(freshness, 4),
-                "top": [row["id"] for row in result[:4]],
+                "business_reward": business["reward"],
+                "business_reward_coverage": business["reward_coverage"],
+                "business_requests": business["requests"],
+                "business_estimator": business["estimator"],
             }
         )
-
-    eligible_count = sum(1 for item in catalog.items if item.eligible)
-    coverage = len(exposed) / max(1, eligible_count)
-    diversity = mean(diversities)
-    freshness = mean(freshness_values)
-    novelty = mean(novelty_values)
-    quality = (
-        0.41 * coverage
-        + 0.23 * diversity
-        + 0.18 * freshness
-        + 0.08 * novelty
-        + 0.10 * float(cold["quality"])
-    )
-    return {
-        "users": len(users),
-        "available_users": len(all_users),
-        "sampled": len(users) < len(all_users),
-        "quality": round(quality, 4),
-        "coverage": round(coverage, 4),
-        "diversity": round(diversity, 4),
-        "freshness": round(freshness, 4),
-        "novelty": round(novelty, 4),
-        "cold_start_quality": cold["quality"],
-        "cold_start_samples": cold["samples"],
-        "details": details,
-    }
+    return result
