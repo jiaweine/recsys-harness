@@ -3,7 +3,9 @@
 The structural/search machinery remains in ``evolution_core``. Public evolution
 routes through ``production_evolution`` so a project-provided RewardSpec and
 production exposure log become the primary objective when available, while the
-legacy proxy path remains available for local/demo datasets.
+proxy path remains available for local/demo datasets. Production-aware runs then
+derive holdout-validated request-segment portfolios around the globally discovered
+strategy basin; sparse segments keep the global strategy as their fallback.
 """
 
 from typing import Any
@@ -21,6 +23,7 @@ from .production_evolution import (
     evolve_recommend as _evolve_recommend,
     evolve_search as _evolve_search,
 )
+from .segment_evolution import attach_recommend_portfolio, attach_search_portfolio
 
 
 def _trust_evidence_gate(result: dict[str, Any]) -> dict[str, Any]:
@@ -49,12 +52,14 @@ def _trust_evidence_gate(result: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def evolve_search(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    return _trust_evidence_gate(_evolve_search(*args, **kwargs))
+def evolve_search(catalog: Any, current: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    result = _trust_evidence_gate(_evolve_search(catalog, current, *args, **kwargs))
+    return attach_search_portfolio(catalog, current, result)
 
 
-def evolve_recommend(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    return _trust_evidence_gate(_evolve_recommend(*args, **kwargs))
+def evolve_recommend(catalog: Any, current: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    result = _trust_evidence_gate(_evolve_recommend(catalog, current, *args, **kwargs))
+    return attach_recommend_portfolio(catalog, current, result)
 
 
 __all__ = [

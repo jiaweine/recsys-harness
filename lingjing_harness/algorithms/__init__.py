@@ -7,6 +7,12 @@ from .capabilities import (
 )
 from .search import SearchConfig, SearchEngine
 from .recommend import RecommendConfig, RecommendationEngine
+from .segments import (
+    SegmentRouter,
+    SearchRequestFeatures,
+    RecommendRequestFeatures,
+    strategy_domain,
+)
 from .evaluation import (
     audit_cold_start,
     audit_search,
@@ -34,6 +40,10 @@ __all__ = [
     "SearchEngine",
     "RecommendConfig",
     "RecommendationEngine",
+    "SegmentRouter",
+    "SearchRequestFeatures",
+    "RecommendRequestFeatures",
+    "strategy_domain",
     "ExposureEvent",
     "RewardSpec",
     "audit_cold_start",
