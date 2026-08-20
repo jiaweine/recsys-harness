@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 import time
 from typing import Any
 
@@ -23,7 +24,9 @@ class ToolRegistry(CoreToolRegistry):
 
     The core registry owns execution and compatibility behavior. This layer makes
     business reward evidence part of strategy memory and active rollback whenever
-    a project supplied RewardSpec + exposure/outcome log is available.
+    a project supplied RewardSpec + exposure/outcome log is available. Evolution
+    memory includes durable positive/negative arm credit so independently failed
+    mutations alter later routing rather than disappearing after one run.
     """
 
     def _business_ready(self, domain: str) -> bool:
@@ -140,6 +143,7 @@ class ToolRegistry(CoreToolRegistry):
             "robustness": result.get("robustness", {}),
             "evaluation_basis": result.get("evaluation_basis", "proxy_metrics"),
             "business_validation": result.get("business_validation", {}),
+            "credit_learning": result.get("credit_learning", {}),
         }
         if activate:
             payload.update(
@@ -149,6 +153,28 @@ class ToolRegistry(CoreToolRegistry):
                 }
             )
         return payload
+
+    def _evolution_memory(self, domain: str) -> list[dict[str, Any]]:
+        reader = getattr(self.memory, "evolution_memory", None)
+        if callable(reader):
+            return reader(self.catalog_key, domain, limit=5)
+        return self.memory.strategies(self.catalog_key, domain, limit=5)
+
+    def _record_credit(
+        self,
+        surface: str,
+        current_config: dict[str, Any],
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        recorder = getattr(self.memory, "record_evolution_result", None)
+        if not callable(recorder):
+            return {"available": False, "reason": "credit_memory_unavailable"}
+        return recorder(
+            self.catalog_key,
+            surface,
+            current_config=current_config,
+            result=result,
+        )
 
     def search_evolve(
         self,
@@ -174,8 +200,10 @@ class ToolRegistry(CoreToolRegistry):
                     )
                 return result
 
-        remembered = self.memory.strategies(self.catalog_key, "search", limit=5)
+        remembered = self._evolution_memory("search")
+        current_config = asdict(self.search.config)
         result = evolve_search(self.catalog, self.search, remembered=remembered)
+        result["credit_learning"] = self._record_credit("search", current_config, result)
         result["activated"] = False
         result["learned"] = False
         if result.get("trusted"):
@@ -225,8 +253,10 @@ class ToolRegistry(CoreToolRegistry):
                     )
                 return result
 
-        remembered = self.memory.strategies(self.catalog_key, "recommend", limit=5)
+        remembered = self._evolution_memory("recommend")
+        current_config = asdict(self.recommend.config)
         result = evolve_recommend(self.catalog, self.recommend, remembered=remembered)
+        result["credit_learning"] = self._record_credit("recommend", current_config, result)
         result["activated"] = False
         result["learned"] = False
         if result.get("trusted"):

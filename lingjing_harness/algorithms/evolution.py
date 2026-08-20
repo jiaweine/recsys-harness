@@ -3,27 +3,36 @@
 The structural/search machinery remains in ``evolution_core``. Public evolution
 routes through ``production_evolution`` so a project-provided RewardSpec and
 production exposure log become the primary objective when available, while the
-proxy path remains available for local/demo datasets. Production-aware runs then
-derive holdout-validated request-segment portfolios around the globally discovered
-strategy basin; sparse segments keep the global strategy as their fallback.
+proxy path remains available for local/demo datasets. Durable positive and
+negative arm credit then steers the response-surface prior, and production-aware
+runs derive holdout-validated request-segment portfolios around the globally
+discovered strategy basin. Sparse segments keep the global strategy as fallback.
 """
 
 from typing import Any
 
-from .evolution_core import (
-    EvolutionDimension,
-    _evolution_schema,
-    _history_posteriors,
-    _perturb,
-    _project,
-    _recommend_gates,
-    _stable_split,
-)
+from . import evolution_core as _core
+from .credit_routing import install_credit_router
 from .production_evolution import (
     evolve_recommend as _evolve_recommend,
     evolve_search as _evolve_search,
 )
-from .segment_evolution import attach_recommend_portfolio, attach_search_portfolio
+from .segment_credit import attach_recommend_portfolio, attach_search_portfolio
+
+
+# Install once at the stable public boundary. ``evolution_core._response_surface``
+# resolves this module-global function at call time, so replacing it here makes
+# every public evolution path credit-aware without duplicating the core search
+# machinery or introducing per-run global mutable context.
+install_credit_router()
+
+EvolutionDimension = _core.EvolutionDimension
+_evolution_schema = _core._evolution_schema
+_history_posteriors = _core._history_posteriors
+_perturb = _core._perturb
+_project = _core._project
+_recommend_gates = _core._recommend_gates
+_stable_split = _core._stable_split
 
 
 def _trust_evidence_gate(result: dict[str, Any]) -> dict[str, Any]:
@@ -53,13 +62,25 @@ def _trust_evidence_gate(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def evolve_search(catalog: Any, current: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    remembered = kwargs.get("remembered")
     result = _trust_evidence_gate(_evolve_search(catalog, current, *args, **kwargs))
-    return attach_search_portfolio(catalog, current, result)
+    return attach_search_portfolio(
+        catalog,
+        current,
+        result,
+        remembered=remembered if isinstance(remembered, list) else None,
+    )
 
 
 def evolve_recommend(catalog: Any, current: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    remembered = kwargs.get("remembered")
     result = _trust_evidence_gate(_evolve_recommend(catalog, current, *args, **kwargs))
-    return attach_recommend_portfolio(catalog, current, result)
+    return attach_recommend_portfolio(
+        catalog,
+        current,
+        result,
+        remembered=remembered if isinstance(remembered, list) else None,
+    )
 
 
 __all__ = [
