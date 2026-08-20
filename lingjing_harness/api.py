@@ -123,7 +123,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    title="灵境体验工作台",
+    title="序枢 · 搜推智能工作台",
     docs_url="/docs" if APP_ENV != "production" else None,
     redoc_url=None,
     lifespan=lifespan,
