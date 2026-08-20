@@ -47,6 +47,20 @@ class ToolRegistry(CoreToolRegistry):
                 issues.append("推荐 production request 太少，暂不足以形成稳定的时间 holdout")
         return {**result, "issues": issues}
 
+    def fork(self) -> "ToolRegistry":
+        """Fork without falling back to the compatibility-only core class."""
+
+        clone = object.__new__(ToolRegistry)
+        clone.catalog = self.catalog
+        clone.memory = self.memory
+        clone.network = self.network
+        clone.catalog_key = self.catalog_key
+        clone.rollback_events = []
+        clone.search = self.search.with_config(clone._load_config("search", SearchConfig))
+        clone.recommend = self.recommend.with_config(clone._load_config("recommend", RecommendConfig))
+        clone._specs = clone._build_specs()
+        return clone
+
     def _validate_active_strategies(self) -> None:
         # Business regression is checked *before* the core validation can mark a
         # strategy fresh. Otherwise a proxy-only refresh could accidentally hide
