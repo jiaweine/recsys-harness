@@ -1,5 +1,5 @@
-"""Compatibility surface for the hardened tool registry."""
+"""Stable ToolRegistry import surface."""
 
-from .tools_core import ToolRegistry
+from .tools_production import ToolRegistry
 
 __all__ = ["ToolRegistry"]
