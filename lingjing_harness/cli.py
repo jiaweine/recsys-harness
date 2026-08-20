@@ -6,7 +6,7 @@ from .runtime import AgentHarness
 
 
 def main()->None:
-    p=argparse.ArgumentParser(description="Lingjing search/recommendation agent harness")
+    p=argparse.ArgumentParser(description="Xushu search/recommendation agent harness")
     p.add_argument("prompt",nargs="*",default=["做一次全局体检"])
     args=p.parse_args()
     result=AgentHarness(build_sample_catalog()).run(" ".join(args.prompt))
