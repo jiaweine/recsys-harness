@@ -3,22 +3,18 @@ from __future__ import annotations
 import re
 
 from lingjing_harness.domain import Catalog
+from .capabilities import CapabilityRegistry, RUNTIME_CAPABILITIES
 from .contracts import AgentPlan, Decision, RunState, ToolSpec
 from .deliberation import DeliberationEngine
 
 
 class OwnedPolicy:
-    """Project-owned controller with mission graphs and evidence-driven replanning.
+    """Project-owned controller with capability-compiled mission graphs.
 
-    The policy has two deliberately separate jobs:
-
-    1. compile user intent and authority into an AgentPlan;
-    2. delegate run-time action selection to a DeliberationEngine that tracks
-       evidence requirements, hypotheses, contradictions and trajectory quality.
-
-    Decisions are not delegated to an external model. Attachments and network
-    content may add observations, but only the user's own text can expand
-    adaptation or network authority.
+    User text still owns intent and authority. Once an AgentPlan exists, mission
+    structure comes from the runtime CapabilityRegistry rather than a central list
+    of search/recommend tool steps. Attachments, memory and network observations
+    can add evidence but cannot expand user-granted authority.
     """
 
     SEARCH_HINTS = ("搜", "搜索", "查询", "找不到", "关键词", "结果不准", "无结果", "搜索体验")
@@ -28,8 +24,14 @@ class OwnedPolicy:
     NO_ADAPT_HINTS = ("不要上线", "先不要上线", "别上线", "不修改", "不要修改", "只检查", "只看", "不改变", "先离线")
     NETWORK_HINTS = ("联网", "网上", "外部资料", "最新资料", "最新信息", "行业趋势", "同类产品", "公开资料", "查网页")
 
-    def __init__(self, deliberation: DeliberationEngine | None = None) -> None:
-        self.deliberation = deliberation or DeliberationEngine()
+    def __init__(
+        self,
+        deliberation: DeliberationEngine | None = None,
+        capabilities: CapabilityRegistry | None = None,
+    ) -> None:
+        inferred = getattr(deliberation, "registry", None) if deliberation is not None else None
+        self.capabilities = capabilities or inferred or RUNTIME_CAPABILITIES
+        self.deliberation = deliberation or DeliberationEngine(self.capabilities)
 
     def plan(
         self,
@@ -110,9 +112,21 @@ class OwnedPolicy:
         for label in catalog.query_labels:
             if label.query and label.query in text:
                 return label.query
-        cleaned = re.sub(r"(帮我|请|看下|看看|分析|检查|为什么|搜索|搜一下|搜|不准|不好|优化|改进|结果|体验|一下|最近)", " ", text)
-        chunks = [x.strip(" ，。！？,.!?：:") for x in re.split(r"\s+", cleaned) if x.strip()]
-        fallback = catalog.query_labels[0].query if catalog.query_labels else (catalog.items[0].title if catalog.items else "")
+        cleaned = re.sub(
+            r"(帮我|请|看下|看看|分析|检查|为什么|搜索|搜一下|搜|不准|不好|优化|改进|结果|体验|一下|最近)",
+            " ",
+            text,
+        )
+        chunks = [
+            x.strip(" ，。！？,.!?：:")
+            for x in re.split(r"\s+", cleaned)
+            if x.strip()
+        ]
+        fallback = (
+            catalog.query_labels[0].query
+            if catalog.query_labels
+            else (catalog.items[0].title if catalog.items else "")
+        )
         return max(chunks, key=len, default=fallback)[:50]
 
     @staticmethod

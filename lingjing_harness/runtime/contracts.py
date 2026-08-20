@@ -51,6 +51,7 @@ class EvidenceRequirement:
     optional: bool = False
     satisfied_by: list[str] = field(default_factory=list)
     reason: str = ""
+    capabilities: tuple[str, ...] = ()
 
     def dict(self) -> dict[str, Any]:
         return {
@@ -58,6 +59,7 @@ class EvidenceRequirement:
             "label": self.label,
             "domain": self.domain,
             "tool": self.tool,
+            "capabilities": list(self.capabilities or ((self.tool,) if self.tool else ())),
             "priority": self.priority,
             "status": self.status,
             "prerequisites": list(self.prerequisites),
@@ -68,17 +70,22 @@ class EvidenceRequirement:
 
     @classmethod
     def from_dict(cls, row: dict[str, Any]) -> "EvidenceRequirement":
+        tool = str(row.get("tool") or "")
+        capabilities = tuple(str(x) for x in row.get("capabilities") or ())
+        if not capabilities and tool:
+            capabilities = (tool,)
         return cls(
             key=str(row.get("key") or "requirement"),
             label=str(row.get("label") or "Evidence requirement"),
             domain=str(row.get("domain") or "general"),
-            tool=str(row.get("tool") or ""),
+            tool=tool,
             priority=str(row.get("priority") or "medium"),
             status=str(row.get("status") or "open"),
             prerequisites=tuple(str(x) for x in row.get("prerequisites") or ()),
             optional=bool(row.get("optional")),
             satisfied_by=[str(x) for x in row.get("satisfied_by") or []],
             reason=str(row.get("reason") or ""),
+            capabilities=capabilities,
         )
 
 
@@ -127,6 +134,7 @@ class MissionGraph:
     requirements: dict[str, EvidenceRequirement] = field(default_factory=dict)
     hypotheses: dict[str, Hypothesis] = field(default_factory=dict)
     exit_criteria: tuple[str, ...] = ()
+    capability_snapshot: tuple[str, ...] = ()
 
     def dict(self) -> dict[str, Any]:
         return {
@@ -135,6 +143,7 @@ class MissionGraph:
             "requirements": {key: req.dict() for key, req in self.requirements.items()},
             "hypotheses": {key: hyp.dict() for key, hyp in self.hypotheses.items()},
             "exit_criteria": list(self.exit_criteria),
+            "capability_snapshot": list(self.capability_snapshot),
         }
 
     @classmethod
@@ -155,6 +164,7 @@ class MissionGraph:
             requirements=requirements,
             hypotheses=hypotheses,
             exit_criteria=tuple(str(x) for x in row.get("exit_criteria") or ()),
+            capability_snapshot=tuple(str(x) for x in row.get("capability_snapshot") or ()),
         )
 
 
