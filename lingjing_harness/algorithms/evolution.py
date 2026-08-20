@@ -1,4 +1,10 @@
-"""Compatibility surface for the hardened vertical evolution engine."""
+"""Stable public surface for vertical evolution.
+
+The structural/search machinery remains in ``evolution_core``. Public evolution
+routes through ``production_evolution`` so a project-provided RewardSpec and
+production exposure log become the primary objective when available, while the
+legacy proxy path remains available for local/demo datasets.
+"""
 
 from .evolution_core import (
     EvolutionDimension,
@@ -8,9 +14,8 @@ from .evolution_core import (
     _project,
     _recommend_gates,
     _stable_split,
-    evolve_recommend,
-    evolve_search,
 )
+from .production_evolution import evolve_recommend, evolve_search
 
 __all__ = [
     "EvolutionDimension",
