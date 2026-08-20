@@ -2,9 +2,9 @@
 
 # 序枢 · Recsys Harness
 
-### 垂直自进化的 Search / Recommendation Agent Harness
+### Search / Recommendation Control & Evolution Plane
 
-**让搜推系统不只会执行和诊断，还能在真实领域指标、隔离验证、策略一致性与权限边界内，自主重组能力、实验、学习、恢复并持续进化。**
+**把真实搜推系统的“发现问题 → 实验候选 → 业务回放 → 未来留出验证 → 信任/激活 → 监控回滚 → 长期学习”收进一个受权限约束、可审计、可恢复的 Agent Harness。**
 
 <sub>XUSHU · SEARCH / RECOMMENDATION AGENT HARNESS</sub>
 
@@ -12,9 +12,9 @@
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![Local-first](https://img.shields.io/badge/runtime-local--first-111827)
 
-**Mission Graph · Mixed Strategy Genome · Capability Evolution · Failure-oriented Evaluation · Independent Holdout · Durable Recovery**
+**Business Reward · Temporal Replay · Mixed Strategy Genome · Independent Guardrails · Durable Recovery**
 
-[真实产品](#真实产品) · [为什么是 Harness](#为什么是-harness) · [Agent Harness 方法](#agent-harness-方法) · [垂直自进化](#垂直自进化从参数到能力) · [快速启动](#快速启动) · [能力](#能力) · [可靠性](#可靠性) · [系统架构](#系统架构) · [质量门槛](#质量门槛)
+[真实产品](#真实产品) · [产品价值](#产品价值) · [生产价值闭环](#生产价值闭环) · [Agent Harness](#agent-harness) · [垂直自进化](#垂直自进化) · [快速启动](#快速启动) · [数据](#生产数据契约) · [架构](#系统架构) · [边界](#当前边界)
 
 </div>
 
@@ -28,18 +28,18 @@
 </p>
 <p align="center"><sub>一个任务面：目标、对话、运行状态、证据、附件与可恢复执行保持在同一上下文。</sub></p>
 
-> **Real product, real browser.** 截图来自仓库实际启动的应用。CI 用真实浏览器执行产品任务，并在视觉 QA 通过后刷新 README 资产。
+> **Real product, real browser.** 截图来自仓库实际启动的应用。CI 使用真实浏览器验证桌面/移动流程，并把 README 资产固定到不可变 commit。
 
 <table>
   <tr>
     <td width="50%" valign="top" align="center">
       <strong>任务工作台</strong><br>
-      <sub>输入、附件、权限与执行入口保持在同一操作面。</sub><br><br>
+      <sub>目标、附件、联网权限与执行入口保持在同一操作面。</sub><br><br>
       <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@9eebea896a9cd50c5ac890a7645915efc2f6330d/docs/readme-assets/workbench.png" alt="序枢工作台" width="100%">
     </td>
     <td width="50%" valign="top" align="center">
       <strong>证据与判断</strong><br>
-      <sub>真实动作、轨迹、依据与结论集中在检查视图。</sub><br><br>
+      <sub>真实动作、轨迹、来源、验证和结论集中在检查视图。</sub><br><br>
       <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@9eebea896a9cd50c5ac890a7645915efc2f6330d/docs/readme-assets/evidence.png" alt="序枢证据面板" width="100%">
     </td>
   </tr>
@@ -47,11 +47,8 @@
 
 ### Mobile · task first
 
-移动端不复刻桌面三栏。主任务永远是第一层，轨迹与证据作为 bottom sheet 进入，关键交互保持可触达尺寸并考虑 safe-area。
-
 <p align="center">
-  <sub>MOBILE · SAME 393 × 852 VIEWPORT · THREE REAL STATES</sub><br>
-  <strong>三张图使用完全一致的列宽与展示尺度。</strong>
+  <sub>MOBILE · SAME 393 × 852 VIEWPORT · THREE REAL STATES</sub>
 </p>
 
 <table>
@@ -69,484 +66,382 @@
 
 ---
 
-## 为什么是 Harness
+# 产品价值
 
-搜索与推荐不是一个“模型调用”问题，而是一套长期运行的决策系统问题：**面对模糊业务目标，系统如何知道还缺什么证据、该执行哪个真实能力、何时改变假设、何时停止、什么结果有资格学习，以及学到的策略能否在下一次任务里安全复用。**
+序枢不是“又一个推荐模型库”，也不是“让 Agent 多调用几个工具”。
 
-**序枢**把这些问题放进一个持久、可审计、可恢复、受权限和独立验证约束的运行时。
+它要解决的是搜推团队长期反复发生、但通常散落在日志、Notebook、实验平台、代码仓库和人工经验里的工作：
 
-| 普通 tool-calling agent | 序枢 |
-|---|---|
-| 生成一个计划后顺序调用工具 | 先编译 Mission Graph；每个 observation 后重新 deliberation |
-| 只记录“调用了什么” | 记录 targeted requirement、utility、hypothesis、alternatives、rationale |
-| 工具结果直接进入下一段文本 | observation 先更新 requirement / hypothesis / contradiction |
-| 模型觉得“够了”就结束 | Trajectory Critic 判断 terminality，ResultVerifier 再独立验收 |
-| 历史对话就是 memory | episodic / procedural / policy memory 分开、受限、可退休 |
-| 优化就是调几个权重 | mixed genome 同时探索参数与真实搜推 capability |
-| 架构选择靠开发者写死 | registry 声明可用实现；真实领域评估决定哪个实现获胜 |
-| 同一批样本既提案又验收 | evaluation identity 先去重；discovery 与 independent holdout 隔离 |
-| 冷启动只看 warm-user 汇总指标 | cold-start 有独立 probe、独立 holdout delta 与退化门槛 |
-| 历史配置拿来就执行 | active strategy 先 canonicalize；失效 capability / 非法 gene 会退休而不是静默执行 |
-| 重启后重新跑 | mission、reflection、critic、actions、observations 一起 checkpoint / resume |
-| 联网或附件可能影响权限 | observation 与 authority 严格分离；只有用户能扩大权限 |
+```text
+线上/离线异常
+    ↓
+到底是 query、候选、排序、冷启动、探索还是数据问题？
+    ↓
+应该先试哪种改动？
+    ↓
+这个候选是 NDCG 更高，还是业务真的更好？
+    ↓
+有没有污染 future holdout？
+    ↓
+能不能安全记住 / 激活？
+    ↓
+上线后退化谁负责发现和回滚？
+```
 
-> **核心原则：** 自主性不是“让 Agent 想做什么就做什么”。自主性是让它在证据、领域指标、权限、风险、预算、验证和恢复边界内，持续选择并进化当前最有价值的策略；而这些边界本身不属于 optimizer 的搜索空间。
+序枢把这些步骤变成同一个证据链。
+
+### 我们真正关心的产品指标
+
+不是“Agent 有多少功能”，而是：
+
+- **MTTD / MTTDg**：搜推异常出现到发现、诊断需要多久；
+- **Experiment lead time**：一个策略想法到可信验证需要多久；
+- **Bad-candidate rejection**：多少坏策略在进入线上实验前被拦住；
+- **Rollback latency**：线上/生产回放退化到自动退休策略需要多久；
+- **Validated uplift**：累计产生多少经过业务 reward + 独立验证支持的改进。
 
 ---
 
-## Agent Harness 方法
+# 生产价值闭环
 
-### 0 · Runtime composition
+上一版最大的产品缺口是：推荐 `quality` 主要由 coverage / diversity / freshness / novelty / cold-start 等 proxy 组成。
 
-`AgentHarness` 是运行时主体；`OwnedPolicy` 编译目标与 authority；`DeliberationEngine` 维护任务级推理状态；Search / RecSys 的长期策略优化由受验证约束的 vertical evolver 完成。
-
-<table>
-  <tr>
-    <td width="33%" valign="top"><strong>MissionGraph</strong><br><sub>Evidence Requirements、依赖、Hypotheses 与 exit criteria。</sub></td>
-    <td width="33%" valign="top"><strong>DeliberationEngine</strong><br><sub>按证据缺口、多信号 utility、风险与历史收益决定下一动作。</sub></td>
-    <td width="33%" valign="top"><strong>TrajectoryCritic</strong><br><sub>检查关键需求、矛盾、stagnation 与 clean-close 条件。</sub></td>
-  </tr>
-  <tr>
-    <td width="33%" valign="top"><strong>ToolRegistry</strong><br><sub>真实 search / recommend / audit / evolve / network 工具及风险契约。</sub></td>
-    <td width="33%" valign="top"><strong>CapabilityRegistry + Mixed Genome</strong><br><sub>参数 gene 与结构 capability gene 共用领域实验、credit assignment 与验证流程。</sub></td>
-    <td width="33%" valign="top"><strong>Verifier + Memory + Checkpoint</strong><br><sub>独立验收、typed learning、策略生命周期与 durable state。</sub></td>
-  </tr>
-</table>
-
-对应实现：[`harness.py`](lingjing_harness/runtime/harness.py) · [`deliberation.py`](lingjing_harness/runtime/deliberation.py) · [`capabilities.py`](lingjing_harness/algorithms/capabilities.py) · [`evolution_core.py`](lingjing_harness/algorithms/evolution_core.py) · [`tools_core.py`](lingjing_harness/runtime/tools_core.py) · [`verifier.py`](lingjing_harness/runtime/verifier.py) · [`memory.py`](lingjing_harness/runtime/memory.py)
-
-`evolution.py`、`recommend.py`、`runtime/tools.py` 保持稳定 import surface；复杂实现集中在对应 `*_core.py`，避免兼容 API 和演化逻辑继续耦合成单一巨型文件。
-
-> **命名边界：** 「序枢 / Xushu」是产品品牌；仓库中的 `lingjing_harness` Python import namespace 暂时保留，只承担向后兼容，不再作为产品名称使用。
-
-规范性行为契约：[`docs/HARNESS_CONTRACT.md`](docs/HARNESS_CONTRACT.md)  
-垂直进化设计：[`docs/VERTICAL_EVOLUTION.md`](docs/VERTICAL_EVOLUTION.md)
-
-### 1 · Goal / Authority → Mission Graph
-
-用户输入先被解析为任务目标、领域、实体与权限：
-
-```text
-mode · goal · query / user
-explore · allow_adaptation · allow_network
-constraints
-```
-
-运行时在第一次工具调用之前建立 Mission Graph。它不是预计算执行列表，而是“这次任务还需要证明什么”的状态图：
-
-```text
-MissionGraph
-├─ workspace_facts
-├─ search_reproduction
-│  └─ search_diagnosis          dormant until evidence asks for it
-├─ search_global_quality
-├─ search_candidate_validation
-└─ hypotheses
-   ├─ search_local_mismatch
-   └─ search_systemic_gap
-```
-
-每个 requirement 带：
-
-```text
-key · domain · tool · priority
-prerequisites · status · satisfied_by · reason
-```
-
-**Mission Graph 定义还缺什么；DeliberationEngine 决定现在用哪个动作补这个缺口。**
-
-附件、图片感知与网页只能改变 observation 和 hypothesis，不能扩大联网或策略激活权限。
-
-### 2 · Evidence Requirements：追缺口，不追固定流程
-
-一次搜索任务可能先执行 `workspace_facts → search_reproduction`。如果结果正常，diagnosis 可以一直 dormant；如果真实结果暴露空召回或弱匹配，它才动态进入 open。
-
-```text
-observation A → requirement satisfied
-observation B → hypothesis strengthened → open diagnosis
-observation C → local/global conflict → contradiction → investigate
-```
-
-Recommendation-only 任务不会因为 `explore=true` 顺手做无关 search audit。Scope 是任务级状态，不是工具列表副作用。
-
-### 3 · Hypothesis tracking：解释也必须有状态
-
-Harness 不只保存 observations，还保存可被支持、削弱和淘汰的 hypothesis：
-
-```text
-key · domain · confidence · status
-supporting_evidence · contradicting_evidence
-```
+这些指标很重要，但它们**不等于业务价值**。
 
 例如：
 
-- `search_local_mismatch`
-- `search_systemic_gap`
-- `recommend_cold_start`
-- `recommend_systemic_gap`
-
-Observation 改变 hypothesis；活跃 hypothesis 又反过来影响 action utility。
-
-### 4 · Multi-signal deliberation
-
-候选动作只来自：
-
 ```text
-open requirement
-+ prerequisites satisfied
-+ capability available
-+ authority allowed
+更高 diversity
++ 更高 freshness
++ 更高 coverage
+≠ 一定更高 CTR / CVR / GMV / watch time / retention
 ```
 
-当前 deliberation 综合：
+因此当前主线引入了独立的生产价值层。
 
-`priority` · `information_gain` · `evidence_gap` · `hypothesis_pressure` · `contradiction_pressure` · `cost_pressure` · `risk_pressure` · `domain_novelty` · `stagnation_pressure` · `learned_policy_bonus`
+## 1 · RewardSpec：业务定义价值，optimizer 不替业务拍脑袋
 
-核心结构：
-
-```text
-utility(action)
-  = priority + information gain + evidence gap
-  + hypothesis / contradiction pressure
-  + bounded learned prior
-  - cost / risk / failure / stagnation pressure
+```json
+{
+  "reward_spec": {
+    "weights": {
+      "click": 0.5,
+      "favorite": 1.5,
+      "cart": 2.0,
+      "purchase": 5.0,
+      "hide": -2.0,
+      "refund": -5.0
+    },
+    "inverse_propensity_cap": 20
+  }
+}
 ```
 
-每次 decision 都保留 target requirement、utility decomposition、active hypotheses、rationale 与 top alternatives，因此“为什么选择这个工具”可以被复核。
-
-### 5 · Execute → Reflect → Replan
+每条 production outcome 的 reward：
 
 ```text
-compile goal + authority
-        ↓
-build Mission Graph
-        ↓
-recall bounded memory
-        ↓
-┌──────────────────────────────────────────────┐
-│ deliberate over valid candidates             │
-│        ↓                                     │
-│ execute one risk-guarded real capability     │
-│        ↓                                     │
-│ consume observation / evidence               │
-│        ↓                                     │
-│ REFLECT                                      │
-│  · satisfy / block requirements              │
-│  · activate dormant requirements             │
-│  · update hypotheses                         │
-│  · detect / resolve contradictions           │
-│  · update stagnation                         │
-│        ↓                                     │
-│ checkpoint complete deliberation state       │
-│        ↓                                     │
-│ trajectory critic → replan or close          │
-└──────────────────────────────────────────────┘
-        ↓
-independent final verifier
-        ↓
-bounded learning / recovery-safe result
+configured weight(event) × event.value
 ```
 
-工具返回不是流程终点，而是新的世界状态。每个 completed / failed action 后先 reflection，再允许下一次 decision。
+所以业务可以自己表达：
 
-### 6 · Contradiction & stagnation
+- 电商：purchase / GMV / refund；
+- 内容：watch time / completion / skip；
+- 社区：follow / dwell / hide；
+- 搜索：click / conversion / reformulation penalty。
 
-复杂任务常常不是“证据太少”，而是证据互相冲突。
+> **RewardSpec 是产品 contract，不是进化 gene。** optimizer 没有权限偷偷把业务目标改成更容易优化的指标。
 
-例如单 query 看起来正常，但全局 audit 显著偏低，Harness 会记录 material contradiction 并要求诊断。连续动作如果没有改变 requirement、hypothesis 或 contradiction，`stagnation` 会升高，重复路径价值随之降低。
+## 2 · ExposureEvent：知道“当时真正展示了什么”
 
-### 7 · Trajectory Critic + Independent Verifier
-
-`TrajectoryCritic` 持续计算：
+生产评估与用户画像行为分开存储。
 
 ```text
-evidence_coverage · terminal_coverage
-unresolved critical/high requirements
-blocked requirements
-unresolved contradictions
-stagnation · confidence
+request_id
+ timestamp
+ surface         search | recommend
+ user_id/query
+ item_id
+ event
+ value
+ propensity
+ position
+ policy_id
+ model_version
+ experiment_id
+ metadata
 ```
 
-只要还有可执行的 critical / high requirement，或 material contradiction 没调查，critic 就不会 clean close。
+`interactions` 可以构造用户 profile；`events` 则回答：
 
-轨迹闭合后 `ResultVerifier` 再独立检查：
+> 哪个真实 request、由哪个策略、在什么位置展示了什么，最后发生了什么？
+
+这是做生产 replay、未来 holdout、策略版本追踪的基础。
+
+## 3 · Logged replay
+
+候选策略会对历史 request 重新执行排名，并用业务 reward 对排名结果打分。
 
 ```text
-no_failed_tools
-evidence_backed
-adaptation_respected
-mission_terminal
-contradictions_resolved
+historical request
+       ↓
+candidate policy
+       ↓
+new ranking
+       ↓
+logged rewarded/penalized items
+       ↓
+rank discount
+       ↓
+optional capped inverse propensity
+       ↓
+request-level policy value
 ```
 
-“控制器认为做完了”和“系统允许返回完整结果”是两个不同判断。
-
-### 8 · Tool contract + typed memory
-
-每个工具声明：
+返回：
 
 ```text
-risk · cost · side_effect · repeatable · input_schema
+business_reward
+business_reward_coverage
+request_scores
+estimator
+propensity_rows
 ```
 
-| Risk | Harness 允许什么 |
-|---|---|
-| `read` | 读取、复现、诊断 |
-| `simulation` | 离线 audit / evaluation |
-| `adaptive` | 探索并写可信策略记忆；激活仍需授权 |
-| `network` | 只有当前 run 明确允许联网时才执行 |
+### 统计边界
 
-长期记忆分为：
-
-| Memory | 保存什么 | 对未来的作用 |
-|---|---|---|
-| Episodic | 任务、动作、findings、reward | 启动时召回类似轨迹 |
-| Procedural | 通过验证的 Search / RecSys strategy genome | trusted / active / retired 生命周期 |
-| Policy | 上下文-动作历史 reward | 有界 prior，不覆盖当前证据 |
-
-**Durable memory 不是可信输入。** 旧版本、损坏或已经失效的 strategy config 在进入引擎之前必须重新通过当前 schema：非有限数值、越界 gene 会被拒绝；已删除 capability 会 canonicalize 到 owned default，而 active fingerprint 如果因此不再描述真实执行策略，会被退休并要求重新评估。
-
-### 9 · Recoverable deliberation
-
-Checkpoint 持久化：
+当前 estimator 明确叫：
 
 ```text
-actions · observations · findings · evidence · decisions
-mission · hypotheses · reflections · contradictions
-critic · stagnation · spent cost · events
+logged_replay
+propensity_weighted_logged_replay
 ```
 
-恢复时 rehydrate 整个 Mission Graph 和 deliberation state，从已完成动作之后继续。Adaptive invocation 使用稳定 ID 保持幂等。
+它**不是**被包装成“完整无偏 OPE”。没有历史曝光的 item 没有真实 outcome；后续可以接 IPS / SNIPS / DR estimator，但当前 README 不提前宣称已经实现。
+
+## 4 · Temporal future holdout
+
+生产 events 不再用普通 hash/random split 作为默认泛化假设。
+
+```text
+older request identities
+       ↓
+production discovery
+       ↓
+candidate routing
+       ↓
+newer request identities
+       ↓
+future holdout
+```
+
+硬约束：
+
+- 一个 `request_id` 永远不能跨 discovery / holdout；
+- future holdout 时间晚于 discovery；
+- business holdout 与 Search relevance / Rec warm-user guardrail holdout 是两套独立证据；
+- 一个 future request 不足以获得 durable trust。
+
+## 5 · Paired bootstrap confidence
+
+在 future holdout 上按相同 `request_id` 比较 reference 与 candidate：
+
+```text
+candidate(request) - reference(request)
+              ↓
+paired bootstrap
+              ↓
+delta + CI95 + probability_positive
+```
+
+样本不足不会被“漂亮置信区间”掩盖；public trust gate 至少需要两个 paired future request，同时还需要 domain guardrail 有独立 holdout。
 
 ---
 
-## 垂直自进化：从参数到能力
+# Agent Harness
 
-这一部分是**序枢**与普通“自动调参 Agent”最重要的区别。
+## Mission-driven，而不是固定 tool sequence
 
-### 1 · Mixed Strategy Genome
+```text
+Goal + Authority
+       ↓
+Mission Graph
+       ↓
+Deliberation
+       ↓
+Tool / Capability
+       ↓
+Observation
+       ↓
+Reflection
+       ↓
+Hypothesis / Contradiction / Requirement update
+       ↓
+Trajectory Critic
+   ┌───┴────────┐
+replan        close
+              ↓
+       Result Verifier
+```
 
-策略不是一组固定 float，而是：
+每个 Evidence Requirement 带：
+
+```text
+key · domain · tool · priority
+prerequisites · status · satisfied_by
+```
+
+Harness 追的是**还缺什么证据**，不是“下一个固定步骤是什么”。
+
+## 需要准确说明的一点
+
+当前 `DeliberationEngine` 仍然持有一部分 Search/Recommendation mission semantics，例如搜索复现、推荐 audit、候选验证等 requirement。
+
+所以：
+
+> **Evolution search space 已经 schema/capability-driven；Mission compiler 还不是完全 capability-declared。**
+
+这是当前真实边界，不能因为项目强调“自进化”就把中心 controller 剩余的 domain code 隐去。
+
+---
+
+# 垂直自进化
+
+## Mixed Strategy Genome
 
 ```text
 Strategy Genome
 ├─ continuous genes
-│  ├─ normalized warm-ranking blend
-│  │  ├─ Search: lexical / semantic / title / quality / popularity / freshness
-│  │  └─ Rec: profile / graph / category / quality / freshness / popularity / novelty / exploration
-│  └─ independent bounded genes
-│     ├─ slate diversity
-│     └─ recommendation cold-start pressure
+│  ├─ Search ranking blend
+│  ├─ Recommendation warm ranking blend
+│  └─ independent diversity / cold-start genes
 └─ capability genes
    ├─ Search: query / candidate / rerank
    └─ Rec: profile / candidate / cold-start / exploration / rerank
 ```
 
-这里有一个重要约束：**只对同一语义作用域的权重做归一化。** `cold_start` 对 warm user 不生效，因此它是独立 gene，不能因为调冷启动而偷偷重分配 profile / graph / freshness 等 warm-ranking 权重。
+`CapabilityRegistry` 只声明 **what exists**；数据和验证决定 **what wins**。
 
-连续 gene 由 dataclass metadata 声明边界和归一化组；capability gene 只声明 `capability_group`，具体合法实现从 `CapabilityRegistry` 自动发现。
+## 两种 evaluation basis
 
-> Registry 定义 **what exists**；domain evaluator 决定 **what wins**。
+### 本地 / demo 数据
 
-### 2 · 当前真实可进化结构
-
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <strong>Search genome</strong><br><br>
-      <code>query_strategy</code><br>
-      <sub>rare_focus · literal · catalog_expand</sub><br><br>
-      <code>candidate_strategy</code><br>
-      <sub>postings_union · semantic_rescue</sub><br><br>
-      <code>rerank_strategy</code><br>
-      <sub>category_mmr · semantic_mmr · hybrid_mmr</sub>
-    </td>
-    <td width="50%" valign="top">
-      <strong>Recommendation genome</strong><br><br>
-      <code>profile_strategy</code><br>
-      <sub>recency_balanced · recent_intent · long_horizon</sub><br><br>
-      <code>candidate_strategy</code><br>
-      <sub>full_pool · evidence_union</sub><br><br>
-      <code>cold_start_strategy</code><br>
-      <sub>quality_freshness · discovery_prior · fresh_explore</sub><br><br>
-      <code>exploration_strategy</code><br>
-      <sub>stable_fresh · novelty_seek · coverage_seek</sub><br><br>
-      <code>rerank_strategy</code><br>
-      <sub>category_mmr · semantic_mmr · hybrid_mmr</sub>
-    </td>
-  </tr>
-</table>
-
-这些不是 README 标签。每个选择都真实进入 `SearchEngine` / `RecommendationEngine` 执行路径。
-
-例如 `semantic_rescue` 只能在已有 lexical / catalog anchor 的前提下补充候选；未知 query 不会因为向量哈希碰撞被凭空召回。结构能力返回的 candidate IDs 还会在进入推荐打分前去重，避免 capability 实现细节制造重复 slate 候选。
-
-### 3 · Mixed response surface + constrained projection
-
-每次 evolution 先在 discovery split 上测局部响应面。
-
-连续 gene：
+如果没有 RewardSpec + production events：
 
 ```text
-field ↑
-field ↓
+evaluation_basis = proxy_metrics
+business_trusted = false
 ```
 
-Capability gene：
+系统仍可以：
+
+- Search NDCG / Recall / MRR；
+- Recommendation coverage / freshness / diversity / novelty；
+- cold-start probe；
+- robustness；
+- capability/continuous response surface。
+
+但不会把这些 proxy 说成“业务增长”。
+
+### Production reward 存在
 
 ```text
-field = registered alternative A
-field = registered alternative B
-...
+Mixed Genome
+    ↓
+Business Reward Replay ──────┐
+                            │ primary routing signal
+Domain Guardrails ───────────┘ safety constraints
+    ↓
+Response Surface
+    ↓
+Posterior-guided Mixed Arms
+    ↓
+Population + QD Archive
+    ↓
+Future Temporal Holdout
+    ↓
+Paired Confidence + Regression Gates
+    ↓
+Trusted Strategy Memory
 ```
 
-每一个 structural neighbor 都重新执行完整 pipeline，而不是只修改配置字符串。
-
-对于需要保持总质量的 blend group，变异后不是简单“clip 一次再平均修正”。当前实现用**有界 capacity redistribution**把剩余质量分配到仍有容量的 gene，直到满足：
-
-```text
-∀ gene: min ≤ value ≤ max
-Σ blend genes = original group mass
-```
-
-因此极端 mutation / clipping 也不能让权重总量悄悄漂移。
-
-Response surface 输出：
-
-```text
-arm · kind · objective_delta · robustness
-historical_prior · posterior_sample · routing_score
-```
-
-### 4 · Posterior routing：历史经验是先验，不是输入真相
-
-Trusted strategy memory 不只记参数，也记 capability selection。
-
-历史经验可以形成这样的 prior：
-
-```text
-lexical:up
-freshness:down
-rerank_strategy=hybrid_mmr
-cold_start_strategy=discovery_prior
-```
-
-但 durable memory 本身可能来自旧版本。Router 只消费结构有效的 trusted / active rows；坏掉的 numeric value、未知字段或无法投影的旧 config 会被跳过，而不是让新 evolution run 崩溃。
-
-当前 catalog 的 discovery response 权重大于历史 posterior，因此曾经的 winner 不会成为永久规则。
-
-### 5 · Quality-Diversity：不让进化塌成一个局部最优
-
-Archive 按 mutation signature 保留不同机制的最佳策略：
-
-```text
-query_strategy=catalog_expand
-candidate_strategy=semantic_rescue + rerank_strategy=hybrid_mmr
-profile_strategy=recent_intent + exploration_strategy=novelty_seek
-lexical:up + semantic:down
-```
-
-下一代可以从多个 mechanism parent 继续探索，而不是只围着全局第一名做小幅抖动。Population expansion 还有显式尝试上限，避免低维/重复 genome 因无法产生足够 unique candidate 而无限循环。
-
-### 6 · Evaluation identity：先保证“独立”，再谈 holdout
-
-“discovery / holdout 两个列表”并不自动意味着独立。如果同一个 query 被重复导入两次，它仍可能以两条 row 的形式泄漏到两边。
-
-因此当前数据路径先做两层防护：
-
-```text
-Catalog ingest
-  → same query labels merge relevance sets
-  → one canonical label per query
-        ↓
-Evolution split
-  → defensive unique-by-identity
-  → deterministic discovery / holdout split
-```
-
-推荐 warm-user split 同样按 user identity 去重。**评价单位的 identity 不能同时出现在 discovery 与 holdout。**
-
-### 7 · Cold-start：独立 probe 必须进入独立 gate
-
-以前仅仅“计算一个 cold-start 指标”还不够。如果 final trust gate 不检查 holdout cold-start regression，这个指标仍然只是旁观数据。
-
-当前推荐 evolution 的路径是：
-
-```text
-discovery warm users
-+ discovery cold-start identities
-        ↓
-mixed response surface / routing
-        ↓
-discovery winner
-
-independent holdout warm users
-+ disjoint holdout cold-start identities
-        ↓
-quality / coverage / robustness
-+ explicit cold_start_quality_delta gate
-        ↓
-trusted strategy memory
-```
-
-Synthetic cold identities 会显式避开真实 user IDs；即使真实数据里恰好存在内部 probe 前缀，也会生成新的无历史 identity，防止“冷启动 probe 意外继承真实行为”。
-
-Trust 现在允许**真正的 cold-start-only improvement**获得 credit，但前提是 independent cold holdout 同样没有退化；反过来，即使 warm quality / coverage 明显提升，只要 holdout cold-start 显著回归，也不能通过 safety gate。
-
-### 8 · Active strategy ≠ 永久可信
-
-一个曾经 trusted / active 的策略，在代码 schema 或 capability registry 变化后不能直接继承旧可信度。
-
-启动时：
-
-```text
-persisted active config
-        ↓
-current schema validation
-  · numeric finite?
-  · within declared bounds?
-  · capability still registered?
-        ↓
-effective config == stored config ?
-  ├─ no  → retire old active fingerprint → owned default → re-evaluate later
-  └─ yes → run active regression validation
-```
-
-Recommendation 的 active regression 不只看 aggregate quality / coverage，还看 `cold_start_quality`。这修正了“整体指标没坏，但冷启动已经明显退化仍继续 active”的漏洞。
-
-### 9 · Evolution ≠ self-modifying code
-
-允许进化：
-
-- ranking/blending weights
-- query processing strategy
-- candidate generation strategy
-- user-profile strategy
-- cold-start policy
-- exploration policy
-- slate reranking strategy
-- posterior exploration prior
-- bounded QD archive / trusted procedural memory
-
-不允许 optimizer 隐式进化：
-
-- 用户权限
-- network authority
-- evaluation identity / holdout membership
-- verifier / trust gate
-- tool risk class
-- checkpoint / lease / fencing
-- 任意 Python 源码
-
-所以它是**垂直 Search/RecSys self-evolution**，不是一个不受约束的通用代码 Agent。
-
-完整设计：[`docs/VERTICAL_EVOLUTION.md`](docs/VERTICAL_EVOLUTION.md)
+业务 reward 成为主要 routing objective；NDCG/Recall、coverage、freshness、cold-start 和 worst-slice 退回它们更合理的位置：**保护体验的 guardrail**。
 
 ---
 
-## 快速启动
+# Existing system integration
 
-**要求：Python 3.11+。核心搜推、控制、验证与 memory 默认本地运行；视觉感知和联网研究是可选能力。**
+序枢的内建 Search / Recommendation 是 reference engine，不是要求企业迁移的目标架构。
+
+当前提供 read-only serving adapter contract：
+
+```python
+from lingjing_harness import (
+    AdapterSearchEngine,
+    CallableSearchAdapter,
+    RewardSpec,
+)
+from lingjing_harness.production import evaluate_logged_policy
+
+adapter = CallableSearchAdapter(
+    lambda query, limit: my_search_service(query=query, limit=limit)
+)
+engine = AdapterSearchEngine(adapter)
+
+report = evaluate_logged_policy(
+    events,
+    surface="search",
+    reward_spec=RewardSpec(weights={"click": 1, "purchase": 5}),
+    search_engine=engine,
+)
+```
+
+外部返回结果会：
+
+- 统一成 `id`；
+- 去重；
+- 拒绝非有限 score；
+- 保持确定排名；
+- 直接进入同一套 business replay。
+
+因此 Elasticsearch、OpenSearch、Vespa、内部 rank API、已有 recommendation service 都可以先作为**真实评估对象**接入。
+
+> 当前 external adapter 是 read-only evaluation contract。自动修改外部 production policy 仍要求接入方提供显式 typed write/experiment contract；序枢不会猜远端参数后直接修改生产服务。
+
+---
+
+# Active strategy lifecycle
+
+```text
+candidate
+   ↓
+production discovery + guardrails
+   ↓
+future holdout
+   ↓
+trusted
+   ↓ explicit user authority
+active
+   ↓
+periodic validation
+   ├─ business reward regression → retire
+   ├─ relevance / coverage / cold regression → retire
+   └─ pass → keep active
+```
+
+当 production reward 存在时：
+
+- strategy memory 的 score 优先保存 business reward；
+- memory payload 保存 `evaluation_basis` 和 `business_validation`；
+- business regression 在 proxy validation 之前检查；
+- proxy-only refresh 不能把 business regression 隐藏整个 TTL；
+- Harness fork 仍保持 production-aware ToolRegistry。
+
+---
+
+# 快速启动
+
+要求：**Python 3.11+**。
 
 ```bash
 git clone https://github.com/jiaweine/recsys-harness.git
@@ -554,8 +449,7 @@ cd recsys-harness
 python -m venv .venv
 ```
 
-<details open>
-<summary><strong>macOS / Linux</strong></summary>
+### macOS / Linux
 
 ```bash
 source .venv/bin/activate
@@ -563,18 +457,13 @@ python -m pip install -e .
 python -m uvicorn lingjing_harness.api:app --host 127.0.0.1 --port 8765
 ```
 
-</details>
-
-<details>
-<summary><strong>Windows PowerShell</strong></summary>
+### Windows PowerShell
 
 ```powershell
 .venv\Scripts\Activate.ps1
 python -m pip install -e .
 python -m uvicorn lingjing_harness.api:app --host 127.0.0.1 --port 8765
 ```
-
-</details>
 
 打开：
 
@@ -588,7 +477,7 @@ CLI：
 xushu-harness "做一次全局体检"
 ```
 
-开发与验证：
+开发验证：
 
 ```bash
 python -m pip install -e ".[dev]"
@@ -596,191 +485,193 @@ pytest -q
 python scripts/probe_harness_contract.py
 ```
 
+> 「序枢 / Xushu」是产品品牌；`lingjing_harness` Python import namespace 和已有 `LINGJING_*` 环境变量目前只作为历史兼容接口保留。
+
 ---
 
-## 能力
+# 生产数据契约
 
-<table>
-  <tr>
-    <td width="33%" valign="top"><strong>01 · Real Search</strong><br><sub>真实 query processing、candidate retrieval、rerank、诊断与 audit。</sub></td>
-    <td width="33%" valign="top"><strong>02 · Real Recommendation</strong><br><sub>用户 profile、候选池、cold-start、exploration、slate rerank。</sub></td>
-    <td width="33%" valign="top"><strong>03 · Capability Evolution</strong><br><sub>参数 + 结构 mixed genome，真实 pipeline response surface。</sub></td>
-  </tr>
-  <tr>
-    <td width="33%" valign="top"><strong>04 · Independent Evaluation</strong><br><sub>identity-isolated discovery / holdout、regression、robustness、cold-start gate。</sub></td>
-    <td width="33%" valign="top"><strong>05 · Controlled Evidence</strong><br><sub>多模态与网络只能提供 observation / provenance，不扩大 authority。</sub></td>
-    <td width="33%" valign="top"><strong>06 · Durable Learning</strong><br><sub>Episodic / procedural / policy memory + canonicalization / retirement + recovery。</sub></td>
-  </tr>
-</table>
+完整格式见 [`docs/DATA_FORMAT.md`](docs/DATA_FORMAT.md)。
 
-<details>
-<summary><strong>搜索 / 推荐实际覆盖</strong></summary>
+最小 production value 数据：
 
-| Search | Recommendation |
-|---|---|
-| query evidence / catalog expansion | recency-balanced / recent / long-horizon profile |
-| lexical postings / bounded semantic rescue | full-pool / evidence-union candidates |
-| field-aware lexical + semantic scoring | graph / content / category / quality / freshness |
-| category / semantic / hybrid MMR | cold-start + stable / novelty / coverage exploration |
-| Recall / MRR / NDCG | Coverage / Diversity / Freshness / Novelty + collision-safe cold-start slice |
-
-</details>
-
-<details>
-<summary><strong>可选联网与视觉感知</strong></summary>
-
-```bash
-export LINGJING_WEB_SEARCH_URL=<your-search-endpoint>
-export LINGJING_WEB_SEARCH_KEY=<optional-key>
-export LINGJING_VISION_BASE_URL=<your-vision-endpoint>
-export LINGJING_VISION_MODEL=<your-model-id>
+```json
+{
+  "items": [
+    {"id": "sku-1", "title": "商品 A"}
+  ],
+  "reward_spec": {
+    "weights": {
+      "click": 1,
+      "purchase": 5,
+      "hide": -2
+    }
+  },
+  "events": [
+    {
+      "request_id": "r-1",
+      "timestamp": 100,
+      "surface": "recommend",
+      "user_id": "u-1",
+      "item_id": "sku-1",
+      "event": "click",
+      "position": 1,
+      "propensity": 0.5,
+      "policy_id": "prod-v1"
+    }
+  ]
+}
 ```
 
-联网结果保留 title / URL / snippet；图片感知只产生受限 observation。两者都不能扩大用户授权。
+`Catalog.summary()` 会直接报告：
 
-</details>
+```text
+production_events
+production_requests
+search_replay_requests
+recommend_replay_requests
+business_reward_ready
+```
 
----
+`data.inspect` 会明确告诉你当前工作区是：
 
-## 可靠性
-
-<table>
-  <tr>
-    <td width="25%" valign="top"><strong>Guardrails</strong><br><sub>risk / cost / side effect / schema / authority 显式化。</sub></td>
-    <td width="25%" valign="top"><strong>Verification</strong><br><sub>critic、verifier、identity-isolated holdout、cold gate 与 robustness 分层。</sub></td>
-    <td width="25%" valign="top"><strong>Durability</strong><br><sub>动作、mission、deliberation 与 effective strategy state 可恢复。</sub></td>
-    <td width="25%" valign="top"><strong>Fencing</strong><br><sub>lease + heartbeat + revision 阻止 stale worker 覆盖新状态。</sub></td>
-  </tr>
-</table>
-
-<details open>
-<summary><strong>Durable execution</strong></summary>
-
-同一个 conversation 同时只允许一个 active run；不同 conversation 可以并行。Adaptive invocation 幂等；`cancel_requested` 可跨进程安全收敛。
-
-SQLite 同时承担 conversation reservation、worker owner、lease、heartbeat 与 terminal-state fencing。迟到 worker 不能覆盖新 owner 已提交的状态。
-
-</details>
-
-<details>
-<summary><strong>Strategy lifecycle hardening</strong></summary>
-
-Active strategy 不是绕过验证的永久缓存。加载时先验证当前 schema / bounds / capability registry；effective config 与旧 fingerprint 不一致就退休。定期 revalidation 会重新比较 owned default，Recommendation 还额外检查 cold-start regression。
-
-</details>
-
-<details>
-<summary><strong>Workspace coherence</strong></summary>
-
-Catalog 有共享 revision 和 update lock。数据导入期间不接受新的 run；revision 提交后，其他 worker 会重新加载一致的 Catalog / Harness。
-
-</details>
+- 已有 production reward evidence；还是
+- 只能做 proxy evaluation。
 
 ---
 
-## 系统架构
+# 系统架构
 
 <p align="center"><sub>AGENT HARNESS RUNTIME · CONTROL · EVIDENCE · EVOLUTION · TRUST · STATE</sub></p>
 <p align="center">
   <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@9eebea896a9cd50c5ac890a7645915efc2f6330d/docs/readme-assets/architecture.svg" alt="序枢 system architecture" width="97%">
 </p>
 
-当前系统可以看成两个受同一 trust plane 约束的闭环。
+```text
+                     ┌─────────────────────────────┐
+                     │ Goal + User Authority       │
+                     └──────────────┬──────────────┘
+                                    ↓
+                    Mission Graph / Deliberation
+                                    ↓
+                      Real Search / RecSys Tools
+                                    ↓
+                         Observation / Reflection
+                                    ↓
+                          Trajectory Critic
+                                    ↓
+──────────────────────────────── TRUST PLANE ────────────────────────────────
+                                    ↓
+                     Mixed Strategy Candidate Space
+                                    ↓
+         ┌──────────────────────────┴───────────────────────────┐
+         ↓                                                      ↓
+Domain Guardrails                                      Production Events
+NDCG / Recall / cold / coverage                       + RewardSpec
+         ↓                                                      ↓
+         └──────────────────── Response Surface ─────────────────┘
+                                    ↓
+                       Posterior Routing + QD
+                                    ↓
+                         Future Temporal Holdout
+                                    ↓
+                       Paired Confidence / Gates
+                                    ↓
+                      Trusted / Permissioned Active
+                                    ↓
+                       Revalidation / Retirement
+                                    ↓
+                       Typed Durable Strategy Memory
+```
 
-**Task loop**
+详细架构：[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)  
+Harness contract：[`docs/HARNESS_CONTRACT.md`](docs/HARNESS_CONTRACT.md)  
+Vertical evolution：[`docs/VERTICAL_EVOLUTION.md`](docs/VERTICAL_EVOLUTION.md)
+
+---
+
+# 可靠性
+
+已有工程边界继续保留：
+
+- Mission Graph / checkpoint resume；
+- adaptive invocation idempotency；
+- strategy schema canonicalization；
+- cold-start independent probe；
+- query/request identity isolation；
+- SQLite worker lease + heartbeat + fencing；
+- workspace revision；
+- production auth / rate limit / CSP；
+- attachment TTL / evidence retention；
+- network permission isolation；
+- stale worker 不得覆盖当前状态。
+
+新增 production value invariants：
 
 ```text
-Goal + Authority
-      ↓
-MissionGraph ─────────────────┐
-      ↓                       │
-DeliberationEngine            │
-      ↓                       │
-ToolRegistry → Observation    │
-      ↓                       │
-Reflection → Hypotheses       │
-      │       Requirements    │
-      │       Contradictions  │
-      ↓                       │
-TrajectoryCritic ── replan ───┘
-      ↓ close
-ResultVerifier
+business reward != proxy quality
+request identity cannot cross temporal split
+one future request cannot certify durable trust
+business regression can retire active strategy
+proxy validation cannot hide business regression
+RewardSpec cannot be evolved by optimizer
 ```
 
-**Vertical evolution loop**
+---
+
+# 当前边界
+
+这次更新解决的是最核心的“价值函数错误”，但序枢还没有假装自己已经完成整个生产实验基础设施。
+
+当前仍需继续推进：
+
+1. **完整 OPE estimator suite**：IPS / SNIPS / Doubly Robust；
+2. **Segment-conditioned strategy portfolio**：不同 query/user/session pathology 使用不同 verified strategy basin；
+3. **Online experiment adapters**：A/B、interleaving、canary、traffic allocation；
+4. **External typed write contract**：安全发布外部 serving policy；
+5. **Latency / infra cost Pareto objective**：质量、业务收益、P99、成本共同选择；
+6. **Capability-driven Mission Compiler**：移除 controller 里剩余的具体 tool/requirement taxonomy。
+
+这些是明确的下一阶段，不写成“已经完成”。
+
+---
+
+# Repository map
 
 ```text
-Current Search / RecSys Strategy
-      ↓
-Schema + Capability Canonicalization
-      ↓
-Mixed Genome
-  warm blend + independent genes + capability genes
-      ↓
-Identity-Isolated Discovery Response Surface
-      ↓
-Posterior-Guided Mixed Routing
-      ↓
-Population + QD Archive
-      ↓
-Independent Warm + Cold Holdout
-      ↓
-Regression / Robustness / Cold-start Gates
-      ↓
-Trusted Strategy Memory
-      ↓
-Optional Permissioned Activation
-      ↓
-Periodic Active Revalidation / Retirement
+frontend/                          序枢产品 UI
+lingjing_harness/
+  production.py                    RewardSpec / ExposureEvent / temporal replay / bootstrap
+  adapters.py                      existing-system read-only serving adapters
+  domain.py                        Catalog + training data + production evidence
+  algorithms/
+    search.py                      Search mixed genome + execution stages
+    recommend_core.py              Rec mixed genome + cold-start / exploration / rerank
+    capabilities.py                typed capability registry + config validation
+    evaluation.py                  domain guardrails + explicit business reward reporting
+    evolution_core.py              mixed response surface / posterior / QD primitives
+    production_evolution.py        business-routed search/recommend evolution
+    evolution.py                   stable public evolution surface + trust evidence gate
+  runtime/
+    harness.py                     Agent Harness orchestration / durable loop
+    deliberation.py                Mission Graph / hypotheses / reflection / critic
+    tools_core.py                  compatibility core lifecycle
+    tools_production.py            business-aware memory / active rollback lifecycle
+    tools.py                       stable ToolRegistry import surface
+    verifier.py                    result / authority verification
+    memory.py                      episodic / procedural / policy memory
+  api.py                           API / auth / workspace / recovery
+  store.py                         runs / leases / revisions / shared rate limit
+tests/test_production_value_loop.py
+                                   reward / temporal / replay / evolution regressions
+tests/test_serving_adapters.py     external serving adapter regressions
+docs/ARCHITECTURE.md               current production value architecture
+docs/DATA_FORMAT.md                production event / reward contract
 ```
 
-<table>
-  <tr>
-    <td width="33%" valign="top"><strong>Control plane</strong><br><sub>Mission Graph、Deliberation、Reflection、Trajectory Critic 持有任务级决策权。</sub></td>
-    <td width="33%" valign="top"><strong>Evolution plane</strong><br><sub>CapabilityRegistry、mixed genome、bounded projection、response surface、posterior router 与 QD archive 负责领域策略搜索。</sub></td>
-    <td width="33%" valign="top"><strong>Trust & state plane</strong><br><sub>identity isolation、Verifier、warm/cold holdout、typed memory、strategy retirement、checkpoint、lease 与 revision 约束长期行为。</sub></td>
-  </tr>
-</table>
-
-**Architecture invariants**
-
-`attachments never grant permission` · `network evidence never promotes strategy` · `one evaluation identity cannot cross discovery / holdout` · `cold-start credit requires cold-start evidence` · `stored strategy must equal effective strategy` · `holdout precedes trust` · `critic gates clean closure` · `stale workers cannot overwrite current state`
-
-> 架构说明：[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · Harness contract：[`docs/HARNESS_CONTRACT.md`](docs/HARNESS_CONTRACT.md) · Self-evolution：[`docs/VERTICAL_EVOLUTION.md`](docs/VERTICAL_EVOLUTION.md)
-
 ---
 
-## 部署
-
-默认本地模式不要求登录。生产暴露时必须显式配置访问密钥：
-
-```bash
-export LINGJING_ENV=production
-export LINGJING_ACCESS_TOKEN='<a-long-random-secret>'
-python -m uvicorn lingjing_harness.api:app --host 0.0.0.0 --port 8765
-```
-
-> `LINGJING_*` 目前仍是兼容配置前缀；它属于历史运行时接口，不是产品品牌。后续可以在不破坏现有部署的前提下迁移到 `XUSHU_*`。
-
-生产边界包括签名 HttpOnly + SameSite 会话、共享 SQLite 限流、安全响应头与可选 trusted-proxy IP 处理。
-
-> 当前多 worker 设计假设 worker 共享同一 SQLite 与数据目录；真正多机 / 多区域部署应把协调存储与对象存储迁移到共享基础设施。
-
----
-
-## 数据
-
-内置 sample catalog 可以直接体验。导入自己的数据时支持：
-
-`items` · `interactions` · `query labels` · `eligibility` · `quality` · `popularity` · `freshness`
-
-重复 query label 会在 Catalog 边界合并 relevance set；query 本身是 Search evaluation 的 identity，不会以重复 row 的方式跨 discovery / holdout。
-
-完整格式见 [`docs/DATA_FORMAT.md`](docs/DATA_FORMAT.md)。
-
----
-
-## 质量门槛
+# 质量门槛
 
 ```bash
 make check
@@ -789,71 +680,26 @@ make demo
 python scripts/probe_harness_contract.py
 ```
 
-CI 覆盖：Python 编译与完整回归、Harness contract probe、mixed-genome / capability-stage 测试、CLI smoke、wheel 干净安装、产品 hygiene、真实浏览器桌面 / 移动流程、多 worker lease / fencing / workspace revision，以及生产访问与限流契约。
+CI 同时验证：
 
-这次 hardening 不是只补 happy-path，而是增加 failure-oriented regression：
-
-- duplicate query identity 不得跨 discovery / holdout；
-- 极端 clipping 后 blend 仍严格满足 bounds + exact group mass；
-- `cold_start` mutation 不得改变 warm ranking blend；
-- 损坏 / 旧版 trusted memory 不得让 evolution 崩溃；
-- synthetic cold identity 与真实用户撞名时必须避让；
-- cold-start-only improvement 在独立 holdout 支持时可以获得 trust；
-- warm 指标再好也不能掩盖 holdout cold-start regression；
-- public recommendation audit 必须实际报告 cold-start slice；
-- 已删除 capability / 非法 active config 在执行前退休；
-- active recommendation 的 cold-start 回归必须触发 rollback；
-- 非默认 query / candidate / profile / cold-start / exploration / rerank 仍真实执行；
-- Harness contract、CLI、wheel、resilience 与既有产品测试必须同时通过。
-
----
-
-## Repository map
-
-```text
-frontend/                          产品 UI
-lingjing_harness/                  Python compatibility namespace
-  algorithms/
-    capabilities.py                typed registry + config canonicalization
-    search.py                      search mixed strategy genome + real stages
-    recommend.py                   stable public compatibility surface
-    recommend_core.py              hardened recommendation stages / cold-start isolation
-    evolution.py                   stable public compatibility surface
-    evolution_core.py              response surface / posterior / QD / isolated gates
-    evaluation.py                  Search/Rec metrics + collision-safe cold probes
-  runtime/
-    harness.py                     Agent Harness orchestration / checkpoint loop
-    policy.py                      用户目标、scope 与 authority 编译
-    deliberation.py                Mission Graph / hypotheses / reflection / critic
-    contracts.py                   runtime state / requirement / decision contracts
-    tools.py                       stable ToolRegistry import surface
-    tools_core.py                  strategy validation / activation / rollback lifecycle
-    verifier.py                    独立结果、权限与 trajectory 验证
-    memory.py                      episodic / procedural / policy memory
-    perception.py                  多模态 observation
-    network.py                     可控网络 evidence
-  api.py                           API、认证、附件、恢复、工作区运行时
-  store.py                         durable run、lease、revision、共享限流
-tests/test_deliberation.py         mission / reflection / critic 回归
-tests/test_vertical_evolution.py   mixed-genome / holdout / posterior 回归
-tests/test_capability_genome.py    real capability-stage 回归
-tests/test_evolution_hardening.py  identity / memory / projection / cold-gate 对抗回归
-docs/HARNESS_CONTRACT.md           规范性 Harness contract
-docs/VERTICAL_EVOLUTION.md         垂直自进化设计与扩展契约
-scripts/probe_harness_contract.py  可执行 contract probe
-scripts/capture_readme_assets.py   真实浏览器 QA 与 README 截图
-```
-
-> 仓库只维护**一条主线实现**。Search / Recommendation 是垂直能力；Agent Harness 是控制、实验、验证、进化、学习与恢复这些能力的产品主体。
+- Python compile + full pytest；
+- Mission/Deliberation/Harness contracts；
+- mixed genome / capability stages；
+- production reward / temporal request split / bootstrap；
+- malformed external adapter output；
+- strategy lifecycle / recovery / fencing；
+- CLI / wheel clean install；
+- frontend syntax / product hygiene；
+- desktop/mobile product browser flow。
 
 ---
 
 <div align="center">
 
-### Search and recommendation are the domain. The self-evolving Harness is the product.
+### Search / Recommendation is the domain. Measurable improvement is the product.
 
-**Compile · Deliberate · Execute · Reflect · Evolve · Isolate · Holdout · Verify · Learn · Recover**
+**Observe · Diagnose · Replay · Evolve · Holdout · Verify · Activate · Rollback · Learn**
 
-<sub>Mission graphs · Mixed genomes · Real capabilities · Failure-oriented gates · Typed memory · Durable state</sub>
+<sub>Business reward first · Domain guardrails always · Authority explicit</sub>
 
 </div>

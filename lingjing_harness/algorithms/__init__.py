@@ -16,6 +16,13 @@ from .evaluation import (
     ndcg_at_k,
 )
 from .evolution import evolve_search, evolve_recommend
+from lingjing_harness.production import (
+    ExposureEvent,
+    RewardSpec,
+    evaluate_logged_policy,
+    paired_bootstrap_delta,
+    temporal_request_split,
+)
 
 __all__ = [
     "CAPABILITIES",
@@ -27,11 +34,16 @@ __all__ = [
     "SearchEngine",
     "RecommendConfig",
     "RecommendationEngine",
+    "ExposureEvent",
+    "RewardSpec",
     "audit_cold_start",
     "audit_search",
     "audit_recommend",
     "evolve_search",
     "evolve_recommend",
+    "evaluate_logged_policy",
+    "paired_bootstrap_delta",
+    "temporal_request_split",
     "recall_at_k",
     "reciprocal_rank",
     "ndcg_at_k",
