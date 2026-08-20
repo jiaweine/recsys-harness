@@ -116,7 +116,7 @@ function messageContextHtml(m){
   return `${chips.length?`<div class="msg-meta">${chips.join('')}</div>`:''}${files}`;
 }
 function userMessageHtml(m){return `<div class="msg user"><div class="bubble"><div class="bubble-text">${esc(m.content)}</div>${messageContextHtml(m)}</div></div>`}
-function assistantMessageHtml(m){return `<div class="msg assistant"><div class="bubble"><div class="assistant-label"><b>灵境</b><span>执行完成</span></div><div class="answer">${md(m.content)}</div></div></div>`}
+function assistantMessageHtml(m){return `<div class="msg assistant"><div class="bubble"><div class="assistant-label"><b>序枢</b><span>执行完成</span></div><div class="answer">${md(m.content)}</div></div></div>`}
 function renderMessages(rows){$('welcome').hidden=rows.length>0;$('messageList').innerHTML=rows.map(m=>m.role==='user'?userMessageHtml(m):assistantMessageHtml(m)).join('');scrollBottom()}
 function appendUser(text,payload){$('welcome').hidden=true;$('messageList').insertAdjacentHTML('beforeend',userMessageHtml({content:text,payload}));scrollBottom()}
 function appendAssistant(msg){$('messageList').insertAdjacentHTML('beforeend',assistantMessageHtml(msg));scrollBottom()}
