@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 import time
 from typing import Any
 
@@ -42,16 +41,17 @@ class ToolRegistry(CoreToolRegistry):
         elif not self.catalog.events:
             issues.append("已配置 RewardSpec，但缺少 production events；还不能进行业务 reward replay")
         else:
-            if summary.get("search_replay_requests", 0) < 4:
-                issues.append("搜索 production request 太少，暂不足以形成时间 holdout")
-            if summary.get("recommend_replay_requests", 0) < 4:
-                issues.append("推荐 production request 太少，暂不足以形成时间 holdout")
+            if summary.get("search_replay_requests", 0) < 8:
+                issues.append("搜索 production request 太少，暂不足以形成稳定的时间 holdout")
+            if summary.get("recommend_replay_requests", 0) < 8:
+                issues.append("推荐 production request 太少，暂不足以形成稳定的时间 holdout")
         return {**result, "issues": issues}
 
     def _validate_active_strategies(self) -> None:
-        # Preserve every existing proxy/cold-start safety gate first.
-        super()._validate_active_strategies()
-
+        # Business regression is checked *before* the core validation can mark a
+        # strategy fresh. Otherwise a proxy-only refresh could accidentally hide
+        # a production-reward regression for the whole validation TTL.
+        business_pass: dict[str, tuple[str, float, float]] = {}
         for domain, engine, default_engine in (
             ("search", self.search, self.search.with_config(SearchConfig())),
             ("recommend", self.recommend, self.recommend.with_config(RecommendConfig())),
@@ -80,15 +80,30 @@ class ToolRegistry(CoreToolRegistry):
                 if retired:
                     self.rollback_events.append({"domain": domain, **retired})
             else:
-                self.memory.mark_skill_validation(
-                    self.catalog_key,
-                    domain,
-                    skill["fingerprint"],
-                    metrics={
-                        "business_reward": float(active_reward),
-                        "proxy_quality": float(active_report.get("quality", 0.0)),
-                    },
+                business_pass[domain] = (
+                    str(skill["fingerprint"]),
+                    float(active_reward),
+                    float(active_report.get("quality", 0.0)),
                 )
+
+        # Existing relevance/coverage/cold-start checks remain mandatory.
+        super()._validate_active_strategies()
+
+        # If the strategy survived both business and proxy checks, persist one
+        # validation record that states both values explicitly.
+        for domain, (fingerprint, reward, proxy_quality) in business_pass.items():
+            skill = self.memory.active_skill(self.catalog_key, domain)
+            if not skill or str(skill.get("fingerprint")) != fingerprint:
+                continue
+            self.memory.mark_skill_validation(
+                self.catalog_key,
+                domain,
+                fingerprint,
+                metrics={
+                    "business_reward": reward,
+                    "proxy_quality": proxy_quality,
+                },
+            )
 
     @staticmethod
     def _strategy_score(result: dict[str, Any]) -> float:
