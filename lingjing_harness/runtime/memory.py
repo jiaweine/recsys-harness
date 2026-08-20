@@ -35,7 +35,7 @@ def catalog_fingerprint(catalog: Catalog) -> str:
         separators=(",", ":"),
     )
     digest = blake2b(digest_size=12)
-    digest.update(f"{base}|reward-contract-v1|{reward}".encode("utf-8"))
+    digest.update(f"{base}|reward-contract|{reward}".encode("utf-8"))
     return digest.hexdigest()
 
 
