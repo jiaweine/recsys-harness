@@ -18,7 +18,7 @@ jobs:
       - run: pytest -q
       - run: python scripts/demo_smoke.py > /dev/null
       - run: python scripts/probe_harness_contract.py > /dev/null
-      - run: lingjing-harness '做一次全局体检' > /dev/null
+      - run: xushu-harness '做一次全局体检' > /dev/null
       - name: Product hygiene gates
         run: |
           python - <<'PY'
@@ -34,6 +34,8 @@ jobs:
           ]
           hits = [term for term in forbidden_ui if term in lower]
           assert not hits, f'customer UI leaked internal/third-party terms: {hits}'
+          assert '灵境' not in frontend and 'lingjing' not in lower, 'legacy product branding leaked into customer UI'
+          assert '序枢' in frontend, 'Xushu product branding missing from customer UI'
 
           css = '\n'.join(path.read_text(encoding='utf-8') for path in sorted(Path('frontend').glob('*.css')))
           css_lower = css.lower()
@@ -102,7 +104,7 @@ jobs:
               status = client.get('/api/status')
               capabilities = client.get('/api/capabilities')
           assert page.status_code == 200
-          assert '灵境' in page.text
+          assert '序枢' in page.text and '灵境' not in page.text
           assert layout.status_code == 200 and 'Focused Workspace' in layout.text
           assert status.status_code == 200 and status.json()['runtime']['evidence_utility_controller'] is True
           assert capabilities.status_code == 200 and capabilities.json()['multimodal']['attachments'] is True
