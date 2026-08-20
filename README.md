@@ -1,10 +1,12 @@
 <div align="center">
 
-# Recsys Harness
+# 序枢 · Recsys Harness
 
 ### 垂直自进化的 Search / Recommendation Agent Harness
 
 **让搜推系统不只会执行和诊断，还能在真实领域指标、隔离验证、策略一致性与权限边界内，自主重组能力、实验、学习、恢复并持续进化。**
+
+<sub>XUSHU · SEARCH / RECOMMENDATION AGENT HARNESS</sub>
 
 [![CI](https://github.com/jiaweine/recsys-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/jiaweine/recsys-harness/actions/workflows/ci.yml)
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
@@ -22,7 +24,7 @@
 
 <p align="center"><sub>DESKTOP · FULL WORKSPACE</sub></p>
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@36eed1e547b75e03e3c846875dd5f3441a4c6138/docs/readme-assets/overview.png" alt="Recsys Harness 真实运行界面" width="96%">
+  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@36eed1e547b75e03e3c846875dd5f3441a4c6138/docs/readme-assets/overview.png" alt="序枢真实运行界面" width="96%">
 </p>
 <p align="center"><sub>一个任务面：目标、对话、运行状态、证据、附件与可恢复执行保持在同一上下文。</sub></p>
 
@@ -33,12 +35,12 @@
     <td width="50%" valign="top" align="center">
       <strong>任务工作台</strong><br>
       <sub>输入、附件、权限与执行入口保持在同一操作面。</sub><br><br>
-      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@36eed1e547b75e03e3c846875dd5f3441a4c6138/docs/readme-assets/workbench.png" alt="Recsys Harness 工作台" width="100%">
+      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@36eed1e547b75e03e3c846875dd5f3441a4c6138/docs/readme-assets/workbench.png" alt="序枢工作台" width="100%">
     </td>
     <td width="50%" valign="top" align="center">
       <strong>证据与判断</strong><br>
       <sub>真实动作、轨迹、依据与结论集中在检查视图。</sub><br><br>
-      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@36eed1e547b75e03e3c846875dd5f3441a4c6138/docs/readme-assets/evidence.png" alt="Recsys Harness 证据面板" width="100%">
+      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@36eed1e547b75e03e3c846875dd5f3441a4c6138/docs/readme-assets/evidence.png" alt="序枢证据面板" width="100%">
     </td>
   </tr>
 </table>
@@ -59,9 +61,9 @@
     <td width="33%" valign="top" align="center"><strong>03 · 判断依据</strong><br><sub>Bottom sheet · 证据 / 来源</sub></td>
   </tr>
   <tr>
-    <td width="33%" valign="top" align="center"><img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@36eed1e547b75e03e3c846875dd5f3441a4c6138/docs/readme-assets/mobile-workspace.png" alt="Recsys Harness 移动端主任务" width="92%"></td>
-    <td width="33%" valign="top" align="center"><img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@36eed1e547b75e03e3c846875dd5f3441a4c6138/docs/readme-assets/mobile-progress.png" alt="Recsys Harness 移动端执行轨迹" width="92%"></td>
-    <td width="33%" valign="top" align="center"><img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@36eed1e547b75e03e3c846875dd5f3441a4c6138/docs/readme-assets/mobile-evidence.png" alt="Recsys Harness 移动端判断依据" width="92%"></td>
+    <td width="33%" valign="top" align="center"><img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@36eed1e547b75e03e3c846875dd5f3441a4c6138/docs/readme-assets/mobile-workspace.png" alt="序枢移动端主任务" width="92%"></td>
+    <td width="33%" valign="top" align="center"><img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@36eed1e547b75e03e3c846875dd5f3441a4c6138/docs/readme-assets/mobile-progress.png" alt="序枢移动端执行轨迹" width="92%"></td>
+    <td width="33%" valign="top" align="center"><img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@36eed1e547b75e03e3c846875dd5f3441a4c6138/docs/readme-assets/mobile-evidence.png" alt="序枢移动端判断依据" width="92%"></td>
   </tr>
 </table>
 
@@ -71,9 +73,9 @@
 
 搜索与推荐不是一个“模型调用”问题，而是一套长期运行的决策系统问题：**面对模糊业务目标，系统如何知道还缺什么证据、该执行哪个真实能力、何时改变假设、何时停止、什么结果有资格学习，以及学到的策略能否在下一次任务里安全复用。**
 
-Recsys Harness 把这些问题放进一个持久、可审计、可恢复、受权限和独立验证约束的运行时。
+**序枢**把这些问题放进一个持久、可审计、可恢复、受权限和独立验证约束的运行时。
 
-| 普通 tool-calling agent | Recsys Harness |
+| 普通 tool-calling agent | 序枢 |
 |---|---|
 | 生成一个计划后顺序调用工具 | 先编译 Mission Graph；每个 observation 后重新 deliberation |
 | 只记录“调用了什么” | 记录 targeted requirement、utility、hypothesis、alternatives、rationale |
@@ -114,6 +116,8 @@ Recsys Harness 把这些问题放进一个持久、可审计、可恢复、受�
 对应实现：[`harness.py`](lingjing_harness/runtime/harness.py) · [`deliberation.py`](lingjing_harness/runtime/deliberation.py) · [`capabilities.py`](lingjing_harness/algorithms/capabilities.py) · [`evolution_core.py`](lingjing_harness/algorithms/evolution_core.py) · [`tools_core.py`](lingjing_harness/runtime/tools_core.py) · [`verifier.py`](lingjing_harness/runtime/verifier.py) · [`memory.py`](lingjing_harness/runtime/memory.py)
 
 `evolution.py`、`recommend.py`、`runtime/tools.py` 保持稳定 import surface；复杂实现集中在对应 `*_core.py`，避免兼容 API 和演化逻辑继续耦合成单一巨型文件。
+
+> **命名边界：** 「序枢 / Xushu」是产品品牌；仓库中的 `lingjing_harness` Python import namespace 暂时保留，只承担向后兼容，不再作为产品名称使用。
 
 规范性行为契约：[`docs/HARNESS_CONTRACT.md`](docs/HARNESS_CONTRACT.md)  
 垂直进化设计：[`docs/VERTICAL_EVOLUTION.md`](docs/VERTICAL_EVOLUTION.md)
@@ -318,7 +322,7 @@ critic · stagnation · spent cost · events
 
 ## 垂直自进化：从参数到能力
 
-这一部分是 Recsys Harness 与普通“自动调参 Agent”最重要的区别。
+这一部分是**序枢**与普通“自动调参 Agent”最重要的区别。
 
 ### 1 · Mixed Strategy Genome
 
@@ -581,7 +585,7 @@ http://127.0.0.1:8765
 CLI：
 
 ```bash
-lingjing-harness "做一次全局体检"
+xushu-harness "做一次全局体检"
 ```
 
 开发与验证：
@@ -678,7 +682,7 @@ Catalog 有共享 revision 和 update lock。数据导入期间不接受新的 r
 
 <p align="center"><sub>AGENT HARNESS RUNTIME · CONTROL · EVIDENCE · EVOLUTION · TRUST · STATE</sub></p>
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@36eed1e547b75e03e3c846875dd5f3441a4c6138/docs/readme-assets/architecture.svg" alt="Recsys Harness system architecture" width="97%">
+  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@36eed1e547b75e03e3c846875dd5f3441a4c6138/docs/readme-assets/architecture.svg" alt="序枢 system architecture" width="97%">
 </p>
 
 当前系统可以看成两个受同一 trust plane 约束的闭环。
@@ -756,6 +760,8 @@ export LINGJING_ACCESS_TOKEN='<a-long-random-secret>'
 python -m uvicorn lingjing_harness.api:app --host 0.0.0.0 --port 8765
 ```
 
+> `LINGJING_*` 目前仍是兼容配置前缀；它属于历史运行时接口，不是产品品牌。后续可以在不破坏现有部署的前提下迁移到 `XUSHU_*`。
+
 生产边界包括签名 HttpOnly + SameSite 会话、共享 SQLite 限流、安全响应头与可选 trusted-proxy IP 处理。
 
 > 当前多 worker 设计假设 worker 共享同一 SQLite 与数据目录；真正多机 / 多区域部署应把协调存储与对象存储迁移到共享基础设施。
@@ -805,8 +811,8 @@ CI 覆盖：Python 编译与完整回归、Harness contract probe、mixed-genome
 ## Repository map
 
 ```text
-frontend/                          产品 UI（本轮 hardening 不修改）
-lingjing_harness/
+frontend/                          产品 UI
+lingjing_harness/                  Python compatibility namespace
   algorithms/
     capabilities.py                typed registry + config canonicalization
     search.py                      search mixed strategy genome + real stages
