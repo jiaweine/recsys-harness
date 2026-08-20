@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from math import isfinite, log1p
 from typing import Any
 
+from .production import ExposureEvent, RewardSpec
+
 
 def _number(
     value: Any,
@@ -145,6 +147,8 @@ class Catalog:
     items: list[Item]
     interactions: list[Interaction] = field(default_factory=list)
     query_labels: list[QueryLabel] = field(default_factory=list)
+    events: list[ExposureEvent] = field(default_factory=list)
+    reward_spec: RewardSpec | None = None
     name: str = "演示数据"
 
     def __post_init__(self) -> None:
@@ -165,10 +169,26 @@ class Catalog:
         ]
         self.interactions.sort(key=lambda event: (event.user_id, event.timestamp, event.item_id))
 
+        # Production exposure/outcome rows are durable evaluation evidence. They
+        # are kept separate from implicit-feedback training interactions because
+        # exposure identity, policy/version and propensity are needed by replay.
+        self.events = [
+            event
+            for event in self.events
+            if event.request_id and event.item_id in self.item_by_id
+        ]
+        self.events.sort(
+            key=lambda event: (
+                event.timestamp,
+                event.request_id,
+                event.position or 10**9,
+                event.item_id,
+                event.event,
+            )
+        )
+
         # Query text is the evaluation unit. Duplicate rows for the same query
         # must never be allowed to land on opposite sides of discovery/holdout.
-        # Merge their relevance sets here so every downstream evaluator sees one
-        # canonical label per query.
         eligible_ids = {item.item_id for item in self.items if item.eligible}
         merged: dict[str, list[str]] = {}
         for label in self.query_labels:
@@ -193,13 +213,25 @@ class Catalog:
         item_rows = _rows(payload, "items")
         interaction_rows = _rows(payload, "interactions")
         query_rows = _rows(payload, "query_labels")
+        event_rows = _rows(payload, "events")
+        if not event_rows and payload.get("exposures") is not None:
+            event_rows = _rows(payload, "exposures")
         if not item_rows:
             raise ValueError("数据中至少需要一条包含 id 与 title 的有效内容")
+
+        reward_raw = payload.get("reward_spec")
+        reward_spec = None
+        if reward_raw not in (None, {}):
+            if not isinstance(reward_raw, dict):
+                raise ValueError("reward_spec 必须是对象")
+            reward_spec = RewardSpec.from_dict(reward_raw)
 
         catalog = cls(
             items=[Item.from_dict(row) for row in item_rows],
             interactions=[Interaction.from_dict(row) for row in interaction_rows],
             query_labels=[QueryLabel.from_dict(row) for row in query_rows],
+            events=[ExposureEvent.from_dict(row) for row in event_rows],
+            reward_spec=reward_spec,
             name=str(name or "导入数据").strip() or "导入数据",
         )
         if not catalog.items:
@@ -236,11 +268,16 @@ class Catalog:
                 {"query": label.query, "relevant": list(label.relevant)}
                 for label in self.query_labels
             ],
+            "events": [event.to_dict() for event in self.events],
+            "reward_spec": self.reward_spec.to_dict() if self.reward_spec else None,
         }
 
     def summary(self) -> dict[str, Any]:
         users = {event.user_id for event in self.interactions}
         categories = {category for item in self.items for category in item.categories}
+        request_ids = {event.request_id for event in self.events}
+        search_requests = {event.request_id for event in self.events if event.surface == "search"}
+        recommend_requests = {event.request_id for event in self.events if event.surface == "recommend"}
         return {
             "name": self.name,
             "items": len(self.items),
@@ -248,6 +285,11 @@ class Catalog:
             "interactions": len(self.interactions),
             "queries": len(self.query_labels),
             "categories": len(categories),
+            "production_events": len(self.events),
+            "production_requests": len(request_ids),
+            "search_replay_requests": len(search_requests),
+            "recommend_replay_requests": len(recommend_requests),
+            "business_reward_ready": bool(self.reward_spec and request_ids),
         }
 
     def popularity_norm(self, item: Item) -> float:
