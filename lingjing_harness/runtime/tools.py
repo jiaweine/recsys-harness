@@ -165,7 +165,20 @@ class ToolRegistry(_ProductionToolRegistry):
                 )
 
     def fork(self) -> "ToolRegistry":
-        return type(self)(self.catalog, self.memory, self.network)
+        """Pick up durable strategies while reusing immutable/heavy features."""
+
+        clone = object.__new__(type(self))
+        clone.catalog = self.catalog
+        clone.memory = self.memory
+        clone.network = self.network
+        clone.catalog_key = self.catalog_key
+        clone.rollback_events = []
+        clone.search = self.search.with_config(clone._load_config("search", SearchConfig))
+        clone.recommend = self.recommend.with_config(clone._load_config("recommend", RecommendConfig))
+        clone._specs = clone._build_specs()
+        clone._refresh_portfolio()
+        clone._validate_active_portfolio()
+        return clone
 
     def inspect_data(self) -> dict[str, Any]:
         result = super().inspect_data()
@@ -298,16 +311,25 @@ class ToolRegistry(_ProductionToolRegistry):
             _invocation_id=_invocation_id,
             **kwargs,
         )
+        global_activated = bool(result.get("activated"))
+        portfolio_activate = effective_activate and not global_activated
         portfolio_skills = self._remember_segment_portfolio(
             result,
             surface="search",
-            activate=effective_activate,
+            activate=portfolio_activate,
             invocation_id=_invocation_id,
         )
+        if global_activated:
+            # Segment boundaries were measured against the pre-activation global
+            # strategy. Rebuild routing and require another independent segment
+            # validation before any segment override can become active.
+            self._refresh_portfolio()
         if portfolio_skills:
             result["learned"] = True
         result["portfolio_skills"] = portfolio_skills
-        result["portfolio_activated"] = bool(effective_activate and portfolio_skills)
+        result["portfolio_activated"] = bool(portfolio_activate and portfolio_skills)
+        if effective_activate and global_activated and portfolio_skills:
+            result["portfolio_activation_blocked_by"] = "global_strategy_changed_requires_segment_revalidation"
         if activate and not effective_activate:
             result["activation_blocked_by"] = "production_request_floor<8"
         return result
@@ -324,16 +346,22 @@ class ToolRegistry(_ProductionToolRegistry):
             _invocation_id=_invocation_id,
             **kwargs,
         )
+        global_activated = bool(result.get("activated"))
+        portfolio_activate = effective_activate and not global_activated
         portfolio_skills = self._remember_segment_portfolio(
             result,
             surface="recommend",
-            activate=effective_activate,
+            activate=portfolio_activate,
             invocation_id=_invocation_id,
         )
+        if global_activated:
+            self._refresh_portfolio()
         if portfolio_skills:
             result["learned"] = True
         result["portfolio_skills"] = portfolio_skills
-        result["portfolio_activated"] = bool(effective_activate and portfolio_skills)
+        result["portfolio_activated"] = bool(portfolio_activate and portfolio_skills)
+        if effective_activate and global_activated and portfolio_skills:
+            result["portfolio_activation_blocked_by"] = "global_strategy_changed_requires_segment_revalidation"
         if activate and not effective_activate:
             result["activation_blocked_by"] = "production_request_floor<8"
         return result
