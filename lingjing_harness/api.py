@@ -1,8 +1,9 @@
 """Stable Xushu API surface.
 
 The implementation lives in :mod:`lingjing_harness.api_core`.  This entrypoint
-keeps the historical ``lingjing_harness.api:app`` import stable and installs the
-run-read coherence boundary in one small, reviewable place.
+keeps the historical ``lingjing_harness.api:app`` import stable and installs two
+small cross-cutting consistency boundaries: full production-evidence workspace
+revisioning and coherent terminal run reads.
 """
 
 from __future__ import annotations
@@ -13,6 +14,14 @@ import sys
 from fastapi import HTTPException
 
 from . import api_core as _core
+from .workspace_identity import workspace_fingerprint
+
+
+# Agent memory uses a stable strategy-context fingerprint so appended outcomes do
+# not erase useful history.  Workspace synchronization is stricter: every worker
+# must reload when the production evidence snapshot changes.
+_core.catalog_fingerprint = workspace_fingerprint
+_core.CATALOG_REVISION = workspace_fingerprint(_core.catalog)
 
 
 def _coherent_get_run(run_id: str):
