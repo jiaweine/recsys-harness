@@ -5,16 +5,17 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="theme-color" content="#f2f3f1" />
   <meta name="color-scheme" content="light" />
-  <title>序枢 · 搜推智能工作台</title>
+  <title>序枢 · 搜推工作台</title>
   <link rel="stylesheet" href="/assets/app.css" />
   <link rel="stylesheet" href="/assets/layout.css" />
+  <link rel="stylesheet" href="/assets/refinement.css" />
 </head>
 <body>
 <div class="auth-gate" id="authGate" hidden>
   <form class="auth-panel" id="authForm" autocomplete="off">
     <span>受保护工作区</span>
     <h1>进入序枢</h1>
-    <p>输入部署时配置的访问密钥。凭据只用于建立当前浏览器的安全会话。</p>
+    <p>输入部署访问密钥，建立当前浏览器会话。</p>
     <label for="authKey">访问密钥</label>
     <input id="authKey" type="password" autocomplete="current-password" maxlength="512" required />
     <button type="submit" id="authSubmit">进入工作区</button>
@@ -23,7 +24,7 @@
 </div>
 <div class="shell">
   <header class="topbar">
-    <div class="brand" aria-label="序枢搜推智能工作台">
+    <div class="brand" aria-label="序枢搜推工作台">
       <span class="brand-mark">序枢</span>
       <span class="brand-rule"></span>
       <span class="brand-sub">搜推工作台</span>
@@ -34,8 +35,8 @@
       <span class="status-chip quiet" id="networkStatus">联网研究 · 检查中</span>
     </div>
     <div class="top-actions">
-      <button class="top-link" id="importBtn">导入工作区</button>
-      <button class="trace-toggle" id="inspectorToggle" aria-expanded="false" aria-controls="inspector">查看证据</button>
+      <button class="top-link" id="importBtn">导入数据</button>
+      <button class="trace-toggle" id="inspectorToggle" aria-expanded="false" aria-controls="inspector">证据</button>
       <button class="avatar" id="lockBtn" type="button" aria-label="锁定工作区" hidden>XH</button>
     </div>
   </header>
@@ -43,16 +44,16 @@
   <aside class="sidebar">
     <button class="new-task" id="newTaskBtn"><span>新任务</span><b aria-hidden="true">＋</b></button>
     <nav class="scene-nav" aria-label="任务类型">
-      <span class="nav-label">工作模式</span>
-      <button class="scene active" data-scene="search"><span>01</span><div><b>搜索体验</b><small>相关性 · 无结果 · 长尾</small></div></button>
-      <button class="scene" data-scene="recommend"><span>02</span><div><b>推荐体验</b><small>首屏 · 冷启动 · 重复</small></div></button>
-      <button class="scene" data-scene="evolve"><span>03</span><div><b>自主优化</b><small>探索 · 验证 · 学习</small></div></button>
-      <button class="scene" data-scene="audit"><span>04</span><div><b>全局体检</b><small>风险 · 稳定性 · 优先级</small></div></button>
+      <span class="nav-label">任务</span>
+      <button class="scene active" data-scene="search"><span>01</span><div><b>搜索</b><small>相关性 · 无结果 · 长尾</small></div></button>
+      <button class="scene" data-scene="recommend"><span>02</span><div><b>推荐</b><small>首屏 · 冷启动 · 重复</small></div></button>
+      <button class="scene" data-scene="evolve"><span>03</span><div><b>优化</b><small>探索 · 验证 · 学习</small></div></button>
+      <button class="scene" data-scene="audit"><span>04</span><div><b>体检</b><small>风险 · 稳定性 · 优先级</small></div></button>
     </nav>
-    <div class="history-head"><span>最近任务</span><button id="refreshBtn" aria-label="刷新历史">↻</button></div>
+    <div class="history-head"><span>最近</span><button id="refreshBtn" aria-label="刷新历史">↻</button></div>
     <div class="history" id="historyList"></div>
     <div class="sidebar-foot">
-      <span class="tiny-dot"></span><span>自主执行 · 本地优先</span>
+      <span class="tiny-dot"></span><span>本地工作区</span>
     </div>
   </aside>
 
@@ -67,22 +68,17 @@
       <section class="welcome" id="welcome">
         <div class="hero-grid">
           <div class="hero-copy">
-            <span class="hero-index">自主工作台 · 搜索与推荐</span>
-            <h2>把搜推问题交给系统，<br><em>结论必须能被复核。</em></h2>
-            <p>描述目标，附上截图或数据。系统会复现问题、判断证据缺口、执行必要检查，并在明确边界内继续推进。</p>
-          </div>
-          <div class="hero-signal" aria-label="系统能力">
-            <div><strong>01</strong><span>先复现</span><small>从真实结果开始判断</small></div>
-            <div><strong>02</strong><span>再决策</span><small>证据变化会改变路径</small></div>
-            <div><strong>03</strong><span>后验证</span><small>没有稳定优势就不改变</small></div>
+            <span class="hero-index">搜推诊断 · 策略验证</span>
+            <h2>从问题直接开始，<br><em>证据决定下一步。</em></h2>
+            <p>输入搜索、用户或数据。系统复现、诊断、验证；未经独立验证不改变策略。</p>
           </div>
         </div>
 
         <div class="prompt-board">
-          <div class="board-head"><span>常用起点</span><small>选择后仍可继续编辑</small></div>
-          <button data-prompt="最近搜索“露营灯”的结果不太准，帮我复现问题、定位原因，并探索一个可验证的改进方向，但先不要改变当前策略。"><span>搜索</span><b>为什么“露营灯”排得不够准？</b><i>复现 → 诊断 → 验证</i></button>
-          <button data-prompt="帮我看看用户 u-lin 的推荐首屏，检查重复、新鲜度和冷启动风险，并告诉我最值得先处理的问题。"><span>推荐</span><b>这位用户的首屏哪里最值得改？</b><i>首屏 → 证据 → 优先级</i></button>
-          <button data-prompt="做一次全局体检，自己判断搜索和推荐里现在最值得先解决的三个问题；如果证据足够，再探索改进策略，但不要直接改变当前策略。"><span>体检</span><b>先找到最值得处理的三个问题</b><i>扫描 → 判断 → 探索</i></button>
+          <div class="board-head"><span>快速开始</span></div>
+          <button data-prompt="检查搜索露营灯的结果，先复现相关性问题，再定位原因并验证一个改进方向，不改变当前策略。"><span>搜索</span><b>检查露营灯的相关性</b><i>复现 · 诊断 · 验证</i></button>
+          <button data-prompt="检查用户 u-lin 的推荐首屏，重点看重复、新鲜度和冷启动风险，并给出优先级。"><span>推荐</span><b>检查 u-lin 的推荐首屏</b><i>首屏 · 风险 · 优先级</i></button>
+          <button data-prompt="做一次全局体检，找出搜索和推荐里最值得先处理的三个问题；证据足够时探索改进策略，不改变当前策略。"><span>体检</span><b>找出当前前三个问题</b><i>扫描 · 判断 · 探索</i></button>
         </div>
       </section>
 
@@ -99,17 +95,16 @@
       <div class="drop-hint" id="dropHint"><b>放下附件</b><span>图片 / JSON / CSV / Markdown / TXT</span></div>
       <div class="composer">
         <div class="attachment-tray" id="attachmentTray" hidden></div>
-        <textarea id="input" rows="1" maxlength="6000" placeholder="描述目标，或直接粘贴截图。比如：这张搜索结果截图有什么明显问题？先复现，再给出可验证结论。"></textarea>
+        <textarea id="input" rows="1" maxlength="6000" placeholder="输入搜索、用户或问题，也可粘贴截图和数据"></textarea>
         <div class="composer-foot">
           <div class="composer-tools">
             <button class="tool-btn" id="attachBtn" aria-label="添加附件"><span aria-hidden="true">＋</span> 附件</button>
             <button class="tool-btn network-btn" id="networkBtn" aria-pressed="false"><span class="network-light"></span> 联网</button>
-            <span class="input-hint">拖入 / 粘贴截图 · Enter 发送</span>
+            <span class="input-hint">拖入或粘贴附件 · Enter 发送</span>
           </div>
           <button class="send-btn" id="sendBtn" aria-label="发送任务"><span>执行</span><b aria-hidden="true">↗</b></button>
         </div>
       </div>
-      <p>附件与公开资料只作为证据；策略变化仍需通过独立验证。</p>
     </div>
   </main>
 
@@ -119,29 +114,29 @@
       <button id="inspectorClose" aria-label="关闭证据面板">×</button>
     </div>
     <div class="tabs" role="tablist">
-      <button class="tab active" role="tab" aria-selected="true" data-tab="progress">执行轨迹</button>
-      <button class="tab" role="tab" aria-selected="false" data-tab="evidence">判断依据</button>
-      <button class="tab" role="tab" aria-selected="false" data-tab="data">工作区</button>
+      <button class="tab active" role="tab" aria-selected="true" data-tab="progress">轨迹</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="evidence">证据</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="data">数据</button>
     </div>
     <div class="inspector-body">
       <section class="panel active" id="panel-progress">
         <div class="state-row"><span>任务状态</span><b id="stateText">等待开始</b></div>
-        <div class="timeline" id="timeline"><div class="empty">开始一个任务后，这里会记录系统实际做过的每一步。</div></div>
-        <div class="next-block"><span>继续追问</span><div id="suggestions"><button>先做一次全局体检</button><button>检查一个具体搜索</button></div></div>
+        <div class="timeline" id="timeline"><div class="empty">执行后显示实际步骤。</div></div>
+        <div class="next-block"><span>继续</span><div id="suggestions"><button>先做一次全局体检</button><button>检查一个具体搜索</button></div></div>
       </section>
       <section class="panel" id="panel-evidence">
-        <div class="section-intro"><span>判断依据</span><h3>只保留能复核的证据</h3><p>结果位置、执行检查和公开来源集中在这里；外部资料会单独标明。</p></div>
+        <div class="section-intro"><span>判断依据</span><h3>可复核证据</h3></div>
         <div class="evidence-list" id="evidenceList"><div class="empty">还没有执行结果。</div></div>
       </section>
       <section class="panel" id="panel-data">
-        <div class="section-intro"><span>工作区</span><h3 id="datasetTitle">当前体验数据</h3><p>用于复现问题、离线验证和核对结论。</p></div>
+        <div class="section-intro"><span>工作区</span><h3 id="datasetTitle">当前体验数据</h3></div>
         <div class="data-grid" id="dataGrid"></div>
         <div class="capability-lines">
           <div><span>图片与文件</span><b id="visionCapability">检查中</b></div>
           <div><span>联网研究</span><b id="networkCapability">检查中</b></div>
           <div><span>执行恢复</span><b>已就绪</b></div>
         </div>
-        <button class="import-line" id="importBtnSide"><span>换成我的工作区数据</span><b>JSON ↗</b></button>
+        <button class="import-line" id="importBtnSide"><span>导入工作区数据</span><b>JSON ↗</b></button>
       </section>
     </div>
   </aside>
