@@ -5,10 +5,11 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="theme-color" content="#f6f6f4" />
   <meta name="color-scheme" content="light" />
-  <title>序枢 · 搜推工作台</title>
+  <title>序枢</title>
   <link rel="stylesheet" href="/assets/app.css" />
   <link rel="stylesheet" href="/assets/layout.css" />
   <link rel="stylesheet" href="/assets/refinement.css" />
+  <link rel="stylesheet" href="/assets/worklog.css" />
 </head>
 <body>
 <div class="auth-gate" id="authGate" hidden>
@@ -24,9 +25,8 @@
 </div>
 <div class="shell">
   <header class="topbar">
-    <div class="brand" aria-label="序枢搜推工作台">
+    <div class="brand" aria-label="序枢">
       <span class="brand-mark">序枢</span>
-      <span class="brand-sub">搜推工作台</span>
     </div>
     <div class="top-status" aria-label="工作区状态">
       <span class="status-chip"><i class="status-dot"></i><b id="dataName">示例体验数据</b><small id="dataMeta">连接中</small></span>
@@ -34,7 +34,7 @@
       <span class="status-chip quiet" id="networkStatus" hidden>联网研究 · 检查中</span>
     </div>
     <div class="top-actions">
-      <button class="top-link" id="importBtn">导入数据</button>
+      <button class="top-link" id="importBtn">导入</button>
       <button class="trace-toggle" id="inspectorToggle" aria-expanded="false" aria-controls="inspector">详情</button>
       <button class="avatar" id="lockBtn" type="button" aria-label="锁定工作区" hidden>XH</button>
     </div>
@@ -58,7 +58,7 @@
 
   <main class="main">
     <div class="main-head">
-      <div class="task-title-wrap"><h1 id="taskTitle">新的体验任务</h1><span id="taskState">等待输入</span></div>
+      <div class="task-title-wrap"><h1 id="taskTitle">新任务</h1><span id="taskState">等待输入</span></div>
       <button class="copy-btn" id="copyBtn">复制结论</button>
     </div>
 
@@ -72,7 +72,7 @@
         </div>
 
         <div class="prompt-board">
-          <div class="board-head"><span>常用任务</span></div>
+          <div class="board-head"><span>常用</span></div>
           <button data-prompt="检查搜索露营灯的结果，先复现相关性问题，再定位原因并验证一个改进方向，不改变当前策略。"><span>搜索</span><b>检查露营灯的相关性</b></button>
           <button data-prompt="检查用户 u-lin 的推荐首屏，重点看重复、新鲜度和冷启动风险，并给出优先级。"><span>推荐</span><b>检查 u-lin 的推荐首屏</b></button>
           <button data-prompt="做一次全局体检，找出搜索和推荐里最值得先处理的三个问题；证据足够时探索改进策略，不改变当前策略。"><span>体检</span><b>找出当前最值得处理的问题</b></button>
@@ -107,11 +107,11 @@
 
   <aside class="inspector" id="inspector" aria-label="任务详情面板">
     <div class="inspector-head">
-      <div><span>任务详情</span><b>证据与状态</b></div>
+      <div><b>详情</b></div>
       <button id="inspectorClose" aria-label="关闭详情面板">×</button>
     </div>
     <div class="tabs" role="tablist">
-      <button class="tab active" role="tab" aria-selected="true" data-tab="progress">轨迹</button>
+      <button class="tab active" role="tab" aria-selected="true" data-tab="progress">运行</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="evidence">证据</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="data">数据</button>
     </div>
