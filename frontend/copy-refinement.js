@@ -12,28 +12,43 @@ function setPrompt(scene) {
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-function applyInitialPrompt() {
-  const welcome = document.getElementById('welcome');
-  const taskTitle = document.getElementById('taskTitle');
-  if (!welcome || welcome.hidden || taskTitle?.textContent !== '新的体验任务') return;
-  const active = document.querySelector('.scene.active[data-scene]');
-  setPrompt(active?.dataset.scene || 'search');
-}
-
 function refineDynamicCopy(root = document) {
   root.querySelectorAll?.('.evidence-item a').forEach(link => {
     if (link.textContent !== '打开来源') link.textContent = '打开来源';
   });
+
+  const taskTitle = document.getElementById('taskTitle');
+  if (taskTitle?.textContent === '新的体验任务') taskTitle.textContent = '新任务';
+
+  const taskState = document.getElementById('taskState');
+  if (taskState?.textContent === '正在自主执行') taskState.textContent = '执行中';
+
+  root.querySelectorAll?.('.timeline .empty').forEach(empty => {
+    if (empty.textContent.includes('记录系统实际做过的每一步')) empty.textContent = '执行后显示实际步骤。';
+  });
+}
+
+function applyInitialPrompt() {
+  const welcome = document.getElementById('welcome');
+  const taskTitle = document.getElementById('taskTitle');
+  if (!welcome || welcome.hidden || !['新任务', '新的体验任务'].includes(taskTitle?.textContent || '')) return;
+  refineDynamicCopy();
+  const active = document.querySelector('.scene.active[data-scene]');
+  setPrompt(active?.dataset.scene || 'search');
 }
 
 document.addEventListener('click', event => {
   const sceneButton = event.target.closest('.scene[data-scene]');
   if (sceneButton) {
-    setTimeout(() => setPrompt(sceneButton.dataset.scene), 0);
+    setTimeout(() => {
+      refineDynamicCopy();
+      setPrompt(sceneButton.dataset.scene);
+    }, 0);
     return;
   }
   if (event.target.closest('#newTaskBtn')) {
     setTimeout(() => {
+      refineDynamicCopy();
       const active = document.querySelector('.scene.active[data-scene]');
       setPrompt(active?.dataset.scene || 'search');
     }, 0);
@@ -46,8 +61,9 @@ const copyObserver = new MutationObserver(records => {
       if (node.nodeType === Node.ELEMENT_NODE) refineDynamicCopy(node);
     }
   }
+  refineDynamicCopy();
 });
-copyObserver.observe(document.body, { childList: true, subtree: true });
+copyObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
 refineDynamicCopy();
 
 if (document.body.classList.contains('ready')) {
