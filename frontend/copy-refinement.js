@@ -20,6 +20,12 @@ function applyInitialPrompt() {
   setPrompt(active?.dataset.scene || 'search');
 }
 
+function refineDynamicCopy(root = document) {
+  root.querySelectorAll?.('.evidence-item a').forEach(link => {
+    if (link.textContent !== '打开来源') link.textContent = '打开来源';
+  });
+}
+
 document.addEventListener('click', event => {
   const sceneButton = event.target.closest('.scene[data-scene]');
   if (sceneButton) {
@@ -34,13 +40,23 @@ document.addEventListener('click', event => {
   }
 });
 
+const copyObserver = new MutationObserver(records => {
+  for (const record of records) {
+    for (const node of record.addedNodes) {
+      if (node.nodeType === Node.ELEMENT_NODE) refineDynamicCopy(node);
+    }
+  }
+});
+copyObserver.observe(document.body, { childList: true, subtree: true });
+refineDynamicCopy();
+
 if (document.body.classList.contains('ready')) {
   applyInitialPrompt();
 } else {
-  const observer = new MutationObserver(() => {
+  const readyObserver = new MutationObserver(() => {
     if (!document.body.classList.contains('ready')) return;
-    observer.disconnect();
+    readyObserver.disconnect();
     applyInitialPrompt();
   });
-  observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  readyObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
 }
