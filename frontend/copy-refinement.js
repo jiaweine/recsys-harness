@@ -12,6 +12,14 @@ function setPrompt(scene) {
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+function applyInitialPrompt() {
+  const welcome = document.getElementById('welcome');
+  const taskTitle = document.getElementById('taskTitle');
+  if (!welcome || welcome.hidden || taskTitle?.textContent !== '新的体验任务') return;
+  const active = document.querySelector('.scene.active[data-scene]');
+  setPrompt(active?.dataset.scene || 'search');
+}
+
 document.addEventListener('click', event => {
   const sceneButton = event.target.closest('.scene[data-scene]');
   if (sceneButton) {
@@ -26,9 +34,13 @@ document.addEventListener('click', event => {
   }
 });
 
-setTimeout(() => {
-  const welcome = document.getElementById('welcome');
-  if (!welcome || welcome.hidden) return;
-  const active = document.querySelector('.scene.active[data-scene]');
-  setPrompt(active?.dataset.scene || 'search');
-}, 250);
+if (document.body.classList.contains('ready')) {
+  applyInitialPrompt();
+} else {
+  const observer = new MutationObserver(() => {
+    if (!document.body.classList.contains('ready')) return;
+    observer.disconnect();
+    applyInitialPrompt();
+  });
+  observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+}
