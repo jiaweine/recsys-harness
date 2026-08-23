@@ -1,0 +1,74 @@
+/* Final density pass: task-first hierarchy with less explanatory chrome. */
+:root{
+  --left:196px;
+  --right:292px;
+}
+
+/* Keep operational state visible without turning the header into a status dashboard. */
+.status-chip.quiet{display:none}
+.top-status{flex:1}
+.top-actions{gap:12px}
+.top-link,.trace-toggle{font-weight:700}
+
+/* Navigation favors destinations over descriptions. */
+.sidebar{padding-left:11px;padding-right:11px}
+.scene-nav{margin-top:15px}
+.scene{min-height:44px;grid-template-columns:22px 1fr;padding:5px 7px}
+.scene>span{padding-top:4px}
+.scene div{gap:0}
+.scene small{display:none}
+.history-head{margin-top:15px}
+.history-item{min-height:46px}
+
+/* The welcome screen is an entry point, not a product brochure. */
+.welcome{max-width:820px;padding:38px 44px 28px}
+.hero-index{margin-bottom:11px}
+.hero-copy h2{max-width:680px;font-size:clamp(28px,2.25vw,34px);line-height:1.1}
+.hero-copy p{max-width:610px;margin-top:12px;font-size:12px;line-height:1.62}
+.prompt-board{margin-top:25px}
+.board-head{height:34px}
+.prompt-board button{min-height:52px;grid-template-columns:58px minmax(0,1fr);padding:5px 2px}
+.prompt-board button>b{font-size:12px}
+.prompt-board button>i{display:none}
+
+/* Give the conversation slightly more space than the surrounding chrome. */
+.main-head{height:56px;padding-left:28px;padding-right:28px}
+.messages{padding-top:28px}
+.scroll{padding-bottom:150px}
+.composer-wrap{padding-top:8px;padding-bottom:8px}
+.composer{box-shadow:0 9px 28px rgba(39,51,47,.08)}
+.composer textarea{min-height:50px}
+.input-hint{color:var(--muted)}
+
+/* Evidence remains secondary but scannable. */
+.inspector-head{height:56px}
+.tabs{height:42px}
+.tab{min-height:42px}
+.inspector-body{padding-top:14px}
+.section-intro{padding-bottom:10px}
+.section-intro h3{margin-bottom:0}
+
+@media (max-width:1180px) and (min-width:1001px){
+  :root{--left:196px;--right:0px}
+}
+
+@media (max-width:1000px){
+  :root{--left:204px;--right:0px}
+  .welcome{padding:36px 34px 28px}
+}
+
+@media (max-width:720px){
+  :root{--left:0px;--right:0px}
+  .welcome{padding:22px 17px 20px}
+  .hero-index{margin-bottom:9px}
+  .hero-copy h2{font-size:25px}
+  .hero-copy p{display:none}
+  .prompt-board{margin-top:18px}
+  .board-head{height:31px}
+  .prompt-board button{min-height:49px;grid-template-columns:43px minmax(0,1fr);padding:5px 2px}
+  .scene small{display:none}
+  .scroll{padding-bottom:146px;scroll-padding-bottom:152px}
+  .composer-wrap{padding-top:6px}
+  .inspector-head{height:60px}
+  .tabs{height:42px}
+}
