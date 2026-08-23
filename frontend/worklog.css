@@ -162,6 +162,6 @@
 }
 
 @media (max-width:430px){
-  .prompt-board button>span{font-size:9px}
+  .prompt-board button>span{font-size:10px}
   .prompt-board button>b{font-size:11px}
 }
