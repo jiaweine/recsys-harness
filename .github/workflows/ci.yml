@@ -17,7 +17,7 @@ jobs:
       - run: python -m compileall -q lingjing_harness tests scripts
       - run: pytest -q
       - name: Durable store contention stress smoke
-        run: python scripts/stress_smoke.py --workers 8 --iterations 25
+        run: python scripts/stress_smoke.py --workers 8 --iterations 25 --processes 4
       - run: python scripts/demo_smoke.py > /dev/null
       - run: python scripts/probe_harness_contract.py > /dev/null
       - run: xushu-harness '做一次全局体检' > /dev/null
