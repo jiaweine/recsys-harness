@@ -27,11 +27,15 @@ _core.CATALOG_REVISION = workspace_fingerprint(_core.catalog)
 def _coherent_get_run(run_id: str):
     """Never expose a terminal status with an older in-memory payload.
 
-    A poll can copy a local ``running`` snapshot immediately before the owner
-    finishes and persists ``completed``.  Reading only the persisted status at
-    that point creates an impossible response: ``completed`` + ``result=None``.
-    If persistence has crossed a terminal boundary, return the *whole* durable
-    snapshot and refresh the local cache instead of splicing just the status.
+    Active runs are polled frequently by the UI.  Reading and decoding the whole
+    durable snapshot on every poll makes that hot path scale with checkpoint
+    size, even when persistence is still in the same active state.  Read the
+    lightweight durable status first and fetch the full snapshot only when the
+    durable run has crossed a terminal boundary.
+
+    This still preserves the consistency invariant that motivated this wrapper:
+    a caller must never observe ``completed`` (or another terminal status) with
+    an older in-memory payload such as ``result=None``.
     """
 
     with _core.RUN_LOCK:
@@ -45,19 +49,22 @@ def _coherent_get_run(run_id: str):
             raise HTTPException(404, "执行任务不存在") from exc
 
     if snapshot.get("status") in _core.ACTIVE_RUN_STATUSES:
-        try:
-            persisted = _core.store.get_run(run_id)
-        except KeyError as exc:
-            raise HTTPException(404, "执行任务不存在") from exc
-        persisted_status = str(persisted.get("status") or "")
-        if persisted_status and persisted_status not in _core.ACTIVE_RUN_STATUSES:
+        persisted_status = _core.store.run_status(run_id)
+        if persisted_status is None:
+            raise HTTPException(404, "执行任务不存在")
+
+        if persisted_status not in _core.ACTIVE_RUN_STATUSES:
+            try:
+                persisted = _core.store.get_run(run_id)
+            except KeyError as exc:
+                raise HTTPException(404, "执行任务不存在") from exc
             snapshot = persisted
             with _core.RUN_LOCK:
                 current = _core.RUNS.get(run_id)
                 if current is not None and current.get("status") in _core.ACTIVE_RUN_STATUSES:
                     current.clear()
                     current.update(copy.deepcopy(persisted))
-        elif persisted_status:
+        else:
             snapshot["status"] = persisted_status
     return snapshot
 
