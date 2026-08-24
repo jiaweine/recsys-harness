@@ -212,16 +212,17 @@ def run_stress(workers: int, iterations: int, processes: int = 0) -> dict[str, f
         if processes:
             process_iterations = max(4, iterations // 2)
             with ProcessPoolExecutor(max_workers=processes) as executor:
-                process_shared_messages = sum(
+                futures = [
                     executor.submit(
                         _process_write,
                         database,
                         shared["id"],
                         worker,
                         process_iterations,
-                    ).result()
+                    )
                     for worker in range(processes)
-                )
+                ]
+                process_shared_messages = sum(future.result() for future in futures)
             operations += process_shared_messages
 
             expected_shared = thread_shared_messages + process_shared_messages
