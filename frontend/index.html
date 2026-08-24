@@ -13,10 +13,10 @@
 </head>
 <body>
 <div class="auth-gate" id="authGate" hidden>
-  <form class="auth-panel" id="authForm" autocomplete="off">
+  <form class="auth-panel" id="authForm" autocomplete="off" role="dialog" aria-modal="true" aria-labelledby="authTitle" aria-describedby="authDescription">
     <span>受保护工作区</span>
-    <h1>进入序枢</h1>
-    <p>输入部署访问密钥，建立当前浏览器会话。</p>
+    <h1 id="authTitle">进入序枢</h1>
+    <p id="authDescription">输入部署访问密钥，建立当前浏览器会话。</p>
     <label for="authKey">访问密钥</label>
     <input id="authKey" type="password" autocomplete="current-password" maxlength="512" required />
     <button type="submit" id="authSubmit">进入工作区</button>
@@ -79,9 +79,9 @@
         </div>
       </section>
 
-      <div class="messages" id="messageList" aria-live="polite"></div>
+      <div class="messages" id="messageList" role="log" aria-live="polite" aria-relevant="additions text"></div>
 
-      <section class="running" id="running" hidden aria-live="polite">
+      <section class="running" id="running" hidden aria-live="polite" aria-atomic="true">
         <div class="run-meta"><span>正在执行</span><b id="runPercent">0%</b></div>
         <div class="run-head"><i class="run-mark"></i><div><b id="runTitle">正在执行</b><small id="runDetail">读取当前工作区</small></div><button class="run-stop" id="runStopBtn" type="button">停止</button></div>
         <div class="run-line"><i id="runBar"></i></div>
@@ -107,25 +107,25 @@
 
   <aside class="inspector" id="inspector" aria-label="任务详情面板">
     <div class="inspector-head">
-      <div><b>详情</b></div>
+      <div><b id="inspectorTitle">详情</b></div>
       <button id="inspectorClose" aria-label="关闭详情面板">×</button>
     </div>
-    <div class="tabs" role="tablist">
-      <button class="tab active" role="tab" aria-selected="true" data-tab="progress">运行</button>
-      <button class="tab" role="tab" aria-selected="false" data-tab="evidence">证据</button>
-      <button class="tab" role="tab" aria-selected="false" data-tab="data">数据</button>
+    <div class="tabs" role="tablist" aria-label="任务详情">
+      <button class="tab active" id="tab-progress" role="tab" aria-selected="true" aria-controls="panel-progress" tabindex="0" data-tab="progress">运行</button>
+      <button class="tab" id="tab-evidence" role="tab" aria-selected="false" aria-controls="panel-evidence" tabindex="-1" data-tab="evidence">证据</button>
+      <button class="tab" id="tab-data" role="tab" aria-selected="false" aria-controls="panel-data" tabindex="-1" data-tab="data">数据</button>
     </div>
     <div class="inspector-body">
-      <section class="panel active" id="panel-progress">
+      <section class="panel active" id="panel-progress" role="tabpanel" aria-labelledby="tab-progress" aria-hidden="false">
         <div class="state-row"><span>状态</span><b id="stateText">等待开始</b></div>
         <div class="timeline" id="timeline"><div class="empty">执行后显示实际步骤。</div></div>
         <div class="next-block"><span>继续</span><div id="suggestions"><button>先做一次全局体检</button><button>检查一个具体搜索</button></div></div>
       </section>
-      <section class="panel" id="panel-evidence">
+      <section class="panel" id="panel-evidence" role="tabpanel" aria-labelledby="tab-evidence" aria-hidden="true">
         <div class="section-intro"><span>证据</span><h3>可复核依据</h3></div>
         <div class="evidence-list" id="evidenceList"><div class="empty">还没有执行结果。</div></div>
       </section>
-      <section class="panel" id="panel-data">
+      <section class="panel" id="panel-data" role="tabpanel" aria-labelledby="tab-data" aria-hidden="true">
         <div class="section-intro"><span>数据</span><h3 id="datasetTitle">当前体验数据</h3></div>
         <div class="data-grid" id="dataGrid"></div>
         <div class="capability-lines">
@@ -143,6 +143,7 @@
 <input id="dataFileInput" type="file" accept="application/json,.json" hidden />
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script type="module" src="/assets/app.js"></script>
+<script type="module" src="/assets/a11y.js"></script>
 <script type="module" src="/assets/copy-refinement.js"></script>
 </body>
 </html>
