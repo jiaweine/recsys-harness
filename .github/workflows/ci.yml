@@ -14,8 +14,10 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: pip install -e . --no-deps
-      - run: python -m compileall -q lingjing_harness tests
+      - run: python -m compileall -q lingjing_harness tests scripts
       - run: pytest -q
+      - name: Durable store contention stress smoke
+        run: python scripts/stress_smoke.py --workers 8 --iterations 25
       - run: python scripts/demo_smoke.py > /dev/null
       - run: python scripts/probe_harness_contract.py > /dev/null
       - run: xushu-harness '做一次全局体检' > /dev/null
@@ -25,7 +27,11 @@ jobs:
           from pathlib import Path
           import re
 
-          frontend_paths = [Path('frontend/index.html'), Path('frontend/app.js'), *sorted(Path('frontend').glob('*.css'))]
+          frontend_paths = [
+              Path('frontend/index.html'),
+              *sorted(Path('frontend').glob('*.js')),
+              *sorted(Path('frontend').glob('*.css')),
+          ]
           frontend = '\n'.join(path.read_text(encoding='utf-8') for path in frontend_paths)
           lower = frontend.lower()
           forbidden_ui = [
@@ -36,6 +42,11 @@ jobs:
           assert not hits, f'customer UI leaked internal/third-party terms: {hits}'
           assert '灵境' not in frontend and 'lingjing' not in lower, 'legacy product branding leaked into customer UI'
           assert '序枢' in frontend, 'Xushu product branding missing from customer UI'
+
+          index = Path('frontend/index.html').read_text(encoding='utf-8')
+          assert '/assets/a11y.js' in index, 'accessibility behavior module is not loaded'
+          assert 'role="tabpanel"' in index and 'aria-controls="panel-' in index, 'tab semantics are incomplete'
+          assert 'aria-modal="true"' in index and 'aria-labelledby="authTitle"' in index, 'auth dialog semantics are incomplete'
 
           css = '\n'.join(path.read_text(encoding='utf-8') for path in sorted(Path('frontend').glob('*.css')))
           css_lower = css.lower()
@@ -101,12 +112,18 @@ jobs:
           with TestClient(app) as client:
               page = client.get('/')
               layout = client.get('/assets/layout.css')
+              a11y = client.get('/assets/a11y.js')
               status = client.get('/api/status')
               capabilities = client.get('/api/capabilities')
           assert page.status_code == 200
           assert '序枢' in page.text and '灵境' not in page.text
           assert layout.status_code == 200 and 'Focused Workspace' in layout.text
+          assert a11y.status_code == 200 and 'syncTabs' in a11y.text
           assert status.status_code == 200 and status.json()['runtime']['evidence_utility_controller'] is True
           assert capabilities.status_code == 200 and capabilities.json()['multimodal']['attachments'] is True
           PY
-      - run: node --check frontend/app.js
+      - name: Verify frontend JavaScript syntax
+        run: |
+          for file in frontend/*.js; do
+            node --check "$file"
+          done
