@@ -1,15 +1,18 @@
 """Stable Xushu API surface.
 
 The implementation lives in :mod:`lingjing_harness.api_core`.  This entrypoint
-keeps the historical ``lingjing_harness.api:app`` import stable and installs two
-small cross-cutting consistency boundaries: full production-evidence workspace
-revisioning and coherent terminal run reads.
+keeps the historical ``lingjing_harness.api:app`` import stable and installs
+cross-cutting consistency boundaries for workspace identity, durable run reads,
+and checkpoint persistence/recovery.
 """
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import sys
+import time
+from typing import Any
 
 from fastapi import HTTPException
 
@@ -22,6 +25,290 @@ from .workspace_identity import workspace_fingerprint
 # must reload when the production evidence snapshot changes.
 _core.catalog_fingerprint = workspace_fingerprint
 _core.CATALOG_REVISION = workspace_fingerprint(_core.catalog)
+
+
+# Full run snapshots grow with every action, observation and event.  Persisting
+# the whole JSON document for decide + execute + reflect + checkpoint therefore
+# creates avoidable SQLite write amplification.  Keep the durable boundaries that
+# matter for recovery and cross-worker visibility while coalescing events that are
+# immediately followed by a stronger boundary.
+_DURABLE_EVENT_PHASES = frozenset({"execute", "resume", "verify", "complete", "cancel"})
+_PERSIST_META: dict[str, tuple[Any, ...]] = {}
+
+
+def _checkpoint_signature(row: dict[str, Any]) -> tuple[Any, ...] | None:
+    checkpoint = row.get("checkpoint")
+    if not isinstance(checkpoint, dict):
+        return None
+    return (
+        int(checkpoint.get("cycle", 0) or 0),
+        str(checkpoint.get("status") or "running"),
+        checkpoint.get("result") is not None,
+    )
+
+
+def _persistence_meta(row: dict[str, Any]) -> tuple[Any, ...]:
+    events = row.get("events") or []
+    latest_phase = ""
+    if events and isinstance(events[-1], dict):
+        latest_phase = str(events[-1].get("phase") or "")
+    attachments = row.get("attachments") or []
+    return (
+        str(row.get("status") or "running"),
+        len(events),
+        latest_phase,
+        _checkpoint_signature(row),
+        row.get("result") is not None,
+        row.get("message") is not None,
+        len(attachments) if isinstance(attachments, list) else 0,
+        bool(row.get("multimodal_context")),
+        bool(row.get("error")),
+    )
+
+
+def _compact_run_snapshot(row: dict[str, Any]) -> dict[str, Any]:
+    """Remove duplicate recovery data without changing the in-memory run.
+
+    Active checkpoints carry the same event list that is already stored at the
+    run root.  Keeping both roughly doubles the event portion of every later
+    snapshot.  Persist one copy and reconstruct it only when a process actually
+    needs to resume.  Terminal rows no longer need a checkpoint at all.
+    """
+
+    snapshot = copy.deepcopy(row)
+    checkpoint = snapshot.get("checkpoint")
+    if isinstance(checkpoint, dict) and checkpoint.get("events") == snapshot.get("events"):
+        compact = dict(checkpoint)
+        compact.pop("events", None)
+        snapshot["checkpoint"] = compact
+    if str(snapshot.get("status") or "") not in _core.ACTIVE_RUN_STATUSES:
+        snapshot.pop("checkpoint", None)
+    return snapshot
+
+
+def _should_persist_run(row: dict[str, Any]) -> tuple[bool, tuple[Any, ...]]:
+    run_id = str(row.get("run_id") or "")
+    current = _persistence_meta(row)
+    previous = _PERSIST_META.get(run_id)
+    if previous is None:
+        return True, current
+
+    status, event_count, latest_phase, checkpoint, result_ready, message_ready, attachments, context_ready, error_ready = current
+    (
+        previous_status,
+        previous_event_count,
+        _previous_phase,
+        previous_checkpoint,
+        previous_result_ready,
+        previous_message_ready,
+        previous_attachments,
+        previous_context_ready,
+        previous_error_ready,
+    ) = previous
+
+    if status != previous_status:
+        return True, current
+    if checkpoint != previous_checkpoint:
+        return True, current
+    if result_ready != previous_result_ready or message_ready != previous_message_ready:
+        return True, current
+    if attachments != previous_attachments or context_ready != previous_context_ready:
+        return True, current
+    if error_ready != previous_error_ready:
+        return True, current
+    if event_count != previous_event_count and latest_phase in _DURABLE_EVENT_PHASES:
+        return True, current
+    return False, current
+
+
+def _coalesced_persist_run(row: dict[str, Any]) -> None:
+    should_persist, current_meta = _should_persist_run(row)
+    if not should_persist:
+        return
+
+    snapshot = _compact_run_snapshot(row)
+    persisted_status = _core.store.save_run(
+        row["run_id"],
+        row["conversation_id"],
+        row.get("goal", ""),
+        row.get("status", "running"),
+        snapshot,
+        owner_id=_core.WORKER_ID,
+        lease_seconds=_core.RUN_LEASE_SECONDS,
+    )
+    if persisted_status != row.get("status"):
+        row["status"] = persisted_status
+        current_meta = _persistence_meta(row)
+
+    if persisted_status in _core.ACTIVE_RUN_STATUSES:
+        _PERSIST_META[str(row["run_id"])] = current_meta
+    else:
+        _PERSIST_META.pop(str(row["run_id"]), None)
+
+
+def _inflate_checkpoint(snapshot: dict[str, Any]) -> dict[str, Any] | None:
+    checkpoint = snapshot.get("checkpoint")
+    if not isinstance(checkpoint, dict):
+        return None
+    restored = copy.deepcopy(checkpoint)
+    if "events" not in restored:
+        restored["events"] = copy.deepcopy(snapshot.get("events") or [])
+    return restored
+
+
+async def _recover_on_startup_hardened() -> None:
+    """Recover active work without replaying an already completed final checkpoint.
+
+    ``AgentHarness`` writes its final checkpoint after verifier + memory updates,
+    but the API still has a tiny window before it stores the assistant message and
+    terminal run row.  A crash in that window used to replay the tail of the run,
+    which could double-count episodic/policy learning.  A completed checkpoint is
+    already sufficient to finalize the API transaction, so recover it directly.
+    """
+
+    claimed = _core.store.claim_recoverable_runs(
+        owner_id=_core.WORKER_ID,
+        lease_seconds=_core.RUN_LEASE_SECONDS,
+        limit=16,
+    )
+    for saved in claimed:
+        run_id = saved["run_id"]
+        cid = saved["conversation_id"]
+        text = saved["goal"]
+        snapshot = saved.get("snapshot") or {}
+        snapshot.setdefault("events", [])
+        snapshot.setdefault("result", None)
+        checkpoint = _inflate_checkpoint(snapshot)
+
+        if saved.get("status") == "cancel_requested":
+            snapshot.update(
+                {
+                    "run_id": run_id,
+                    "conversation_id": cid,
+                    "goal": text,
+                    "status": "cancelled",
+                    "updated_at": time.time(),
+                }
+            )
+            snapshot["events"].append(
+                {
+                    "phase": "cancel",
+                    "title": "已停止本次执行",
+                    "detail": "服务恢复时确认了停止请求，任务没有重新执行",
+                    "progress": int(snapshot["events"][-1].get("progress", 0)) if snapshot["events"] else 0,
+                    "payload": {"recovered": True},
+                    "created_at": time.time(),
+                }
+            )
+            snapshot.pop("checkpoint", None)
+            _core.store.save_run(
+                run_id,
+                cid,
+                text,
+                "cancelled",
+                snapshot,
+                owner_id=_core.WORKER_ID,
+            )
+            continue
+
+        with _core.WORKSPACE_LOCK:
+            current_revision = _core.CATALOG_REVISION
+        saved_revision = snapshot.get("catalog_revision") or current_revision
+        if saved_revision != current_revision:
+            snapshot.update(
+                {
+                    "run_id": run_id,
+                    "conversation_id": cid,
+                    "goal": text,
+                    "status": "failed",
+                    "error": "工作区数据已变化，未恢复旧数据任务",
+                    "updated_at": time.time(),
+                }
+            )
+            snapshot.pop("checkpoint", None)
+            _core.store.save_run(
+                run_id,
+                cid,
+                text,
+                "failed",
+                snapshot,
+                owner_id=_core.WORKER_ID,
+            )
+            continue
+
+        if (
+            isinstance(checkpoint, dict)
+            and checkpoint.get("status") == "completed"
+            and isinstance(checkpoint.get("result"), dict)
+        ):
+            result = copy.deepcopy(checkpoint["result"])
+            result["job_id"] = run_id
+            result["attachments"] = copy.deepcopy(snapshot.get("attachments") or [])
+            result["catalog_revision"] = saved_revision
+            existing = _core.store.assistant_for_job(cid, run_id)
+            if existing is None:
+                message = _core.store.add_message(cid, "assistant", str(result.get("answer") or ""), result)
+            else:
+                message = existing
+                result = copy.deepcopy(existing.get("payload") or result)
+            snapshot.update(
+                {
+                    "run_id": run_id,
+                    "conversation_id": cid,
+                    "goal": text,
+                    "status": "completed",
+                    "result": result,
+                    "message": message,
+                    "catalog_revision": saved_revision,
+                    "updated_at": time.time(),
+                }
+            )
+            snapshot.pop("checkpoint", None)
+            _core.store.save_run(
+                run_id,
+                cid,
+                text,
+                "completed",
+                snapshot,
+                owner_id=_core.WORKER_ID,
+            )
+            continue
+
+        snapshot.update(
+            {
+                "run_id": run_id,
+                "conversation_id": cid,
+                "goal": text,
+                "status": "running",
+                "catalog_revision": saved_revision,
+                "updated_at": time.time(),
+            }
+        )
+        with _core.RUN_LOCK:
+            _core.RUNS[run_id] = snapshot
+            _core._persist_run(snapshot)
+        asyncio.create_task(
+            _core._execute(
+                run_id,
+                cid,
+                text,
+                _core.harness.fork(),
+                attachment_ids=list(snapshot.get("attachment_ids") or []),
+                allow_network=bool(snapshot.get("allow_network")),
+                resume=checkpoint,
+                catalog_revision=saved_revision,
+            )
+        )
+
+
+# Install persistence and recovery boundaries before the application lifespan is
+# entered.  api_core resolves these globals at runtime, so existing route and
+# integration monkeypatch behavior stays intact.
+_core._persist_run = _coalesced_persist_run
+_core._recover_on_startup = _recover_on_startup_hardened
+_core._compact_run_snapshot = _compact_run_snapshot
+_core._inflate_checkpoint = _inflate_checkpoint
+_core._PERSIST_META = _PERSIST_META
 
 
 def _coherent_get_run(run_id: str):
