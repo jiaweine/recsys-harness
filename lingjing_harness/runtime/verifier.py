@@ -53,11 +53,28 @@ class ResultVerifier:
         critic: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         critic = critic or {}
+        completed_actions = [row for row in actions if row.get("status") == "completed"]
+        completed_audits = [
+            row for row in completed_actions if str(row.get("tool") or "").endswith("audit")
+        ]
+        external_evidence = [row for row in evidence if row.get("kind") == "external"]
+        local_evidence = [row for row in evidence if row.get("kind") != "external"]
+
+        # Public/web evidence may inform the current explanation, but it must not
+        # satisfy the product's final evidence floor by itself.  Otherwise a
+        # poisoned or merely irrelevant external source could make a trajectory
+        # look verified and indirectly increase durable policy/episode reward.
+        # A completed owned audit is also acceptable local execution evidence;
+        # importantly, a failed audit is not.
+        evidence_backed = bool(local_evidence) or bool(completed_audits)
+        external_only = bool(external_evidence) and not evidence_backed
         checks = {
             "executed_tools": bool(actions),
             "no_failed_tools": not any(row.get("status") == "failed" for row in actions),
-            "evidence_backed": bool(evidence) or any(row.get("tool", "").endswith("audit") for row in actions),
-            "adaptation_respected": allow_adaptation or not any(row.get("result", {}).get("activated") for row in actions),
+            "evidence_backed": evidence_backed,
+            "external_evidence_bounded": not external_only,
+            "adaptation_respected": allow_adaptation
+            or not any(row.get("result", {}).get("activated") for row in actions),
             "mission_terminal": bool(critic.get("ready", True)),
             "contradictions_resolved": not bool(critic.get("unresolved_contradictions")),
         }
@@ -69,12 +86,20 @@ class ResultVerifier:
         confidence += 0.10 if checks["mission_terminal"] else -0.18
         confidence += 0.06 if checks["contradictions_resolved"] else -0.16
         confidence += 0.08 * float(critic.get("evidence_coverage", 0.0) or 0.0)
+        if external_only:
+            confidence -= 0.06
         confidence -= min(0.18, 0.05 * len(severe))
         return {
             "passed": all(checks.values()) and not severe,
             "confidence": round(max(0.0, min(0.99, confidence)), 3),
             "checks": checks,
             "severe_findings": severe,
+            "evidence_provenance": {
+                "local": len(local_evidence),
+                "external": len(external_evidence),
+                "completed_audits": len(completed_audits),
+                "external_only": external_only,
+            },
             "trajectory": {
                 "evidence_coverage": critic.get("evidence_coverage"),
                 "terminal_coverage": critic.get("terminal_coverage"),
