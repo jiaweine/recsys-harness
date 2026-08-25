@@ -179,7 +179,27 @@ def _ordered_records(records: Iterable[CounterfactualRecord]) -> list[Counterfac
                 "counterfactual data must contain exactly one logged action per decision_id"
             )
         seen.add(row.decision_id)
+
+    if rows:
+        first = rows[0]
+        for row in rows[1:]:
+            if row.surface != first.surface:
+                raise ValueError("counterfactual report must contain exactly one surface")
+            if row.logging_policy_id != first.logging_policy_id:
+                raise ValueError(
+                    "counterfactual report must contain exactly one logging_policy_id"
+                )
+            if row.target_policy_id != first.target_policy_id:
+                raise ValueError(
+                    "counterfactual report must contain exactly one target_policy_id"
+                )
     return rows
+
+
+def _effective_sample_size(weights: list[float]) -> float:
+    weight_sum = sum(weights)
+    square_sum = sum(weight * weight for weight in weights)
+    return (weight_sum * weight_sum / square_sum) if square_sum > 0.0 else 0.0
 
 
 def _point_estimates(
@@ -255,13 +275,13 @@ def _confidence_for_estimator(
         }
     observed = float(value) - float(baseline)
     if len(rows) <= 1:
-        rounded = round(observed, 6)
         return {
-            "available": True,
+            "available": False,
             "samples": len(rows),
-            "delta": rounded,
-            "ci95": [rounded, rounded],
-            "probability_positive": 1.0 if observed > 0.0 else 0.0,
+            "delta": round(observed, 6),
+            "ci95": None,
+            "probability_positive": None,
+            "reason": "at least two decisions are required for bootstrap uncertainty",
         }
 
     stable = "|".join(
@@ -313,12 +333,14 @@ def evaluate_off_policy(
     importance_weight_cap: float = 20.0,
     bootstrap_iterations: int = 600,
 ) -> dict[str, Any]:
-    """Evaluate a target policy with explicit IPS, SNIPS and optional DR.
+    """Evaluate one target policy with explicit IPS, SNIPS and optional DR.
 
     The estimators are valid only to the extent that the supplied propensities and
     reward model are valid. Weight clipping is always reported because clipping
-    reduces variance by accepting bias. This function therefore returns overlap
-    diagnostics instead of turning an OPE number into an automatic trust decision.
+    reduces variance by accepting bias. Raw-weight ESS is reported separately
+    from clipped-weight ESS so clipping cannot make poor overlap look healthier.
+    This function therefore returns diagnostics instead of turning an OPE number
+    into an automatic trust decision.
     """
 
     weight_cap = _validate_weight_cap(importance_weight_cap)
@@ -333,6 +355,11 @@ def evaluate_off_policy(
                 "importance_weight_cap": weight_cap,
                 "effective_sample_size": 0.0,
                 "effective_sample_ratio": 0.0,
+                "raw_effective_sample_size": 0.0,
+                "raw_effective_sample_ratio": 0.0,
+                "clipped_effective_sample_size": 0.0,
+                "clipped_effective_sample_ratio": 0.0,
+                "effective_sample_basis": "clipped_importance_weights",
                 "clipped_samples": 0,
                 "clipped_share": 0.0,
                 "logged_action_support_coverage": 0.0,
@@ -342,9 +369,8 @@ def evaluate_off_policy(
     point = _point_estimates(rows, weight_cap)
     raw_weights = point["raw_weights"]
     weights = point["weights"]
-    weight_sum = sum(weights)
-    square_sum = sum(weight * weight for weight in weights)
-    ess = (weight_sum * weight_sum / square_sum) if square_sum > 0.0 else 0.0
+    raw_ess = _effective_sample_size(raw_weights)
+    clipped_ess = _effective_sample_size(weights)
     clipped = sum(1 for raw in raw_weights if raw > weight_cap)
     supported = sum(1 for row in rows if row.target_propensity > 0.0)
     direct_samples = int(point["direct_samples"])
@@ -362,6 +388,7 @@ def evaluate_off_policy(
             "available": True,
             "value": round(float(value), 6),
             "delta_vs_logged": round(float(value) - baseline, 6),
+            "importance_weight_clipping_applied": clipped > 0,
         }
 
     estimators = {
@@ -400,8 +427,14 @@ def evaluate_off_policy(
             "raw_weight_max": round(max(raw_weights), 6),
             "weight_max": round(max(weights), 6),
             "weight_mean": round(mean(weights), 6),
-            "effective_sample_size": round(ess, 6),
-            "effective_sample_ratio": round(ess / len(rows), 6),
+            # Compatibility fields keep their historical clipped-weight meaning.
+            "effective_sample_size": round(clipped_ess, 6),
+            "effective_sample_ratio": round(clipped_ess / len(rows), 6),
+            "effective_sample_basis": "clipped_importance_weights",
+            "raw_effective_sample_size": round(raw_ess, 6),
+            "raw_effective_sample_ratio": round(raw_ess / len(rows), 6),
+            "clipped_effective_sample_size": round(clipped_ess, 6),
+            "clipped_effective_sample_ratio": round(clipped_ess / len(rows), 6),
             "clipped_samples": clipped,
             "clipped_share": round(clipped / len(rows), 6),
             "zero_target_samples": len(rows) - supported,
@@ -414,10 +447,12 @@ def evaluate_off_policy(
         },
         "assumptions": [
             "one logged action per decision_id",
+            "one surface, logging policy and target policy per report",
             "logging_propensity is mu(a_logged|x)",
             "target_propensity is pi(a_logged|x) for the same action",
             "target-policy support must overlap the logging policy",
             "importance-weight clipping trades variance for bias",
+            "raw-weight ESS should be inspected before clipping; clipped ESS is also reported",
             "DR additionally requires q_hat(x,a_logged) and E_pi[q_hat(x,a)]",
         ],
     }
