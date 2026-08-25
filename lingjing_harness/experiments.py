@@ -19,7 +19,9 @@ class ExperimentCriteria:
 
     The harness intentionally does not hide these thresholds inside optimizer
     recipes. Teams define the amount of evidence and overlap they consider enough
-    for their product/risk class.
+    for their product/risk class. Effective-sample-ratio eligibility is evaluated
+    on raw importance weights before clipping so variance reduction cannot make
+    weak logging-policy overlap look stronger than it actually is.
     """
 
     minimum_samples: int
@@ -183,19 +185,26 @@ def evaluate_counterfactual_experiment(
     blockers: list[str] = []
     samples = int(report.get("samples", 0) or 0)
     if samples < criteria.minimum_samples:
-        blockers.append(
-            f"samples<{criteria.minimum_samples}"
+        blockers.append(f"samples<{criteria.minimum_samples}")
+
+    # Clipping is a variance-control choice, not evidence that the logging policy
+    # had good overlap with the target policy. Gate on raw-weight ESS so a large
+    # cap intervention cannot manufacture an acceptable effective sample ratio.
+    raw_ess_ratio = float(
+        diagnostics.get(
+            "raw_effective_sample_ratio",
+            diagnostics.get("effective_sample_ratio", 0.0),
         )
-    ess_ratio = float(diagnostics.get("effective_sample_ratio", 0.0) or 0.0)
-    if ess_ratio < criteria.minimum_effective_sample_ratio:
+        or 0.0
+    )
+    if raw_ess_ratio < criteria.minimum_effective_sample_ratio:
         blockers.append(
             f"effective_sample_ratio<{criteria.minimum_effective_sample_ratio:g}"
         )
+
     clipped_share = float(diagnostics.get("clipped_share", 0.0) or 0.0)
     if clipped_share > criteria.maximum_clipped_share:
-        blockers.append(
-            f"clipped_share>{criteria.maximum_clipped_share:g}"
-        )
+        blockers.append(f"clipped_share>{criteria.maximum_clipped_share:g}")
     support = float(
         diagnostics.get("logged_action_support_coverage", 0.0) or 0.0
     )
@@ -225,6 +234,7 @@ def evaluate_counterfactual_experiment(
             "eligible_for_online_test": eligible,
             "automatic_activation": False,
             "primary_estimator": spec.primary_estimator,
+            "effective_sample_ratio_basis": "raw_importance_weights",
             "blockers": blockers,
             "next_step": (
                 "controlled_online_experiment"
