@@ -1,0 +1,41 @@
+/* Run Context Strip — compact task identity between the task header and document canvas. */
+.run-context-strip{height:31px;flex:0 0 31px;display:flex;align-items:stretch;min-width:0;padding:0 32px;border-bottom:1px solid #232328;background:#0d0d0f;overflow-x:auto;overflow-y:hidden;white-space:nowrap;scrollbar-width:none}
+.run-context-strip::-webkit-scrollbar{display:none}
+.run-context-item{height:100%;display:flex;align-items:center;gap:6px;min-width:0;padding:0 11px;border-right:1px solid #232328;font-size:10px;color:#74747e}
+.run-context-item:first-child{padding-left:0}
+.run-context-item:last-child{border-right:0}
+.run-context-key{font-family:var(--mono);font-size:10px;font-style:normal;font-weight:600;letter-spacing:.055em;color:#565661}
+.run-context-value{min-width:0;max-width:230px;overflow:hidden;text-overflow:ellipsis;font-size:10px;font-weight:650;color:#b7b7bf}
+.run-context-scene .run-context-value{color:#c8cbff}
+.run-context-scene strong{width:20px;height:20px;display:grid;place-items:center;border:1px solid rgba(94,106,210,.34);border-radius:5px;background:rgba(94,106,210,.09);font-family:var(--mono);font-size:10px;font-weight:650;color:#b7bcff}
+.run-context-state{gap:7px}
+.run-context-dot{width:6px;height:6px;flex:0 0 6px;border-radius:50%;background:#565661}
+.run-context-state[data-tone="live"] .run-context-dot{background:var(--accent);box-shadow:0 0 0 3px rgba(94,106,210,.1)}
+.run-context-state[data-tone="live"] .run-context-value{color:#c8cbff}
+.run-context-state[data-tone="warn"] .run-context-dot{background:var(--warm)}
+.run-context-state[data-tone="warn"] .run-context-value{color:#fdba74}
+.run-context-verification[data-tone="pass"] .run-context-dot{background:var(--success);box-shadow:0 0 0 3px rgba(52,211,153,.08)}
+.run-context-verification[data-tone="pass"] .run-context-value{color:#9fe8c9}
+.run-context-verification[data-tone="review"] .run-context-dot{background:var(--warm)}
+.run-context-verification[data-tone="review"] .run-context-value{color:#fdba74}
+.run-context-time .run-context-value{font-family:var(--mono);font-weight:550;color:#696973}
+.run-context-mobile-title{display:none}
+
+@media (max-width:1000px){
+  .run-context-strip{padding:0 24px}
+  .run-context-value{max-width:190px}
+}
+
+@media (max-width:720px){
+  .run-context-strip{height:34px;flex-basis:34px;padding:0 12px;background:#0f0f11;overscroll-behavior-x:contain}
+  .run-context-item{min-height:34px;padding:0 9px}
+  .run-context-item:first-child{padding-left:0}
+  .run-context-mobile-title{display:flex;max-width:220px}
+  .run-context-mobile-title .run-context-value{max-width:180px;color:#d6d6dc}
+  .run-context-time{display:none}
+  .run-context-target .run-context-value{max-width:150px}
+}
+
+@media (prefers-reduced-motion:reduce){
+  .run-context-strip{scroll-behavior:auto}
+}
