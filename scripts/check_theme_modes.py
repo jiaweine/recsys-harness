@@ -13,7 +13,27 @@ def rgb(page, selector: str) -> str:
     return page.locator(selector).evaluate("el => getComputedStyle(el).backgroundColor")
 
 
-def assert_theme(page, theme: str) -> None:
+def luma(page, selector: str) -> float:
+    return float(page.locator(selector).evaluate("""el => {
+      const values = (getComputedStyle(el).backgroundColor.match(/\d+/g) || []).slice(0, 3).map(Number);
+      const [r = 0, g = 0, b = 0] = values;
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    }"""))
+
+
+def assert_selected_theme(page, theme: str) -> None:
+    actual_theme = page.locator("html").get_attribute("data-theme")
+    if actual_theme != theme:
+        raise RuntimeError(f"Expected theme {theme!r}, got {actual_theme!r}")
+    active = page.locator(f'[data-theme-choice="{theme}"]')
+    if active.get_attribute("aria-pressed") != "true":
+        raise RuntimeError(f"{theme} theme button is not exposed as selected")
+    other = "dark" if theme == "light" else "light"
+    if page.locator(f'[data-theme-choice="{other}"]').get_attribute("aria-pressed") != "false":
+        raise RuntimeError(f"Inactive {other} theme button incorrectly reports selected")
+
+
+def assert_desktop_theme(page, theme: str) -> None:
     expected = {
         "light": {
             "body": "rgb(246, 247, 249)",
@@ -23,26 +43,32 @@ def assert_theme(page, theme: str) -> None:
             ".inspector": "rgb(250, 250, 250)",
         },
         "dark": {
-            "body": "rgb(11, 11, 13)",
+            "body": "rgb(9, 9, 11)",
             ".topbar": "rgb(14, 14, 16)",
             ".sidebar": "rgb(13, 13, 15)",
             ".main": "rgb(16, 16, 18)",
             ".inspector": "rgb(13, 13, 15)",
         },
     }[theme]
-    actual_theme = page.locator("html").get_attribute("data-theme")
-    if actual_theme != theme:
-        raise RuntimeError(f"Expected theme {theme!r}, got {actual_theme!r}")
+    assert_selected_theme(page, theme)
     for selector, expected_color in expected.items():
         actual = rgb(page, selector)
         if actual != expected_color:
-            raise RuntimeError(f"{theme} theme {selector} background drifted: {actual} != {expected_color}")
-    active = page.locator(f'[data-theme-choice="{theme}"]')
-    if active.get_attribute("aria-pressed") != "true":
-        raise RuntimeError(f"{theme} theme button is not exposed as selected")
-    other = "dark" if theme == "light" else "light"
-    if page.locator(f'[data-theme-choice="{other}"]').get_attribute("aria-pressed") != "false":
-        raise RuntimeError(f"Inactive {other} theme button incorrectly reports selected")
+            raise RuntimeError(f"{theme} desktop {selector} background drifted: {actual} != {expected_color}")
+
+
+def assert_mobile_theme(page, theme: str) -> None:
+    assert_selected_theme(page, theme)
+    surfaces = ("body", ".topbar", ".main", ".inspector")
+    values = {selector: luma(page, selector) for selector in surfaces}
+    if theme == "light":
+        too_dark = {selector: value for selector, value in values.items() if value < 235}
+        if too_dark:
+            raise RuntimeError(f"Regular mobile theme retained dark primary surfaces: {too_dark}")
+    else:
+        too_light = {selector: value for selector, value in values.items() if value > 70}
+        if too_light:
+            raise RuntimeError(f"Dark mobile theme escaped the Graphite surface ladder: {too_light}")
 
 
 def main() -> None:
@@ -61,24 +87,24 @@ def main() -> None:
         page.wait_for_function("document.body.classList.contains('ready')", timeout=15_000)
 
         # A new user gets the regular light workspace, not a near-black canvas.
-        assert_theme(page, "light")
+        assert_desktop_theme(page, "light")
         if page.locator('meta[name="theme-color"]').get_attribute("content") != "#f6f7f9":
             raise RuntimeError("Regular theme did not publish its light browser chrome color")
 
         page.locator('[data-theme-choice="dark"]').click()
-        assert_theme(page, "dark")
+        assert_desktop_theme(page, "dark")
         if page.locator('meta[name="theme-color"]').get_attribute("content") != "#09090b":
             raise RuntimeError("Dark theme did not publish its Graphite browser chrome color")
         page.reload(wait_until="domcontentloaded")
         page.wait_for_function("document.body.classList.contains('ready')", timeout=15_000)
-        assert_theme(page, "dark")
+        assert_desktop_theme(page, "dark")
 
         # Explicitly switch back and verify persistence in the other direction too.
         page.locator('[data-theme-choice="light"]').click()
-        assert_theme(page, "light")
+        assert_desktop_theme(page, "light")
         page.reload(wait_until="domcontentloaded")
         page.wait_for_function("document.body.classList.contains('ready')", timeout=15_000)
-        assert_theme(page, "light")
+        assert_desktop_theme(page, "light")
 
         page.set_viewport_size({"width": 393, "height": 852})
         page.wait_for_timeout(180)
@@ -90,13 +116,15 @@ def main() -> None:
             box = button.bounding_box()
             if not box or box["height"] < 44 or box["width"] < 44:
                 raise RuntimeError(f"Mobile {theme} theme control lost its 44px touch target: {box}")
+
+        assert_mobile_theme(page, "light")
         page.locator('[data-theme-choice="dark"]').click()
-        assert_theme(page, "dark")
+        assert_mobile_theme(page, "dark")
         overflow = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
         if overflow > 1:
             raise RuntimeError(f"Dark theme introduced mobile page overflow: {overflow}px")
         page.locator('[data-theme-choice="light"]').click()
-        assert_theme(page, "light")
+        assert_mobile_theme(page, "light")
         overflow = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
         if overflow > 1:
             raise RuntimeError(f"Regular theme introduced mobile page overflow: {overflow}px")
