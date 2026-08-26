@@ -100,7 +100,8 @@ def main() -> None:
             if page.locator(selector).evaluate("el => el.hidden"):
                 raise RuntimeError(f"Completed engineering surface stayed hidden: {selector}")
 
-        if page.locator("#agentTrace .trace-step").count() < 6:
+        trace_steps = page.locator("#agentTrace .trace-step").count()
+        if trace_steps < 6:
             raise RuntimeError("Agent Trace did not render enough structured run events")
         if page.locator("#missionSummary .mission-requirement").count() < 1:
             raise RuntimeError("Mission Graph did not render evidence requirements")
@@ -110,6 +111,14 @@ def main() -> None:
             raise RuntimeError("Learning Ledger did not render durable state")
         if "search_diagnosis" in page.locator("#agentTrace").inner_text():
             raise RuntimeError("Completed Trace leaked an internal requirement key")
+
+        progress_badge = page.locator(".tab[data-tab='progress'] .tab-count")
+        evidence_badge = page.locator(".tab[data-tab='evidence'] .tab-count")
+        if progress_badge.count() != 1 or progress_badge.inner_text() != str(trace_steps):
+            raise RuntimeError("Progress tab count is not synchronized with structured trace events")
+        evidence_items = page.locator("#evidenceList .evidence-item").count()
+        if evidence_items and (evidence_badge.count() != 1 or evidence_badge.inner_text() != str(evidence_items)):
+            raise RuntimeError("Evidence tab count is not synchronized with inspectable evidence")
 
         desktop_inspector = page.locator("#inspector").bounding_box()
         if not desktop_inspector or desktop_inspector["width"] < 330:
