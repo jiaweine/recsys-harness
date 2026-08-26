@@ -25,6 +25,9 @@
 #runBar[data-level="0"]{width:0}#runBar[data-level="1"]{width:10%}#runBar[data-level="2"]{width:20%}#runBar[data-level="3"]{width:30%}#runBar[data-level="4"]{width:40%}#runBar[data-level="5"]{width:50%}#runBar[data-level="6"]{width:60%}#runBar[data-level="7"]{width:70%}#runBar[data-level="8"]{width:80%}#runBar[data-level="9"]{width:90%}#runBar[data-level="10"]{width:100%}
 .trace-step summary:focus-visible,#traceToggleAll:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 #traceToggleAll:focus-visible{outline-offset:2px}
+.tab{display:inline-flex;align-items:center;justify-content:center;gap:5px}
+.tab-count{display:grid;place-items:center;min-width:18px;height:18px;padding:0 4px;border:1px solid #303037;border-radius:999px;background:#17171a;font-family:var(--mono);font-size:10px;line-height:1;color:#74747e}
+.tab.active .tab-count{border-color:rgba(94,106,210,.28);background:rgba(94,106,210,.08);color:#aeb3ed}
 .control-foot{display:flex;align-items:center;gap:12px;overflow:auto;padding:8px 10px;border-top:1px solid #222227;background:#0f0f11;scrollbar-width:none}
 .control-foot::-webkit-scrollbar{display:none}
 .control-foot span{white-space:nowrap;font-size:10px;color:#65656f}
@@ -58,4 +61,6 @@
   .learning-foot{display:block}
   .learning-foot b{display:block;margin-top:4px;text-align:left}
   #traceToggleAll{min-height:36px}
+  .tab{gap:4px}
+  .tab-count{min-width:17px;height:17px;padding:0 3px}
 }
