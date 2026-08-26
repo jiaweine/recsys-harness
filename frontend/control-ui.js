@@ -36,6 +36,30 @@
     return Math.max(0, Math.min(10, Math.round((num(value) / denominator) * 10)));
   }
 
+  function setTabCount(name, value) {
+    const tab = document.querySelector(`.tab[data-tab="${name}"]`);
+    if (!tab) return;
+    let badge = tab.querySelector('.tab-count');
+    const count = Math.max(0, Number(value) || 0);
+    if (!count) {
+      if (badge) badge.remove();
+      return;
+    }
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'tab-count';
+      badge.setAttribute('aria-hidden', 'true');
+      tab.appendChild(badge);
+    }
+    badge.textContent = count > 99 ? '99+' : String(count);
+  }
+
+  function syncTabCounts(result = null, events = null) {
+    const rows = events || result?.events || [];
+    setTabCount('progress', Array.isArray(rows) ? rows.length : 0);
+    setTabCount('evidence', Array.isArray(result?.evidence) ? result.evidence.length : 0);
+  }
+
   function permissionCell(label, allowed, detail) {
     const known = typeof allowed === 'boolean';
     const tone = !known ? 'pending' : allowed ? 'allowed' : 'locked';
@@ -197,6 +221,7 @@
     if (!node || !Array.isArray(events) || !events.length) return;
     node.innerHTML = liveControlHtml(events, status);
     node.hidden = false;
+    syncTabCounts(null, events);
     requestAnimationFrame(() => {
       syncLiveTraceSummary(events);
       normalizeMissionLabels();
@@ -217,6 +242,7 @@
       ledger.innerHTML = learningHtml(result);
       ledger.hidden = false;
     }
+    syncTabCounts(result);
     const bar = $('runBar');
     if (bar) bar.dataset.level = '10';
     requestAnimationFrame(() => {
@@ -234,6 +260,7 @@
         node.innerHTML = '';
       }
     });
+    document.querySelectorAll('.tab-count').forEach(node => node.remove());
     const bar = $('runBar');
     if (bar) delete bar.dataset.level;
   }
@@ -272,7 +299,10 @@
   const observer = new MutationObserver(() => {
     ensureMounts();
     normalizeMissionLabels();
-    if (lastResult) normalizeTraceKeys(lastResult);
+    if (lastResult) {
+      normalizeTraceKeys(lastResult);
+      syncTabCounts(lastResult);
+    }
     if (lastResult && ($('runControlPlane')?.hidden || $('learningLedger')?.hidden)) renderCompleted(lastResult);
   });
   observer.observe(document.body, {subtree:true, childList:true});
