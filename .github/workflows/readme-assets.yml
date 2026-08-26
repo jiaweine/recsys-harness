@@ -1,5 +1,5 @@
 # Visual QA screenshots are captured from the real running product after motion settles.
-name: Refresh README product assets
+name: Visual QA / README product assets
 
 on:
   workflow_dispatch:
