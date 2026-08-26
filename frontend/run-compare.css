@@ -60,7 +60,7 @@
 .compare-rank-main b{display:block;font-size:10px;font-weight:620;color:#cfcfd5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .compare-rank-main small{display:block;margin-top:3px;font-size:10px;color:#666670;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .compare-position,.compare-score,.compare-movement{font-family:var(--mono);font-size:10px;text-align:right;color:#8f8f98}
-.compare-movement.up{color:#aeb4ee}.compare-movement.down{color:#9a9aa4}.compare-movement.new{color:#81dcb0}
+.compare-movement.up,.compare-movement.new{color:#aeb4ee}.compare-movement.down{color:#9a9aa4}
 .compare-rank-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 15px;border-top:1px solid #232328;background:#0e0e10}
 .compare-rank-foot span{font-size:10px;color:#65656f}.compare-rank-foot b{font-family:var(--mono);font-size:10px;font-weight:600;color:#888892}
 
@@ -72,9 +72,10 @@
 .run-compare[data-run-nav-focus]:focus{outline:1px solid rgba(94,106,210,.48);outline-offset:4px}
 
 @media (max-width:720px){
-  .snapshot-actions{gap:5px}.compare-trigger{padding:0 7px}
+  .snapshot-actions{gap:5px;align-items:center}.compare-trigger{height:44px;min-width:88px;padding:0 10px}
   .run-compare{padding:0 15px;margin-bottom:22px}
   .compare-head{padding:11px 12px}.compare-scope{display:none}
+  .compare-close{width:44px;height:44px}
   .compare-context{display:block;padding:9px 12px}.compare-context time{display:block;margin-top:6px}
   .compare-verification>div{padding:8px 9px}
   .compare-metrics-head,.compare-metric{grid-template-columns:minmax(82px,1.2fr) repeat(3,minmax(50px,.72fr));gap:5px}
