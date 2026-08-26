@@ -50,6 +50,16 @@
     node.classList.toggle('live', running);
   }
 
+  function applySelection() {
+    history.querySelectorAll('.history-item[data-id]').forEach(button => {
+      const running = button.classList.contains('running');
+      const current = !!currentId && button.dataset.id === currentId;
+      button.classList.toggle('current', current);
+      button.setAttribute('aria-current', current ? 'page' : 'false');
+      stateLabel(button, running, current);
+    });
+  }
+
   function decorate(button, row) {
     const meta = sceneMeta[row?.scene] || {short:'·', label:'任务'};
     const running = button.classList.contains('running') || row?.active === true;
@@ -84,6 +94,7 @@
     if ((firstPaint || selectFirstOnNextRender) && !currentId) currentId = buttons[0].dataset.id || null;
     firstPaint = false;
     selectFirstOnNextRender = false;
+    applySelection();
 
     const token = ++requestToken;
     try {
@@ -107,12 +118,14 @@
     const item = event.target.closest('.history-item[data-id]');
     if (item) {
       currentId = item.dataset.id || null;
+      applySelection();
       scheduleHydrate();
       return;
     }
     if (event.target.closest('#newTaskBtn, .scene')) {
       currentId = null;
       requestToken += 1;
+      applySelection();
       scheduleHydrate();
       return;
     }
