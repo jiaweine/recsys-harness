@@ -147,12 +147,24 @@
       </div>`;
   }
 
+  function syncLiveTraceSummary(events) {
+    const trace = $('agentTrace');
+    const cells = trace ? trace.querySelectorAll('.trace-overview > span') : [];
+    if (cells.length < 3) return;
+    const launched = (events || []).filter(event => event.phase === 'execute').length;
+    const value = cells[2].querySelector('b');
+    const label = cells[2].querySelector('i');
+    if (value) value.textContent = String(launched);
+    if (label) label.textContent = '动作已发起';
+  }
+
   function renderLive(events, status) {
     ensureMounts();
     const node = $('runControlPlane');
     if (!node || !Array.isArray(events) || !events.length) return;
     node.innerHTML = liveControlHtml(events, status);
     node.hidden = false;
+    requestAnimationFrame(() => syncLiveTraceSummary(events));
   }
 
   function renderCompleted(result) {
