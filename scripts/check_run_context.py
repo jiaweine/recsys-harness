@@ -72,9 +72,19 @@ def main() -> None:
             }""",
             timeout=8_000,
         )
+        page.wait_for_function(
+            "document.getElementById('taskState').textContent === '可继续追问'",
+            timeout=8_000,
+        )
+        page.wait_for_function(
+            "document.querySelector('#runContextStrip .run-context-state')?.textContent.includes('已完成')",
+            timeout=8_000,
+        )
 
         if "已完成" not in strip.locator(".run-context-state").inner_text():
-            raise RuntimeError("Completed task state did not reconcile into Run Context")
+            raise RuntimeError("Run Context must show execution completion instead of the follow-up affordance")
+        if "可继续追问" not in page.locator("#taskState").inner_text():
+            raise RuntimeError("Task header no longer exposes the follow-up affordance after completion")
         if strip.locator(".run-context-time").count() != 1:
             raise RuntimeError("Persisted completed task did not expose its update time in Run Context")
         verification = strip.locator(".run-context-verification")
