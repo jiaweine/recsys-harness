@@ -3,7 +3,7 @@
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
   }[char]));
-  let current = {conversation_id:null, scene:'', result:null};
+  let currentConversationId = null;
   let generation = 0;
   let triggerQueued = false;
 
@@ -74,11 +74,19 @@
     return {domain:search && recommend ? 'both' : mode || 'run', key:'', label:'当前任务'};
   }
 
-  function assistantResult(conversation) {
-    const row = [...(conversation?.messages || [])].reverse().find(message => message.role === 'assistant' && message.payload && typeof message.payload === 'object');
-    const payload = row?.payload;
-    if (!payload || (!Array.isArray(payload.actions) && !payload.verification && !Array.isArray(payload.events))) return null;
-    return payload;
+  function validResult(payload) {
+    return !!payload && typeof payload === 'object' && (
+      Array.isArray(payload.actions) || payload.verification || Array.isArray(payload.events)
+    );
+  }
+
+  function assistantResults(conversation) {
+    return (conversation?.messages || [])
+      .filter(message => message.role === 'assistant' && validResult(message.payload))
+      .map(message => ({
+        result:message.payload,
+        created_at:numberOrNull(message.created_at) || 0,
+      }));
   }
 
   function runReward(result) {
@@ -114,29 +122,52 @@
     } catch { return ''; }
   }
 
-  async function findBaseline(snapshot) {
-    const rows = await xhrJson('/api/conversations');
-    if (!Array.isArray(rows)) return null;
-    const candidates = rows
-      .filter(row => row?.id && row.id !== snapshot.conversation_id && !row.active && row.scene === snapshot.scene)
-      .slice(0, 8);
+  function collectCandidates(conversation, row, {skipLatest = false} = {}) {
+    const results = assistantResults(conversation);
+    const usable = skipLatest ? results.slice(0, -1) : results;
+    return usable.map(entry => ({
+      row,
+      result:entry.result,
+      context:resultContext(entry.result),
+      timestamp:entry.created_at || numberOrNull(row?.updated_at) || 0,
+      sameTarget:false,
+    }));
+  }
+
+  async function findBaseline(snapshot, currentConversation) {
     const target = resultContext(snapshot.result);
-    let fallback = null;
-    for (const row of candidates) {
-      let conversation;
-      try { conversation = await xhrJson(`/api/conversations/${encodeURIComponent(row.id)}`); }
-      catch { continue; }
-      const result = assistantResult(conversation);
-      if (!result) continue;
-      const context = resultContext(result);
-      const candidate = {row, conversation, result, context, sameTarget:false};
-      if (!fallback) fallback = candidate;
-      if (target.key && context.domain === target.domain && context.key === target.key) {
-        candidate.sameTarget = true;
-        return candidate;
+    const candidates = collectCandidates(
+      currentConversation,
+      {id:snapshot.conversation_id, title:currentConversation?.title || '当前任务', updated_at:currentConversation?.updated_at},
+      {skipLatest:true},
+    );
+
+    const rows = await xhrJson('/api/conversations');
+    if (Array.isArray(rows)) {
+      const recent = rows
+        .filter(row => row?.id && row.id !== snapshot.conversation_id && !row.active && row.scene === snapshot.scene)
+        .slice(0, 8);
+      for (const row of recent) {
+        try {
+          const conversation = await xhrJson(`/api/conversations/${encodeURIComponent(row.id)}`);
+          candidates.push(...collectCandidates(conversation, row));
+        } catch {
+          // A deleted or temporarily unreadable history row should not block comparison.
+        }
       }
     }
-    return fallback;
+
+    candidates.sort((left, right) => right.timestamp - left.timestamp);
+    if (target.key) {
+      const matched = candidates.find(candidate => (
+        candidate.context.domain === target.domain && candidate.context.key === target.key
+      ));
+      if (matched) {
+        matched.sameTarget = true;
+        return matched;
+      }
+    }
+    return candidates[0] || null;
   }
 
   function metricRow(label, previous, latest, kind = 'number') {
@@ -174,10 +205,10 @@
   function rankingData(result, domain) {
     const action = lastAction(result, domain === 'search' ? 'search.run' : 'recommend.run');
     const rows = Array.isArray(action?.result?.results) ? action.result.results.slice(0, 8) : [];
-    return rows.map(row => ({
+    return rows.map((row, index) => ({
       id:String(row.id || row.item_id || row.title || ''),
       title:String(row.title || row.id || row.item_id || '结果'),
-      rank:numberOrNull(row.rank),
+      rank:numberOrNull(row.rank) ?? index + 1,
       score:numberOrNull(row.score),
       categories:Array.isArray(row.categories) ? row.categories.slice(0, 2).map(String) : [],
     })).filter(row => row.id);
@@ -191,10 +222,10 @@
     const beforeMap = new Map(before.map(row => [row.id, row]));
     const afterIds = new Set(after.map(row => row.id));
     const dropped = before.filter(row => !afterIds.has(row.id)).length;
-    const rows = after.map((row, index) => {
+    const rows = after.map(row => {
       const old = beforeMap.get(row.id);
       const oldRank = old?.rank;
-      const newRank = row.rank ?? index + 1;
+      const newRank = row.rank;
       const movement = oldRank === null || oldRank === undefined
         ? {label:'NEW', tone:'new'}
         : oldRank > newRank
@@ -245,9 +276,14 @@
     if (label) button.textContent = label;
   }
 
+  function completedResultVisible() {
+    const snapshot = $('resultSnapshot');
+    return !!snapshot && !snapshot.hidden && snapshot.textContent.trim().length > 0 && $('stateText')?.textContent.trim() === '已完成';
+  }
+
   function ensureTrigger() {
     triggerQueued = false;
-    if (!current.result || !current.conversation_id) return;
+    if (!completedResultVisible()) return;
     const head = document.querySelector('#resultSnapshot .snapshot-head');
     const state = head?.querySelector('.snapshot-state');
     if (!head || !state) return;
@@ -286,6 +322,19 @@
     setTriggerState({expanded:false, label:'与上次对照'});
   }
 
+  function invalidate({resetConversation = false} = {}) {
+    generation += 1;
+    if (resetConversation) currentConversationId = null;
+    hideCompare({removeTrigger:true});
+  }
+
+  function resolveCurrentConversationId() {
+    if (currentConversationId) return currentConversationId;
+    const first = document.querySelector('.history-item[data-id]');
+    currentConversationId = first?.dataset.id || null;
+    return currentConversationId;
+  }
+
   function renderEmpty(message, detail) {
     const node = ensureSurface();
     if (!node) return;
@@ -304,9 +353,8 @@
     const latestStats = runStats(latest);
     const previousStats = runStats(previous);
     const latestContext = resultContext(latest);
-    const previousContext = baseline.context;
     const sameTarget = !!baseline.sameTarget;
-    const context = {sameTarget, current:latestContext, previous:previousContext};
+    const context = {sameTarget, current:latestContext, previous:baseline.context};
     const contextText = sameTarget
       ? `${latestContext.domain === 'search' ? '相同 Query' : '相同用户'} · ${latestContext.label}`
       : `同场景历史 · ${baseline.row?.title || '上一任务'}`;
@@ -318,7 +366,7 @@
         <div><span>RUN COMPARE</span><h3>与最近一次可用历史运行对照</h3></div>
         <div class="compare-head-actions"><strong class="compare-scope ${sameTarget ? 'same' : ''}"><i></i>${sameTarget ? '同对象' : '同场景'}</strong><button type="button" class="compare-close" aria-label="关闭运行对照">×</button></div>
       </div>
-      <div class="compare-context ${sameTarget ? '' : 'warn'}"><div><b>${esc(contextText)}</b><small>${esc(contextDetail)}</small></div><time>${esc(formatTime(baseline.row?.updated_at))}</time></div>
+      <div class="compare-context ${sameTarget ? '' : 'warn'}"><div><b>${esc(contextText)}</b><small>${esc(contextDetail)}</small></div><time>${esc(formatTime(baseline.timestamp))}</time></div>
       ${verificationHtml(previous, latest)}
       <div class="compare-metrics-head"><span>指标</span><span>上次</span><span>本次</span><span>变化</span></div>
       <div class="compare-metrics">
@@ -344,12 +392,20 @@
   }
 
   async function compareCurrent() {
-    if (!current.result || !current.conversation_id) return;
+    const conversationId = resolveCurrentConversationId();
+    if (!conversationId || !completedResultVisible()) return;
     const requestGeneration = generation;
-    const snapshot = {conversation_id:current.conversation_id, scene:current.scene, result:current.result};
     setTriggerState({busy:true, expanded:false, label:'查找上次…'});
     try {
-      const baseline = await findBaseline(snapshot);
+      const conversation = await xhrJson(`/api/conversations/${encodeURIComponent(conversationId)}`);
+      const results = assistantResults(conversation);
+      const latest = results.at(-1)?.result;
+      if (!latest) {
+        renderEmpty('当前运行没有可对照结果', '只有完成并持久化的运行会参与历史对照。');
+        return;
+      }
+      const snapshot = {conversation_id:conversationId, scene:String(conversation?.scene || ''), result:latest};
+      const baseline = await findBaseline(snapshot, conversation);
       if (requestGeneration !== generation) return;
       if (!baseline) {
         renderEmpty('还没有可用的历史运行', '完成另一个同场景任务后，这里会直接读取持久化结果进行事实对照。');
@@ -364,25 +420,31 @@
     }
   }
 
-  window.addEventListener('xushu:run-context', event => {
-    generation += 1;
-    current = {
-      conversation_id:event.detail?.conversation_id || null,
-      scene:String(event.detail?.scene || ''),
-      result:event.detail?.result && typeof event.detail.result === 'object' ? event.detail.result : null,
-    };
-    hideCompare({removeTrigger:true});
-    if (current.result) scheduleTrigger();
-  });
+  document.addEventListener('click', event => {
+    const history = event.target.closest('.history-item[data-id]');
+    if (history) {
+      currentConversationId = history.dataset.id || null;
+      invalidate();
+      return;
+    }
+    if (event.target.closest('#newTaskBtn, .scene')) {
+      invalidate({resetConversation:true});
+      return;
+    }
+    if (event.target.closest('#sendBtn')) invalidate();
+  }, true);
 
-  window.addEventListener('xushu:run-start', () => {
-    generation += 1;
-    current = {...current, result:null};
-    hideCompare({removeTrigger:true});
-  });
+  document.addEventListener('keydown', event => {
+    if (event.target === $('input') && event.key === 'Enter' && !event.shiftKey && !event.isComposing) invalidate();
+  }, true);
 
   const observer = new MutationObserver(() => {
-    if (current.result && !document.querySelector('.compare-trigger')) scheduleTrigger();
+    if (!completedResultVisible()) {
+      if (document.querySelector('.compare-trigger') || !$('runCompare')?.hidden) hideCompare({removeTrigger:true});
+      return;
+    }
+    if (!document.querySelector('.compare-trigger')) scheduleTrigger();
   });
-  observer.observe(document.body, {subtree:true, childList:true});
+  observer.observe(document.body, {subtree:true, childList:true, characterData:true, attributes:true, attributeFilter:['hidden']});
+  scheduleTrigger();
 })();
