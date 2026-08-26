@@ -89,6 +89,8 @@ def main() -> None:
         # the async response-clone rendering used by the additive UI modules.
         for selector in (
             "#resultSnapshot:not([hidden])",
+            "#resultAnalysis:not([hidden])",
+            "#strategyExperiment:not([hidden])",
             "#runTelemetry:not([hidden])",
             "#verificationSummary:not([hidden])",
             "#missionSummary:not([hidden])",
@@ -99,6 +101,24 @@ def main() -> None:
             page.wait_for_selector(selector, state="attached", timeout=8_000)
             if page.locator(selector).evaluate("el => el.hidden"):
                 raise RuntimeError(f"Completed engineering surface stayed hidden: {selector}")
+
+        rank_rows = page.locator("#resultAnalysis .rank-row").count()
+        if rank_rows < 3:
+            raise RuntimeError(f"Ranked Result Analysis rendered too few real rows: {rank_rows}")
+        rank_text = page.locator("#resultAnalysis").inner_text()
+        for label in ("匹配", "质量", "新鲜", "热度"):
+            if label not in rank_text:
+                raise RuntimeError(f"Search ranking explanation lost the real signal column: {label}")
+
+        experiment_blocks = page.locator("#strategyExperiment .experiment-block").count()
+        if experiment_blocks < 1:
+            raise RuntimeError("Strategy Experiment did not render the real evolution action")
+        if page.locator("#strategyExperiment .experiment-gate").count() < 4:
+            raise RuntimeError("Strategy Experiment did not keep the independent evaluation gates visible")
+        if page.locator("#strategyExperiment .metric-compare > div").count() < 2:
+            raise RuntimeError("Strategy Experiment did not render current/candidate metric comparison")
+        if "未改变当前策略" not in page.locator("#strategyExperiment").inner_text():
+            raise RuntimeError("No-adaptation QA prompt incorrectly presented a candidate as active")
 
         trace_steps = page.locator("#agentTrace .trace-step").count()
         if trace_steps < 6:
