@@ -129,8 +129,8 @@ jobs:
           assert trace_js.status_code == 200 and 'AGENT TRACE' in trace_js.text
           assert control_css.status_code == 200 and 'Control Plane + Learning Ledger' in control_css.text
           assert control_js.status_code == 200 and 'CONTROL PLANE' in control_js.text and 'LEARNING LEDGER' in control_js.text
-          assert nav_css.status_code == 200 and 'Run Navigator' in nav_css.text
-          assert nav_js.status_code == 200 and '运行导航' in nav_js.text and 'commandPalette' in nav_js.text
+          assert nav_css.status_code == 200 and 'Workspace Switcher' in nav_css.text
+          assert nav_js.status_code == 200 and '工作区导航' in nav_js.text and 'historyCommands' in nav_js.text and 'escapeHtml' in nav_js.text
           assert compare_css.status_code == 200 and 'Run Compare' in compare_css.text
           assert compare_js.status_code == 200 and 'RUN COMPARE' in compare_js.text and 'XMLHttpRequest' in compare_js.text
           assert library_css.status_code == 200 and 'Run Library' in library_css.text
