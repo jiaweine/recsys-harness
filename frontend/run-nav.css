@@ -1,0 +1,55 @@
+/* Run Navigator — compact completed-run navigation without adding dashboard chrome. */
+.run-jump[hidden],.run-command-mobile[hidden],.command-palette[hidden]{display:none}
+
+.run-jump{display:flex;align-items:center;gap:2px;margin-left:auto;padding:3px;border:1px solid #2c2c32;border-radius:8px;background:#141417}
+.run-jump button{height:28px;padding:0 8px;border:0;border-radius:6px;background:transparent;font-family:var(--ui);font-size:10px;font-weight:620;color:#777781;cursor:pointer;white-space:nowrap}
+.run-jump button:hover{background:#1d1d21;color:#d5d5da}
+.run-jump button.active{background:#23232a;color:#dfe1ff;box-shadow:inset 0 0 0 1px #383844}
+.run-jump button:disabled{opacity:.34;cursor:default;background:transparent;color:#62626a}
+.run-jump .run-command-trigger{display:flex;align-items:center;gap:6px;margin-left:2px;padding-left:9px;border-left:1px solid #2d2d33;border-radius:0 6px 6px 0;color:#92929b}
+.run-jump kbd,.run-command-mobile kbd{font-family:var(--mono);font-size:10px;font-weight:600;color:#696972}
+.run-jump button:focus-visible,.run-command-mobile:focus-visible,.command-item:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.run-command-mobile{display:none;align-items:center;justify-content:center;min-width:44px;height:44px;padding:0 10px;border:1px solid #34343a;border-radius:999px;background:#17171a;font-family:var(--ui);font-size:10px;font-weight:700;color:#d4d4d8;cursor:pointer}
+.run-command-mobile:hover{background:#202024;color:#fff}
+
+.command-palette{position:fixed;inset:0;z-index:140;display:grid;place-items:start center;padding-top:min(18vh,150px);background:rgba(0,0,0,.54)}
+.command-dialog{width:min(560px,calc(100vw - 28px));border:1px solid #36363d;border-radius:12px;background:#111113;box-shadow:0 28px 72px rgba(0,0,0,.5);overflow:hidden}
+.command-search{display:grid;grid-template-columns:22px minmax(0,1fr) auto;align-items:center;gap:8px;height:52px;padding:0 14px;border-bottom:1px solid #2b2b31;background:#141417}
+.command-search:focus-within{box-shadow:inset 0 -1px 0 #5963b3}
+.command-search>span{font-family:var(--mono);font-size:14px;color:#7f86d7}
+.command-search input{width:100%;border:0;outline:0;background:transparent;font-family:var(--ui);font-size:13px;color:#f2f2f4}
+.command-search input::placeholder{color:#676771}
+.command-search kbd{height:24px;display:grid;place-items:center;padding:0 7px;border:1px solid #34343a;border-radius:5px;background:#19191d;font-family:var(--mono);font-size:10px;color:#74747d}
+.command-list{max-height:min(54vh,430px);overflow:auto;padding:6px}
+.command-empty{padding:24px 14px;text-align:center;font-size:11px;color:#65656f}
+.command-item{width:100%;min-height:44px;display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:9px;align-items:center;padding:6px 8px;border:0;border-radius:7px;background:transparent;text-align:left;color:#c7c7cd;cursor:pointer}
+.command-item:hover,.command-item.selected{background:#1b1b20;color:#fff}
+.command-item:disabled{display:none}
+.command-index{width:24px;height:24px;display:grid;place-items:center;border:1px solid #303037;border-radius:6px;background:#161619;font-family:var(--mono);font-size:10px;color:#73737d}
+.command-item.selected .command-index{border-color:rgba(94,106,210,.42);background:rgba(94,106,210,.12);color:#b2b8f4}
+.command-copy{min-width:0}
+.command-copy b{display:block;font-size:11px;font-weight:650;color:inherit}
+.command-copy small{display:block;margin-top:2px;font-size:10px;color:#666670;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.command-shortcut{font-family:var(--mono);font-size:10px;color:#60606a}
+.command-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;border-top:1px solid #29292f;background:#0e0e10}
+.command-foot span{font-size:10px;color:#5f5f68}
+.command-foot b{font-family:var(--mono);font-size:10px;font-weight:600;color:#7a7a84}
+
+@media (max-width:1180px){
+  .run-jump{display:none!important}
+  .run-command-mobile:not([hidden]){display:inline-flex}
+}
+
+@media (max-width:720px){
+  .command-palette{padding-top:72px;align-items:start}
+  .command-dialog{width:calc(100vw - 16px);max-height:calc(100dvh - 84px);border-radius:14px}
+  .command-search{height:54px;padding:0 12px}
+  .command-list{max-height:calc(100dvh - 190px)}
+  .command-item{min-height:48px}
+  .command-foot{padding-bottom:calc(8px + env(safe-area-inset-bottom))}
+}
+
+@media (prefers-reduced-motion:reduce){
+  .command-palette{scroll-behavior:auto}
+}

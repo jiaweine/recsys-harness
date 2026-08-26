@@ -144,6 +144,43 @@ def main() -> None:
         if evidence_items and (evidence_badge.count() != 1 or evidence_badge.inner_text() != str(evidence_items)):
             raise RuntimeError("Evidence tab count is not synchronized with inspectable evidence")
 
+        # Completed runs get a compact keyboard-first navigator. Exercise real
+        # interaction rather than only checking that the injected DOM exists.
+        page.wait_for_selector("#runJump:not([hidden])", timeout=5_000)
+        if not page.locator("#runJump").is_visible():
+            raise RuntimeError("Desktop Run Navigator did not appear after completion")
+        for command in ("summary", "rank", "experiment", "trace", "evidence"):
+            button = page.locator(f"#runJump [data-command='{command}']")
+            if button.count() != 1 or button.is_disabled():
+                raise RuntimeError(f"Run Navigator command is unavailable despite a real surface: {command}")
+
+        page.locator("#runJump [data-command='rank']").click()
+        page.wait_for_timeout(320)
+        area_box = page.locator("#scrollArea").bounding_box()
+        rank_box = page.locator("#resultAnalysis").bounding_box()
+        if not area_box or not rank_box or rank_box["y"] < area_box["y"] - 4 or rank_box["y"] > area_box["y"] + 180:
+            raise RuntimeError(f"Rank navigator did not move the result surface into view: area={area_box}, rank={rank_box}")
+
+        page.keyboard.press("Control+K")
+        page.wait_for_selector("#commandPalette:not([hidden])", timeout=3_000)
+        if page.evaluate("document.activeElement?.id") != "commandInput":
+            raise RuntimeError("Command palette did not move focus to its search input")
+        page.locator("#commandInput").fill("证据")
+        if page.locator("#commandList [data-palette-command='evidence']").count() != 1:
+            raise RuntimeError("Command palette filtering lost the Evidence destination")
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(220)
+        if not page.locator("#commandPalette").evaluate("el => el.hidden"):
+            raise RuntimeError("Command palette stayed open after executing a destination")
+        evidence_tab = page.locator(".tab[data-tab='evidence']")
+        if evidence_tab.get_attribute("aria-selected") != "true":
+            raise RuntimeError("Command palette did not switch the inspector to Evidence")
+        page.keyboard.press("Control+K")
+        page.wait_for_selector("#commandPalette:not([hidden])", timeout=3_000)
+        page.keyboard.press("Escape")
+        if not page.locator("#commandPalette").evaluate("el => el.hidden"):
+            raise RuntimeError("Escape did not close the command palette")
+
         stale_reconnect = page.locator("#toast").evaluate("el => el.classList.contains('show') && el.textContent.includes('连接暂时中断')")
         if stale_reconnect:
             raise RuntimeError("Recovered run left a stale reconnect notice visible after completion")
@@ -179,6 +216,18 @@ def main() -> None:
         page.locator("#scrollArea").evaluate("el => { el.scrollTop = 0; }")
         page.screenshot(path=str(ASSET_DIR / "mobile-workspace.png"), full_page=False)
 
+        mobile_nav = page.locator("#runCommandMobile")
+        if not mobile_nav.is_visible():
+            raise RuntimeError("Mobile Run Navigator trigger is not visible after completion")
+        mobile_nav_box = mobile_nav.bounding_box()
+        if not mobile_nav_box or mobile_nav_box["height"] < 44 or mobile_nav_box["width"] < 44:
+            raise RuntimeError(f"Mobile Run Navigator touch target is too small: {mobile_nav_box}")
+        mobile_nav.click()
+        page.wait_for_selector("#commandPalette:not([hidden])", timeout=3_000)
+        page.keyboard.press("Escape")
+        if not page.locator("#commandPalette").evaluate("el => el.hidden"):
+            raise RuntimeError("Mobile command palette did not close with Escape")
+
         page.locator("#inspectorToggle").click()
         page.wait_for_selector("#inspector.open", timeout=5_000)
         page.wait_for_timeout(180)
@@ -213,7 +262,7 @@ def main() -> None:
         page.wait_for_timeout(150)
         page.screenshot(path=str(ASSET_DIR / "mobile-evidence.png"), full_page=False)
 
-        for selector in ("#sendBtn", "#attachBtn", "#networkBtn", "#newTaskBtn", "#inspectorToggle", "#inspectorClose"):
+        for selector in ("#sendBtn", "#attachBtn", "#networkBtn", "#newTaskBtn", "#runCommandMobile", "#inspectorToggle", "#inspectorClose"):
             locator = page.locator(selector)
             if not locator.is_visible():
                 continue
