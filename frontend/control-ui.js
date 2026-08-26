@@ -150,12 +150,16 @@
   function syncLiveTraceSummary(events) {
     const trace = $('agentTrace');
     const cells = trace ? trace.querySelectorAll('.trace-overview > span') : [];
-    if (cells.length < 3) return;
-    const launched = (events || []).filter(event => event.phase === 'execute').length;
-    const value = cells[2].querySelector('b');
-    const label = cells[2].querySelector('i');
-    if (value) value.textContent = String(launched);
-    if (label) label.textContent = '动作已发起';
+    if (cells.length >= 3) {
+      const launched = (events || []).filter(event => event.phase === 'execute').length;
+      const value = cells[2].querySelector('b');
+      const label = cells[2].querySelector('i');
+      if (value) value.textContent = String(launched);
+      if (label) label.textContent = '动作已发起';
+    }
+    const latest = (events || []).at(-1);
+    const bar = $('runBar');
+    if (bar && latest) bar.dataset.level = String(level(latest.progress, 100));
   }
 
   function normalizeMissionLabels() {
@@ -213,6 +217,8 @@
       ledger.innerHTML = learningHtml(result);
       ledger.hidden = false;
     }
+    const bar = $('runBar');
+    if (bar) bar.dataset.level = '10';
     requestAnimationFrame(() => {
       normalizeMissionLabels();
       normalizeTraceKeys(result);
@@ -228,6 +234,8 @@
         node.innerHTML = '';
       }
     });
+    const bar = $('runBar');
+    if (bar) delete bar.dataset.level;
   }
 
   function inspectPayload(path, payload) {
