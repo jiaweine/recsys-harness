@@ -83,6 +83,16 @@ def main() -> None:
             "document.querySelector('#runContextStrip .run-context-state')?.textContent.includes('已完成')",
             timeout=8_000,
         )
+        # Run completion precedes the asynchronous history refresh that supplies the persisted timestamp.
+        # Wait for the context to reconcile with that persisted history row instead of racing it.
+        page.wait_for_function(
+            """() => {
+              const selectedTime = document.querySelector('#historyList .history-item[aria-current="page"] small');
+              const contextTime = document.querySelector('#runContextStrip .run-context-time .run-context-value');
+              return Boolean(selectedTime?.textContent.trim() && contextTime?.textContent.trim());
+            }""",
+            timeout=8_000,
+        )
 
         if "已完成" not in strip.locator(".run-context-state").inner_text():
             raise RuntimeError("Run Context must show execution completion instead of the follow-up affordance")
