@@ -1,0 +1,102 @@
+/* Graphite Charcoal V2 — separate chrome, workspace, panels and nested surfaces. */
+:root{
+  --canvas:#0b0d11;
+  --surface:#1b2028;
+  --surface-2:#1f252e;
+  --surface-3:#262e39;
+  --ink:#f5f7fa;
+  --ink-soft:#d8dde5;
+  --muted:#a8b0bb;
+  --muted-2:#7f8996;
+  --line:#303844;
+  --line-strong:#414b59;
+}
+
+html,body,.shell{background:#0b0d11}
+.topbar{background:#0d1015;border-bottom-color:#2a313b}
+.sidebar,.inspector,.inspector-head{background:#101319}
+.sidebar{border-right-color:#2b333e}
+.inspector{border-left-color:#2b333e}
+.main,.main-head,.composer-wrap{background:#151820}
+.main-head{background:#13171d;border-bottom-color:#303844}
+.scroll{background:#151820}
+
+.status-chip,.new-task{background:#1a1f27;border-color:#343d49}
+.scene:hover,.history-item:hover{background:#181d24}
+.scene.active{background:#202630;box-shadow:inset 0 0 0 1px #3a4451}
+.history-item[aria-current="page"]{background:#1a1f27}
+
+.hero-signal,.prompt-board{background:#181d24;border-color:#323a45}
+.hero-signal>div,.prompt-board,.board-head,.prompt-board button{border-color:#303844}
+.prompt-board button{background:#181d24}
+.prompt-board button:hover{background:#202630}
+
+.msg.user .bubble{background:#1c222b;border-color:#3a4350;border-left-color:var(--accent)}
+.context-chip,.message-attachment{background:#1a1f27;border-color:#343d49}
+
+.running{background:rgba(94,106,210,.1);border-color:rgba(139,147,232,.32)}
+.run-stop{background:#1d232b;border-color:#3a4450}
+.run-line{background:#303844}
+
+.composer{background:#1e242d;border-color:#424c59;box-shadow:0 18px 48px rgba(0,0,0,.22),inset 0 1px 0 rgba(255,255,255,.035)}
+.composer:focus-within{border-color:#6974c9;box-shadow:0 0 0 3px rgba(94,106,210,.12),0 20px 50px rgba(0,0,0,.24)}
+.composer-foot,.attachment-tray{border-color:#343d49}
+.tool-btn:hover{background:#272e38;border-color:#414b58}
+
+.tabs{background:#12161c;border-bottom-color:#303844}
+.tab.active{background:#1d232c;color:#dfe2ff}
+.state-row{background:#181d24;border-color:#343d49}
+
+.result-snapshot,.result-analysis,.strategy-experiment{color:var(--ink-soft)}
+.snapshot-head,.analysis-head,.experiment-head{background:#202630;border-color:#343d49}
+.snapshot-body{background:#1b2028;border-color:#343d49}
+.snapshot-findings{background:#181d24;border-left-color:#343d49}
+.result-analysis-block,.experiment-block{background:#1b2028;border-color:#343d49}
+.diagnosis-strip{background:#181d24;border-bottom-color:#303844}
+.rank-row{border-bottom-color:#2a313b}
+.rank-row:hover{background:#1e242d}
+
+.run-telemetry,.verification-summary,.run-control-plane,.learning-ledger,.mission-summary,.agent-trace{background:#1b2028;border-color:#343d49}
+.telemetry-grid,.control-grid,.learning-stats,.trace-overview{background:#343d49;border-color:#343d49}
+.telemetry-card,.control-cell,.learning-stats span,.trace-overview span{background:#202630}
+.verification-head,.control-head,.learning-head,.mission-head,.trace-head{background:#202630;border-bottom-color:#343d49}
+.verification-foot,.control-foot,.learning-foot,.mission-exit{background:#181d24;border-color:#303844}
+.control-constraints{background:#191e25;border-color:#303844}
+
+.mission-requirement,.hypothesis-row{border-top-color:#2a313b}
+.trace-step{background:#1b2028;border-bottom-color:#2a313b}
+.trace-step summary:hover,.trace-step[open] summary{background:#202630}
+.trace-node i{background:#1b2028}
+.trace-cycle,.trace-head-actions button,.tab-count{background:#202630;border-color:#3a4451}
+.trace-facts{background:#343d49;border-color:#343d49}
+.trace-facts>span{background:#202630}
+.trace-chips span{background:#202630;border-color:#3a4451}
+.trace-observation,.trace-gap,.trace-alternatives{background:#181d24;border-color:#343d49}
+
+.verification-checks>div,.snapshot-result,.snapshot-findings p,.metric-compare>div{border-color:#2a313b}
+.metric-compare-head{background:#202630;border-bottom-color:#343d49}
+.experiment-gates{background:#181d24;border-bottom-color:#303844}
+.experiment-foot{background:#181d24;border-top-color:#303844}
+
+.import-line,.auth-panel,.auth-panel input{background:#1b2028;border-color:#3a4451}
+
+.nav-label,.history-head,.task-kicker span,.assistant-label span,.run-meta,
+.analysis-head span,.experiment-head span,.diagnosis-copy span,.snapshot-eyebrow,.snapshot-label,
+.trace-section-label,.mission-head span,.trace-head span,.control-head span,.learning-head span{
+  color:#7f8996;
+}
+
+@media (max-width:720px){
+  body,.shell{background:#0d1015}
+  .topbar,.sidebar{background:#101319}
+  .main,.composer-wrap{background:#151820}
+  .scene-nav{background:#191e25;border-color:#343d49}
+  .scene.active{background:#252c36;box-shadow:inset 0 0 0 1px #414b59}
+  .inspector,.inspector-head,.inspector-body,.panel{background:#151a21}
+  .tabs{background:#1b2028;border-color:#343d49}
+  .tab.active{background:#262e39;box-shadow:inset 0 0 0 1px #414b59}
+  .state-row{background:#1b2028;border-color:#3a4451}
+  .data-grid,.data-cell{background:#1b2028;border-color:#343d49}
+  .capability-lines>div{background:#181d24}
+  .composer{background:#202630}
+}
