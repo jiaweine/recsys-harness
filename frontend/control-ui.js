@@ -171,6 +171,22 @@
     });
   }
 
+  function normalizeTraceKeys(result) {
+    const mission = result?.deliberation?.mission || {};
+    const keyLabels = {};
+    Object.entries(mission.requirements || {}).forEach(([key, row]) => {
+      keyLabels[key] = row?.label || key;
+    });
+    Object.entries(mission.hypotheses || {}).forEach(([key, row]) => {
+      keyLabels[key] = row?.label || key;
+    });
+    if (!Object.keys(keyLabels).length) return;
+    document.querySelectorAll('#agentTrace .trace-facts b, #agentTrace .trace-chips span').forEach(node => {
+      const key = node.textContent.trim();
+      if (keyLabels[key]) node.textContent = keyLabels[key];
+    });
+  }
+
   function renderLive(events, status) {
     ensureMounts();
     const node = $('runControlPlane');
@@ -197,7 +213,10 @@
       ledger.innerHTML = learningHtml(result);
       ledger.hidden = false;
     }
-    requestAnimationFrame(normalizeMissionLabels);
+    requestAnimationFrame(() => {
+      normalizeMissionLabels();
+      normalizeTraceKeys(result);
+    });
   }
 
   function clear() {
@@ -245,6 +264,7 @@
   const observer = new MutationObserver(() => {
     ensureMounts();
     normalizeMissionLabels();
+    if (lastResult) normalizeTraceKeys(lastResult);
     if (lastResult && ($('runControlPlane')?.hidden || $('learningLedger')?.hidden)) renderCompleted(lastResult);
   });
   observer.observe(document.body, {subtree:true, childList:true});
