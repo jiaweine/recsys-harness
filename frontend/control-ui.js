@@ -51,7 +51,8 @@
       badge.setAttribute('aria-hidden', 'true');
       tab.appendChild(badge);
     }
-    badge.textContent = count > 99 ? '99+' : String(count);
+    const text = count > 99 ? '99+' : String(count);
+    if (badge.textContent !== text) badge.textContent = text;
   }
 
   function syncTabCounts(result = null, events = null) {
