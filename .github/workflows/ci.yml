@@ -25,7 +25,11 @@ jobs:
           from pathlib import Path
           import re
 
-          frontend_paths = [Path('frontend/index.html'), Path('frontend/app.js'), *sorted(Path('frontend').glob('*.css'))]
+          frontend_paths = [
+              Path('frontend/index.html'),
+              *sorted(Path('frontend').glob('*.js')),
+              *sorted(Path('frontend').glob('*.css')),
+          ]
           frontend = '\n'.join(path.read_text(encoding='utf-8') for path in frontend_paths)
           lower = frontend.lower()
           forbidden_ui = [
@@ -109,4 +113,8 @@ jobs:
           assert status.status_code == 200 and status.json()['runtime']['evidence_utility_controller'] is True
           assert capabilities.status_code == 200 and capabilities.json()['multimodal']['attachments'] is True
           PY
-      - run: node --check frontend/app.js
+      - name: Check frontend JavaScript syntax
+        run: |
+          for file in frontend/*.js; do
+            node --check "$file"
+          done
