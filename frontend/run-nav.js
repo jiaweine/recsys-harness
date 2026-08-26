@@ -71,6 +71,13 @@
     });
   }
 
+  function focusSection(node) {
+    if (!(node instanceof HTMLElement)) return;
+    if (!node.hasAttribute('tabindex')) node.setAttribute('tabindex', '-1');
+    node.setAttribute('data-run-nav-focus', '');
+    node.focus({preventScroll:true});
+  }
+
   function inspectorOnScreen() {
     const inspector = $('inspector');
     if (!inspector) return false;
@@ -86,6 +93,7 @@
     if (!inspectorOnScreen()) $('inspectorToggle')?.click();
     const tab = document.querySelector(`.tab[data-tab="${tabName}"]`);
     tab?.click();
+    tab?.focus({preventScroll:true});
     requestAnimationFrame(() => requestAnimationFrame(() => {
       const target = targetId ? $(targetId) : null;
       if (target && isVisible(target)) {
@@ -104,6 +112,7 @@
     const nodeRect = node.getBoundingClientRect();
     const nextTop = area.scrollTop + nodeRect.top - areaRect.top - 18;
     area.scrollTo({top: Math.max(0, nextTop), behavior: reduceMotion() ? 'auto' : 'smooth'});
+    requestAnimationFrame(() => focusSection(node));
   }
 
   const commands = [
@@ -140,7 +149,12 @@
     },
     {
       id: 'new', label: '新任务', detail: '清空当前上下文并开始新的任务', key: 'N',
-      available: () => true, run: () => $('newTaskBtn')?.click(),
+      available: () => true,
+      run: () => {
+        const button = $('newTaskBtn');
+        button?.click();
+        button?.focus({preventScroll:true});
+      },
     },
   ];
 
