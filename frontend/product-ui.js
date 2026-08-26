@@ -11,14 +11,12 @@
   const number = value => Number.isFinite(Number(value)) ? Number(value) : 0;
 
   const checkLabels = {
+    executed_tools: '工具已执行',
+    no_failed_tools: '无失败工具',
+    evidence_backed: '证据支撑',
     adaptation_respected: '策略边界',
-    evidence_complete: '证据完整',
-    evidence_present: '证据存在',
-    actions_valid: '工具执行',
-    no_failed_actions: '执行稳定',
-    critic_ready: 'Critic 就绪',
-    constraints_respected: '约束遵循',
-    verification_ready: '验证就绪',
+    mission_terminal: 'Mission 收敛',
+    contradictions_resolved: '矛盾已解决',
   };
 
   const modeLabels = {
@@ -60,6 +58,7 @@
     ];
 
     const details = [
+      ['Verifier', verification.confidence === undefined ? '—' : percent(verification.confidence)],
       ['Critic', critic === undefined || critic === null ? '—' : percent(critic)],
       ['Reward', reward === undefined || reward === null ? '—' : Number(reward).toFixed(2)],
       ['Memory', `${number(autonomy.memory_hits)} hits`],
@@ -82,17 +81,16 @@
     const verification = result.verification || {};
     const checks = verification.checks && typeof verification.checks === 'object' ? verification.checks : {};
     const entries = Object.entries(checks).slice(0, 8);
-    const critic = criticConfidence(result);
 
     return `
       <div class="verification-head">
-        <div><span>VERIFICATION</span><b>${verification.passed === true ? '独立验证通过' : verification.passed === false ? '需要继续复核' : '验证已完成'}</b></div>
+        <div><span>VERIFICATION · ${verification.confidence === undefined ? '—' : percent(verification.confidence)}</span><b>${verification.passed === true ? '独立验证通过' : verification.passed === false ? '需要继续复核' : '验证已完成'}</b></div>
         <strong class="verification-badge ${verification.passed === true ? 'pass' : 'review'}">${verification.passed === true ? 'PASS' : 'CHECK'}</strong>
       </div>
       ${entries.length ? `<div class="verification-checks">${entries.map(([key, value]) => `
-        <div><span class="check-dot ${value ? 'ok' : 'warn'}"></span><b>${esc(checkLabels[key] || key.replaceAll('_', ' '))}</b><small>${value ? '通过' : '检查'}</small></div>
+        <div><span class="check-dot ${value === true ? 'ok' : 'warn'}"></span><b>${esc(checkLabels[key] || key.replaceAll('_', ' '))}</b><small>${value === true ? '通过' : '检查'}</small></div>
       `).join('')}</div>` : ''}
-      <div class="verification-foot"><span>Critic confidence</span><b>${critic === undefined || critic === null ? '—' : percent(critic)}</b></div>`;
+      <div class="verification-foot"><span>Trajectory gate</span><b>${verification.passed === true ? 'all checks passed' : 'review required'}</b></div>`;
   }
 
   function snapshotHtml(result) {
@@ -186,7 +184,7 @@
   };
 
   document.addEventListener('click', event => {
-    if (event.target.closest('#newTaskBtn, .scene')) clear();
+    if (event.target.closest('#newTaskBtn, .scene, .history-item')) clear();
   });
 
   const observer = new MutationObserver(() => {
