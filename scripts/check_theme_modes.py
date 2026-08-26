@@ -23,7 +23,7 @@ def assert_theme(page, theme: str) -> None:
             ".inspector": "rgb(250, 250, 250)",
         },
         "dark": {
-            "body": "rgb(9, 9, 11)",
+            "body": "rgb(11, 11, 13)",
             ".topbar": "rgb(14, 14, 16)",
             ".sidebar": "rgb(13, 13, 15)",
             ".main": "rgb(16, 16, 18)",
