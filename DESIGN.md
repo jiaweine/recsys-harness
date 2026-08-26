@@ -1,6 +1,6 @@
 # RecSys Harness — Graphite Precision
 
-A dense, evidence-first interface for an autonomous search and recommendation workbench.
+A dense, evidence-first interface for an autonomous search and recommendation engineering workbench.
 
 ## Reference hierarchy
 
@@ -12,15 +12,17 @@ The resulting system is named **Graphite Precision** and preserves the Chinese �
 
 ## Product model
 
-RecSys Harness is not a generic AI chat UI. Its visual hierarchy communicates five layers:
+RecSys Harness is not a generic AI chat UI. Its visual hierarchy communicates five product layers:
 
 1. **Goal** — what search/recommendation problem is being investigated.
-2. **Execution** — what the autonomous Harness is doing now and why.
+2. **Execution** — what the autonomous Harness is doing now, which evidence requirement it is pursuing, and which boundaries constrain it.
 3. **Ranked result** — what users currently see and which measurable signals explain the ordering.
 4. **Evidence / Verification** — what supports the conclusion and whether the independent gate passed.
-5. **Experiment / Learning** — whether an explored strategy improves the owned baseline strongly enough to be retained or activated.
+5. **Experiment / Learning** — whether an explored strategy improves the owned baseline strongly enough to be retained or activated, and what durable experience remains afterward.
 
-A successful screen should allow a technical reviewer to answer “what did it do, what did the user see, why was it ranked this way, what evidence supports the conclusion, and did the candidate strategy pass?” without reading the full conversation.
+Within Execution, the inspector follows **Mission → Decision → Tool → Observation → Reflection → Verify**. Within Learning, the UI follows **Experiment → Gate → Memory → Rollback protection**.
+
+A successful screen should allow a technical reviewer to answer “what was the goal, what did the Harness choose, what did the user see, what evidence changed the path, which boundaries applied, was the result verified, and did anything durable change?” without reading the full conversation.
 
 ## Principles
 
@@ -29,10 +31,11 @@ A successful screen should allow a technical reviewer to answer “what did it d
 3. Near-black, not flat black. Layer `#09090b`, `#0d0d0f`, `#101012`, and `#17171a` to create hierarchy without large shadows.
 4. Hairlines over cards. Prefer 1px separators, surface shifts, and compact rows. Use elevation only for the composer, modal/sheet, and authentication surfaces.
 5. Compact but readable. UI labels must be at least 10px, primary content is 11–14px, and welcome display text is 28–38px.
-6. Agent work must look live. Execution uses progress, phase labels, trace rows, and state changes rather than decorative loading animation.
-7. Show real runtime intelligence. Verification, cycles, tool calls, evidence, Critic confidence, memory hits, cost, ranking signals, diagnostic output, experiment deltas, and learned strategies may be surfaced only when present in the real Harness payload.
+6. Agent work must look live. Execution uses progress, phase labels, trace rows, state changes, and explicit cycle IDs rather than decorative loading animation.
+7. Show real runtime intelligence. Verification, cycles, tool calls, evidence, Critic confidence, memory hits, cost, ranking signals, diagnostic output, experiment deltas, mission requirements, hypotheses, permissions, and learned strategies may be surfaced only when present in the real Harness payload.
 8. No synthetic business dashboard. Do not invent CTR, conversion, uplift, confidence bands, or recommendation metrics the runtime did not calculate.
-9. Preserve product identity. Chinese naming and the “序枢” brand remain first-class; this is not a skin of another product.
+9. Show autonomy boundaries as product information. Permissions, budgets, constraints, evaluation gates, rollback readiness, and persistence guarantees are part of the user experience, not implementation trivia.
+10. Preserve product identity. Chinese naming and the “序枢” brand remain first-class; this is not a skin of another product.
 
 ## Core tokens
 
@@ -84,12 +87,44 @@ A successful screen should allow a technical reviewer to answer “what did it d
 
 ### Strategy experiment
 - Experiment UI appears only when an evolution action actually ran.
-- Always show baseline, candidate, and delta together so improvement cannot be presented without context.
+- Always show current, candidate, and delta together so improvement cannot be presented without context.
 - Search experiments show overall quality and relevance coverage.
 - Recommendation experiments show overall quality, content coverage, freshness, diversity, and cold-start quality.
 - `evaluation_ready`, `safe_to_try`, `trusted`, and `activated` are separate gates and must not be collapsed into a single “AI score”.
 - Show independent validation sample count and robustness degradation statistics when present.
 - Never imply a candidate is active when the runtime reports `activated: false`.
+
+### Mission Graph
+- Mission Graph is a compact evidence map, not a decorative node graph.
+- Requirements display label, current status, priority, and the reason or capability that can satisfy them.
+- Hypotheses display only structured label, status, confidence, and recorded evidence state; do not expose hidden model reasoning.
+- Exit criteria should be visible when present so a reviewer understands why the Harness can stop.
+- Mission state is rendered only after the runtime returns a real mission object.
+
+### Agent Trace
+- The primary trace sequence is `Mission → Decision → Tool → Observation → Reflection → Verify`.
+- Preserve preflight events such as workspace observation, attachment perception, memory recall, constraint locking, and resume.
+- Each execution cycle gets a stable cycle marker such as `C01`.
+- Decision rows may show the structured requirement target, score, learned bonus, hypotheses, and alternate actions already recorded by the runtime.
+- Tool rows show user-facing action name, risk class, cost, target requirement, and a concise observation derived from the actual action result.
+- Reflection rows show changed requirements, changed hypotheses, next evidence gaps, and structured Critic coverage when present.
+- Verify rows surface blocked or unresolved items explicitly.
+- Completed traces default to verification/complete rows expanded; live traces default to the latest event expanded.
+- Trace UI must never manufacture or reveal hidden chain-of-thought. It renders only application-owned structured events and summaries already present in the run payload.
+
+### Control Plane
+- Permission boundaries are visible: strategy change authorization and network authorization are separate states.
+- “Authorized” does not mean “used”; completed UI must distinguish permission from actual strategy activation or network use.
+- Tool count and cost display used value against the real runtime budget when available.
+- Constraints appear as compact chips and should remain secondary to execution evidence.
+- Control Plane must update during a live run from emitted guard/execute/decision events, then reconcile against the completed result.
+
+### Learning Ledger
+- Persistent memory is presented as execution episodes, trusted strategies, and currently active strategies.
+- Show how many strategies were learned in the current run without implying activation.
+- Independent evaluation, automatic rollback, checkpoint resume, and idempotent adaptive actions are displayed as separate safety capabilities.
+- If the runtime reports a rollback, elevate it with an orange recovery notice and state that the stable strategy was restored.
+- Never convert memory counts into invented “learning quality” percentages.
 
 ### Conversation
 - User prompts use a restrained graphite bubble with an indigo left edge.
@@ -108,8 +143,9 @@ A successful screen should allow a technical reviewer to answer “what did it d
 
 ### Evidence inspector
 - Inspector is supporting context, not a second primary canvas.
-- Progress tab contains execution telemetry and trace.
+- Progress tab contains Control Plane, telemetry, Mission Graph, and Agent Trace.
 - Evidence tab contains verification summary and inspectable evidence.
+- Workspace tab contains dataset context, capabilities, and the Learning Ledger.
 - On mobile, evidence becomes a bottom sheet while preserving task context behind it.
 
 ## Shape, depth, motion
@@ -125,9 +161,17 @@ A successful screen should allow a technical reviewer to answer “what did it d
 
 - Maintain visible focus states.
 - Do not encode state with color alone.
-- Preserve semantic buttons, labels, tab roles, and ARIA attributes.
-- Minimum interactive target remains approximately 44px on touch layouts.
+- Preserve semantic buttons, labels, tab roles, native `details/summary`, and ARIA attributes.
+- Minimum interactive target remains approximately 44px on touch layouts where controls are frequently tapped.
 - Ranking and experiment tables must remain readable when signal columns wrap on narrow screens.
+- Trace summaries must remain understandable while collapsed; expanded details are supplementary.
+
+## Product hygiene
+
+- Customer-facing CSS has no remote font import, generic gradient, or glass blur.
+- Customer-facing typography never falls below 10px.
+- Frontend text must not leak third-party model/provider branding or internal ranking implementation terminology.
+- All `frontend/*.js` files are included in product-hygiene scanning and JavaScript syntax checks in CI.
 
 ## Implementation
 
@@ -135,8 +179,12 @@ The visual system is intentionally layered so product logic remains isolated:
 
 - `frontend/theme-graphite.css` — base Graphite Precision skin.
 - `frontend/product-ui.css` — runtime telemetry, ranked-result analysis, experiment gates, and run-result visualization.
-- `frontend/product-ui.js` — reads existing completed-run/conversation payloads and renders runtime intelligence without changing the API contract.
+- `frontend/product-ui.js` — reads existing completed-run/conversation payloads and renders result intelligence without changing the API contract.
+- `frontend/trace-ui.css` — Mission Graph and Agent Trace presentation.
+- `frontend/trace-ui.js` — renders live and completed structured run events and completed mission state.
+- `frontend/control-ui.css` — Control Plane and Learning Ledger presentation.
+- `frontend/control-ui.js` — renders live permissions/budget state plus completed durable-memory and rollback state.
 
-`product-ui.js` creates result-analysis and experiment surfaces only when real payloads contain the corresponding actions. This keeps empty product chrome out of simple tasks and preserves the original application behavior.
+Product modules create their surfaces only when the corresponding real payload exists. This keeps empty product chrome out of simple tasks and preserves the original application behavior.
 
-This separation makes the UI easy to review, remove, or iterate while leaving recommendation/search algorithms and Harness Runtime behavior unchanged.
+This separation makes the UI easy to review, remove, or iterate while leaving recommendation/search algorithms, Agent Harness Runtime, Verifier logic, persistence, and evolution behavior unchanged.
