@@ -22,11 +22,9 @@ const scenePrompt = {
   audit:'做一次全局体检，告诉我搜索和推荐里现在最值得先解决的三个问题。',
 };
 
-function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[c]))}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function bytes(n){const v=Number(n)||0;if(v<1024)return `${v} B`;if(v<1024*1024)return `${(v/1024).toFixed(v<10240?1:0)} KB`;return `${(v/1024/1024).toFixed(1)} MB`}
 function safeExternalUrl(value){try{const u=new URL(String(value));return ['http:','https:'].includes(u.protocol)?u.href:''}catch{return ''}}
-function emitRunContext(result=state.lastResult){window.dispatchEvent(new CustomEvent('xushu:run-context',{detail:{conversation_id:state.conversation?.id||null,scene:state.scene,result:result||null}}))}
-function emitRunStart(conversationId){window.dispatchEvent(new CustomEvent('xushu:run-start',{detail:{conversation_id:conversationId||null,scene:state.scene}}))}
 
 async function api(path,opt={}){
   const {headers={},...rest}=opt;
@@ -95,13 +93,13 @@ function clearComposerContext(){state.attachments=[];state.network=false;renderA
 
 function startDraft(scene=state.scene){
   state.scene=SCENES.has(scene)?scene:'audit';state.conversation=null;clearResult();clearComposerContext();updateSceneNav();
-  renderMessages([]);$('taskTitle').textContent='新的体验任务';$('taskState').textContent='等待输入';$('input').value=scenePrompt[state.scene]||'';autoSize();updateSendState();$('input').focus();emitRunContext(null);
+  renderMessages([]);$('taskTitle').textContent='新的体验任务';$('taskState').textContent='等待输入';$('input').value=scenePrompt[state.scene]||'';autoSize();updateSendState();$('input').focus();
 }
 
 async function openConversation(id){
   const c=await api(`/api/conversations/${id}`);state.conversation=c;state.scene=SCENES.has(c.scene)?c.scene:'audit';state.seenEvents=0;clearComposerContext();updateSceneNav();
   state.lastResult=[...c.messages].reverse().find(x=>x.role==='assistant')?.payload||null;$('taskTitle').textContent=c.title;renderMessages(c.messages);
-  if(state.lastResult)renderResult(state.lastResult);else{clearResult();emitRunContext(null)}
+  if(state.lastResult)renderResult(state.lastResult);else clearResult();
   if(c.active_run?.run_id&&!state.activeRuns.has(c.id)){state.activeRuns.set(c.id,c.active_run.run_id);if(c.active_run.events?.length)renderRunning(c.active_run.events);void pollRun(c.active_run.run_id,c.id)}
   updateSendState();await loadHistory();
 }
@@ -131,7 +129,7 @@ function renderResult(r){
   if(!r)return clearResult();state.lastResult=r;$('running').hidden=true;$('copyBtn').disabled=false;$('stateText').textContent='已完成';$('taskState').textContent='已完成';
   const events=r.events||[];$('timeline').innerHTML=events.length?events.map((ev,i)=>renderEvent({...ev,progress:100},i,events.length)).join(''):'<div class="empty">本次没有执行记录。</div>';
   const evidence=r.evidence||[];$('evidenceList').innerHTML=evidence.length?evidence.map(evidenceHtml).join(''):'<div class="empty">本次没有生成具体结果证据。</div>';
-  $('suggestions').innerHTML=(r.suggestions||[]).map(x=>`<button>${esc(x)}</button>`).join('')||'<button>继续检查一个具体问题</button>';bindSuggestionButtons();emitRunContext(r);
+  $('suggestions').innerHTML=(r.suggestions||[]).map(x=>`<button>${esc(x)}</button>`).join('')||'<button>继续检查一个具体问题</button>';bindSuggestionButtons();
 }
 
 async function pollRun(id,conversationId){
@@ -187,7 +185,7 @@ async function send(){
     const payload={content:text,attachments:state.attachments.map(x=>x.id),allow_network:state.network&&state.networkAvailable};
     const displayPayload={attachments:[...state.attachments],allow_network:payload.allow_network};
     const res=await api(`/api/conversations/${conversationId}/messages`,{method:'POST',body:JSON.stringify(payload)});
-    appendUser(text,displayPayload);state.activeRuns.set(conversationId,res.run_id);emitRunStart(conversationId);$('input').value='';clearComposerContext();autoSize();$('stateText').textContent='正在执行';$('taskState').textContent='正在自主执行';$('timeline').innerHTML='<div class="empty">正在建立本次执行上下文…</div>';$('running').hidden=false;updateSendState();void pollRun(res.run_id,conversationId);await loadHistory();
+    appendUser(text,displayPayload);state.activeRuns.set(conversationId,res.run_id);$('input').value='';clearComposerContext();autoSize();$('stateText').textContent='正在执行';$('taskState').textContent='正在自主执行';$('timeline').innerHTML='<div class="empty">正在建立本次执行上下文…</div>';$('running').hidden=false;updateSendState();void pollRun(res.run_id,conversationId);await loadHistory();
   }catch(e){toast(e.message);updateSendState()}
 }
 
