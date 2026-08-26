@@ -27,13 +27,26 @@
 }
 
 @media (max-width:720px){
-  .run-context-strip{height:34px;flex-basis:34px;padding:0 12px;background:#0f0f11;overscroll-behavior-x:contain}
-  .run-context-item{min-height:34px;padding:0 9px}
-  .run-context-item:first-child{padding-left:0}
-  .run-context-mobile-title{display:flex;max-width:220px}
-  .run-context-mobile-title .run-context-value{max-width:180px;color:#d6d6dc}
-  .run-context-time{display:none}
-  .run-context-target .run-context-value{max-width:150px}
+  .run-context-strip{height:34px;flex-basis:34px;padding:0 12px;background:#0f0f11;overflow:hidden;overscroll-behavior:none}
+  .run-context-item{min-height:34px;padding:0 7px}
+  .run-context-scene{flex:0 0 28px;padding-left:0;padding-right:7px}
+  .run-context-scene .run-context-value{display:none}
+  .run-context-mobile-title{display:flex;flex:1 1 auto;max-width:none;min-width:72px;padding-left:8px;padding-right:9px}
+  .run-context-mobile-title .run-context-key{display:none}
+  .run-context-mobile-title .run-context-value{width:100%;max-width:none;color:#d6d6dc}
+  .run-context-target,.run-context-time{display:none}
+  .run-context-state,.run-context-verification{flex:0 0 auto;gap:5px;padding-left:7px;padding-right:7px}
+  .run-context-state .run-context-value{max-width:58px}
+  .run-context-verification .run-context-value{display:none}
+  .run-context-verification:after{font-size:10px;font-weight:650;color:#8a8a94}
+  .run-context-verification[data-tone="pass"]:after{content:"通过";color:#9fe8c9}
+  .run-context-verification[data-tone="review"]:after{content:"复核";color:#fdba74}
+
+  /* Mobile trace needs a real gutter between the phase token and the action title. */
+  .trace-step summary{grid-template-columns:22px 68px minmax(0,1fr) auto 12px;gap:7px;padding-left:7px;padding-right:8px}
+  .trace-phase{padding-right:7px;border-right:1px solid #29292f;letter-spacing:.01em;white-space:nowrap;overflow:hidden}
+  .trace-summary-copy b{padding-left:1px}
+  .trace-detail{padding-left:96px}
 }
 
 @media (prefers-reduced-motion:reduce){
