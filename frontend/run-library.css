@@ -1,0 +1,26 @@
+/* Run Library — selected context and scene-aware recent task navigation. */
+.history-item{display:grid;grid-template-columns:26px minmax(0,1fr);grid-template-rows:auto auto;column-gap:8px;align-items:center;padding:8px 7px;overflow:hidden}
+.history-item:before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:2px;border-radius:2px;background:transparent}
+.history-scene{grid-column:1;grid-row:1/3;width:24px;height:24px;display:grid;place-items:center;align-self:center;border:1px solid #29292f;border-radius:6px;background:#121214;font-family:var(--mono);font-size:10px;font-weight:650;color:#6f6f78}
+.history-item>b{grid-column:2;grid-row:1;padding-right:46px;min-width:0;color:#bdbdc5}
+.history-item>small{grid-column:2;grid-row:2;margin-top:3px;color:#5f5f68}
+.history-state{position:absolute;right:7px;top:8px;min-height:18px;display:inline-flex;align-items:center;padding:0 5px;border:1px solid #303036;border-radius:999px;background:#151518;font-family:var(--mono);font-size:10px;color:#777781}
+.history-state.live{border-color:rgba(251,146,60,.3);background:rgba(251,146,60,.07);color:#e5a06a}
+.history-item.running:after{right:11px;top:auto;bottom:9px;width:5px;height:5px;background:var(--warm);box-shadow:none}
+.history-item.current{background:#17171b;box-shadow:inset 0 0 0 1px #28282e}
+.history-item.current:before{background:var(--accent)}
+.history-item.current .history-scene{border-color:rgba(94,106,210,.36);background:rgba(94,106,210,.10);color:#b4b9f1}
+.history-item.current>b{color:#f0f0f2}
+.history-item.current>small{color:#73737d}
+.history-item.current:hover{background:#1a1a1e}
+.history-item:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;background:#19191d}
+
+@media (max-width:1000px) and (min-width:721px){
+  .history-item{grid-template-columns:24px minmax(0,1fr);column-gap:7px;padding-left:6px;padding-right:6px}
+  .history-scene{width:22px;height:22px}
+  .history-item>b{padding-right:42px}
+}
+
+@media (max-width:720px){
+  .history-item,.history-scene,.history-state{display:none}
+}
