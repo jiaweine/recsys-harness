@@ -1,0 +1,5 @@
+/* Theme control sizing is isolated from surface colors so both modes share one interaction contract. */
+@media (max-width:720px){
+  .theme-picker{height:44px;padding:0}
+  .theme-picker button{height:44px;min-width:48px;padding:0 8px}
+}
