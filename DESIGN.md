@@ -73,6 +73,18 @@ A successful screen should allow a technical reviewer to answer “what was the 
 - Tablet/mobile layouts replace the persistent desktop strip with a minimum-44px “导航” trigger so navigation does not steal task-reading space.
 - The palette is navigation, not another results surface: it never copies metrics, invents summaries, or exposes hidden reasoning.
 
+### Run Compare
+- Run Compare is an on-demand action inside a completed Run Snapshot; it never appears before the current task has a persisted completed result.
+- Historical data is read lazily from existing conversation persistence. The comparison layer must not rerun the Harness, change memory, or alter the current result surface.
+- Prefer the most recent historical run with the same scene and the same concrete target: Search compares the same query; Recommendation compares the same user.
+- Multiple completed turns inside one conversation are valid historical runs and participate in recency ordering alongside other conversations.
+- Only same-target runs may expose Rank Movement and score delta rows. Different targets may compare run-level facts only.
+- Run-level comparison is limited to fields already produced by the runtime and already meaningful in the product: Verifier confidence, cycles, completed tool calls, evidence count, execution cost, recorded reward, and memory hits.
+- Delta color is neutral/indigo because a change is not automatically an improvement. Green remains reserved for independently verified success states, never for rank movement or a newly appearing item.
+- The UI must explicitly say that higher rank is an observed ordering change, not evidence of business uplift.
+- Historical reads must not pass through the product modules' completed-run `fetch` observers; comparison uses a passive same-origin credentialed read path so old payloads cannot overwrite the active Snapshot, Trace, Control Plane, or Verification UI.
+- On mobile, the compare trigger and close control are minimum-44px touch targets, while the comparison table collapses to preserve the document axis without horizontal page scrolling.
+
 ### Status and telemetry
 - Workspace readiness appears as compact chips.
 - Completed runs expose a small telemetry matrix rather than a dashboard wall.
@@ -203,7 +215,8 @@ UI changes are verified against the **real running product**, not static mockups
 - The no-adaptation QA task must never be presented as if a candidate strategy was activated.
 - Progress/evidence tab counts must match the real trace/evidence rows.
 - Run Navigator QA must verify the completed-run strip appears, unavailable destinations stay disabled, Rank navigation moves the real ranking surface into view, `Ctrl+K` focuses the palette, filtered Evidence execution activates the real Evidence tab, and Escape closes the palette.
-- Mobile QA verifies the compact Run Navigator trigger is visible only after completion and remains a minimum-44px touch target.
+- Run Compare QA must prepare one real persisted historical run, complete a second real same-query run in Chromium, lazily open comparison, verify same-target context plus real Rank Movement rows and exactly seven run-level facts, and assert that the historical read does not mutate the current Snapshot or Verification surface.
+- Mobile QA verifies both the compact Run Navigator trigger and Run Compare action remain minimum-44px touch targets after completion.
 - Desktop QA guards the evidence-rail width and page-level horizontal overflow; mobile QA guards bottom-sheet bounds, visible page margins, dark-surface luminance, page-level horizontal overflow, and 44px touch targets.
 - QA deliberately simulates a transient run-polling failure and verifies the product recovers without leaving stale reconnect state visible after completion.
 - Browser console errors and same-origin HTTP failures fail the visual QA run.
@@ -222,7 +235,9 @@ The visual system is intentionally layered so product logic remains isolated:
 - `frontend/control-ui.js` — renders live permissions/budget state plus completed durable-memory and rollback state.
 - `frontend/run-nav.css` — compact desktop navigator, mobile trigger, and command palette presentation.
 - `frontend/run-nav.js` — completed-run destination discovery, keyboard command routing, inspector navigation, and focus restoration.
-- `scripts/capture_readme_assets.py` — real-browser desktop/mobile product QA and screenshot capture.
+- `frontend/run-compare.css` — persisted-run delta table, same-target rank movement, and responsive compare actions.
+- `frontend/run-compare.js` — lazy same-origin history reads, recency/target matching, factual run deltas, and comparison isolation from the active run rendering path.
+- `scripts/capture_readme_assets.py` — real-browser desktop/mobile product QA and screenshot capture, including persisted same-target Run Compare coverage.
 - `.github/workflows/readme-assets.yml` — PR visual-QA artifact generation plus main-only README screenshot publication.
 
 Product modules create their surfaces only when the corresponding real payload exists. This keeps empty product chrome out of simple tasks and preserves the original application behavior.
