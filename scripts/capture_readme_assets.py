@@ -155,8 +155,10 @@ def main() -> None:
         if desktop_overflow > 1:
             raise RuntimeError(f"Desktop product introduced horizontal page overflow: {desktop_overflow}px")
 
-        page.wait_for_timeout(250)
-        page.locator("#scrollArea").evaluate("el => { el.scrollTop = 0; }")
+        # The lead desktop capture should showcase the product-specific ranked result
+        # and experiment surfaces, not only the written conclusion above them.
+        page.locator("#strategyExperiment").evaluate("el => el.scrollIntoView({block:'end'})")
+        page.wait_for_timeout(220)
         page.screenshot(path=str(ASSET_DIR / "overview.png"))
 
         page.locator(".tab[data-tab='evidence']").click()
@@ -199,6 +201,11 @@ def main() -> None:
             raise RuntimeError(f"Mobile inspector escaped the Graphite dark surface hierarchy: luma={inspector_luma:.1f}")
 
         page.locator(".tab[data-tab='progress']").click()
+        page.wait_for_timeout(120)
+        first_execute = page.locator("#agentTrace .trace-step.execute").first
+        if first_execute.count() != 1:
+            raise RuntimeError("Mobile progress capture could not find a real Tool event")
+        first_execute.evaluate("el => el.scrollIntoView({block:'center'})")
         page.wait_for_timeout(150)
         page.screenshot(path=str(ASSET_DIR / "mobile-progress.png"), full_page=False)
 
