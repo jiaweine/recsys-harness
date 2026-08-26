@@ -23,6 +23,11 @@ def post_json(path: str, payload: dict) -> dict:
 
 
 def main() -> None:
+    unsafe_title = '<img src=x onerror="window.__xushuInjected=1"> 安全标题'
+    unsafe = post_json(
+        "/api/conversations",
+        {"scene": "audit", "title": unsafe_title},
+    )
     recommend = post_json(
         "/api/conversations",
         {"scene": "recommend", "title": "推荐首屏历史复核"},
@@ -65,6 +70,23 @@ def main() -> None:
             raise RuntimeError("Command palette did not identify itself as the workspace switcher")
         if "最近任务" not in page.locator("#commandList").inner_text():
             raise RuntimeError("Workspace Switcher did not expose the recent-task group")
+
+        page.locator("#commandInput").fill("安全标题")
+        page.wait_for_function(
+            "document.querySelectorAll('#commandList .history-command').length === 1",
+            timeout=5_000,
+        )
+        unsafe_command = page.locator(
+            f'#commandList .history-command[data-history-id="{unsafe["id"]}"]'
+        )
+        if unsafe_command.count() != 1:
+            raise RuntimeError("Escaped history title could not be found in Workspace Switcher")
+        if unsafe_command.locator("img").count():
+            raise RuntimeError("User-provided history title created an unexpected DOM element")
+        if "<img" not in unsafe_command.inner_text():
+            raise RuntimeError("User-provided markup was not preserved as inert text")
+        if page.evaluate("Boolean(window.__xushuInjected)"):
+            raise RuntimeError("User-provided history title executed script in Workspace Switcher")
 
         page.locator("#commandInput").fill("推荐首屏历史复核")
         page.wait_for_function(
