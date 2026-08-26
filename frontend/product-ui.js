@@ -169,7 +169,8 @@
   function signalHtml(domain, signals = {}) {
     return (signalLabels[domain] || []).map(([key, label]) => {
       const value = clamp01(signals[key]);
-      return `<span class="result-signal"><i>${esc(label)}</i><b>${percent(value)}</b><em><u style="width:${Math.round(value * 100)}%"></u></em></span>`;
+      const level = Math.round(value * 10);
+      return `<span class="result-signal" data-level="${level}"><i>${esc(label)}</i><b>${percent(value)}</b><em><u></u></em></span>`;
     }).join('');
   }
 
