@@ -310,8 +310,6 @@
     });
     if (!ready) setActive('');
     else if (!document.querySelector('#runJump [data-command].active')) setActive('summary');
-    const palette = $('commandPalette');
-    if (palette && !palette.hidden) renderCommands();
   }
 
   function scheduleSync() {
@@ -387,7 +385,16 @@
   });
 
   const observer = new MutationObserver(scheduleSync);
-  observer.observe(document.body, {subtree:true, childList:true, attributes:true, attributeFilter:['hidden','aria-current','class']});
+  observer.observe(document.body, {subtree:true, childList:true, attributes:true, attributeFilter:['hidden']});
+  const history = $('historyList');
+  if (history) {
+    const historyObserver = new MutationObserver(() => {
+      scheduleSync();
+      const palette = $('commandPalette');
+      if (palette && !palette.hidden) renderCommands();
+    });
+    historyObserver.observe(history, {subtree:true, childList:true, attributes:true, attributeFilter:['aria-current','class','data-scene']});
+  }
   ensureUi();
   syncUi();
 })();
