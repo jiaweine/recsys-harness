@@ -11,6 +11,7 @@ on:
       - "scripts/check_run_library.py"
       - "scripts/check_workspace_switcher.py"
       - "scripts/check_run_context.py"
+      - "scripts/check_theme_modes.py"
       - "docs/readme-assets/architecture.svg"
       - ".github/workflows/readme-assets.yml"
   push:
@@ -22,6 +23,7 @@ on:
       - "scripts/check_run_library.py"
       - "scripts/check_workspace_switcher.py"
       - "scripts/check_run_context.py"
+      - "scripts/check_theme_modes.py"
       - "docs/readme-assets/architecture.svg"
       - ".github/workflows/readme-assets.yml"
 
@@ -73,6 +75,9 @@ jobs:
       - name: Verify Run Context Strip
         run: python scripts/check_run_context.py
 
+      - name: Verify regular and dark theme modes
+        run: python scripts/check_theme_modes.py
+
       - name: Upload visual QA bundle
         uses: actions/upload-artifact@v4
         with:
@@ -90,7 +95,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email "4189828+github-actions[bot]@users.noreply.github.com"
 
           git add \
             docs/readme-assets/workbench.png \
