@@ -113,6 +113,8 @@ jobs:
               nav_js = client.get('/assets/run-nav.js')
               compare_css = client.get('/assets/run-compare.css')
               compare_js = client.get('/assets/run-compare.js')
+              library_css = client.get('/assets/run-library.css')
+              library_js = client.get('/assets/run-library.js')
               status = client.get('/api/status')
               capabilities = client.get('/api/capabilities')
           assert page.status_code == 200
@@ -121,6 +123,7 @@ jobs:
           assert '/assets/control-ui.css' in page.text and '/assets/control-ui.js' in page.text
           assert '/assets/run-nav.css' in page.text and '/assets/run-nav.js' in page.text
           assert '/assets/run-compare.css' in page.text and '/assets/run-compare.js' in page.text
+          assert '/assets/run-library.css' in page.text and '/assets/run-library.js' in page.text
           assert layout.status_code == 200 and 'Focused Workspace' in layout.text
           assert trace_css.status_code == 200 and 'Mission + Agent Trace Inspector' in trace_css.text
           assert trace_js.status_code == 200 and 'AGENT TRACE' in trace_js.text
@@ -130,6 +133,8 @@ jobs:
           assert nav_js.status_code == 200 and '运行导航' in nav_js.text and 'commandPalette' in nav_js.text
           assert compare_css.status_code == 200 and 'Run Compare' in compare_css.text
           assert compare_js.status_code == 200 and 'RUN COMPARE' in compare_js.text and 'XMLHttpRequest' in compare_js.text
+          assert library_css.status_code == 200 and 'Run Library' in library_css.text
+          assert library_js.status_code == 200 and 'history-state' in library_js.text and 'aria-current' in library_js.text
           assert status.status_code == 200 and status.json()['runtime']['evidence_utility_controller'] is True
           assert capabilities.status_code == 200 and capabilities.json()['multimodal']['attachments'] is True
           PY
