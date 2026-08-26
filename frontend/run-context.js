@@ -42,6 +42,14 @@
     return [...new Set(values)].slice(0, 2);
   }
 
+  function contextState() {
+    const interaction = $('taskState')?.textContent.trim() || '等待输入';
+    const execution = $('stateText')?.textContent.trim() || '';
+    if (/连接中断|正在重连|停止中/.test(interaction)) return interaction;
+    if (execution && execution !== '等待开始') return execution;
+    return interaction;
+  }
+
   function stateTone(value) {
     const text = String(value || '');
     if (/正在|重连|停止中/.test(text)) return 'live';
@@ -98,7 +106,7 @@
     const scene = currentScene(history);
     const meta = sceneMeta[scene];
     const taskTitle = $('taskTitle')?.textContent.trim() || '新的体验任务';
-    const taskState = $('taskState')?.textContent.trim() || '等待输入';
+    const taskState = contextState();
     const when = history?.querySelector('small')?.textContent.trim() || '';
     const targets = resultTargets();
     const verification = verificationState();
