@@ -83,10 +83,7 @@
   function assistantResults(conversation) {
     return (conversation?.messages || [])
       .filter(message => message.role === 'assistant' && validResult(message.payload))
-      .map(message => ({
-        result:message.payload,
-        created_at:numberOrNull(message.created_at) || 0,
-      }));
+      .map(message => ({result:message.payload, created_at:numberOrNull(message.created_at) || 0}));
   }
 
   function runReward(result) {
@@ -152,7 +149,7 @@
           const conversation = await xhrJson(`/api/conversations/${encodeURIComponent(row.id)}`);
           candidates.push(...collectCandidates(conversation, row));
         } catch {
-          // A deleted or temporarily unreadable history row should not block comparison.
+          // Missing history is not allowed to disturb the current run.
         }
       }
     }
@@ -267,13 +264,13 @@
     return node;
   }
 
-  function setTriggerState({busy = false, expanded = false, label = null} = {}) {
+  function setTriggerState({busy = false, expanded = false} = {}) {
     const button = document.querySelector('.compare-trigger');
     if (!button) return;
     button.disabled = busy;
     button.setAttribute('aria-busy', String(busy));
     button.setAttribute('aria-expanded', String(expanded));
-    if (label) button.textContent = label;
+    button.textContent = '与上次对照';
   }
 
   function completedResultVisible() {
@@ -319,7 +316,7 @@
       node.innerHTML = '';
     }
     if (removeTrigger) document.querySelector('.compare-trigger')?.remove();
-    setTriggerState({expanded:false, label:'与上次对照'});
+    setTriggerState({expanded:false});
   }
 
   function invalidate({resetConversation = false} = {}) {
@@ -340,7 +337,7 @@
     if (!node) return;
     node.innerHTML = `<div class="run-compare-shell"><div class="compare-empty"><span>RUN COMPARE</span><b>${esc(message)}</b><p>${esc(detail)}</p></div></div>`;
     node.hidden = false;
-    setTriggerState({expanded:true, label:'重新查找'});
+    setTriggerState({expanded:true});
     node.focus({preventScroll:true});
     node.scrollIntoView({behavior:'smooth', block:'center'});
   }
@@ -382,11 +379,11 @@
     </div>`;
     node.querySelector('.compare-close').onclick = () => {
       node.hidden = true;
-      setTriggerState({expanded:false, label:'与上次对照'});
+      setTriggerState({expanded:false});
       document.querySelector('.compare-trigger')?.focus();
     };
     node.hidden = false;
-    setTriggerState({expanded:true, label:'已对照'});
+    setTriggerState({expanded:true});
     node.focus({preventScroll:true});
     node.scrollIntoView({behavior:'smooth', block:'center'});
   }
@@ -395,7 +392,7 @@
     const conversationId = resolveCurrentConversationId();
     if (!conversationId || !completedResultVisible()) return;
     const requestGeneration = generation;
-    setTriggerState({busy:true, expanded:false, label:'查找上次…'});
+    setTriggerState({busy:true, expanded:false});
     try {
       const conversation = await xhrJson(`/api/conversations/${encodeURIComponent(conversationId)}`);
       const results = assistantResults(conversation);
