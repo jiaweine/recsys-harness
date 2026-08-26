@@ -64,6 +64,15 @@ A successful screen should allow a technical reviewer to answer “what was the 
 - Hover must not move layout horizontally.
 - “新任务” is a compact bordered control rather than a large marketing CTA.
 
+### Run Navigator
+- A completed run exposes a compact result navigator; incomplete or empty tasks do not carry persistent run chrome.
+- Desktop navigation stays in the task header and jumps to Overview, Ranked Result, Strategy Experiment, Agent Trace, and Evidence without duplicating any runtime data.
+- Destinations that do not exist in the real completed payload remain unavailable rather than opening empty placeholders.
+- `Cmd/Ctrl + K` opens a Raycast-inspired command palette for Overview, Ranking, Experiment, Trace, Evidence, Workspace, input focus, and new-task actions.
+- Command filtering is keyboard-operable with Up/Down, Enter, and Escape. Closing the palette restores focus to the invoking control when possible.
+- Tablet/mobile layouts replace the persistent desktop strip with a minimum-44px “导航” trigger so navigation does not steal task-reading space.
+- The palette is navigation, not another results surface: it never copies metrics, invents summaries, or exposes hidden reasoning.
+
 ### Status and telemetry
 - Workspace readiness appears as compact chips.
 - Completed runs expose a small telemetry matrix rather than a dashboard wall.
@@ -174,6 +183,7 @@ A successful screen should allow a technical reviewer to answer “what was the 
 - Ranking and experiment tables must remain readable when signal columns wrap on narrow screens.
 - Trace summaries must remain understandable while collapsed; expanded details are supplementary.
 - Desktop and mobile product layouts must not introduce page-level horizontal scrolling.
+- Command navigation must be fully usable without a pointer, and modal close should restore focus instead of dropping keyboard users at the document root.
 
 ## Product hygiene
 
@@ -192,6 +202,8 @@ UI changes are verified against the **real running product**, not static mockups
 - Search QA verifies real ranking rows and the `match`, `quality`, `freshness`, and `popularity` signal columns; strategy QA verifies independent gates plus current/candidate metric comparison.
 - The no-adaptation QA task must never be presented as if a candidate strategy was activated.
 - Progress/evidence tab counts must match the real trace/evidence rows.
+- Run Navigator QA must verify the completed-run strip appears, unavailable destinations stay disabled, Rank navigation moves the real ranking surface into view, `Ctrl+K` focuses the palette, filtered Evidence execution activates the real Evidence tab, and Escape closes the palette.
+- Mobile QA verifies the compact Run Navigator trigger is visible only after completion and remains a minimum-44px touch target.
 - Desktop QA guards the evidence-rail width and page-level horizontal overflow; mobile QA guards bottom-sheet bounds, visible page margins, dark-surface luminance, page-level horizontal overflow, and 44px touch targets.
 - QA deliberately simulates a transient run-polling failure and verifies the product recovers without leaving stale reconnect state visible after completion.
 - Browser console errors and same-origin HTTP failures fail the visual QA run.
@@ -208,6 +220,8 @@ The visual system is intentionally layered so product logic remains isolated:
 - `frontend/trace-ui.js` — renders live and completed structured run events and completed mission state.
 - `frontend/control-ui.css` — Control Plane and Learning Ledger presentation.
 - `frontend/control-ui.js` — renders live permissions/budget state plus completed durable-memory and rollback state.
+- `frontend/run-nav.css` — compact desktop navigator, mobile trigger, and command palette presentation.
+- `frontend/run-nav.js` — completed-run destination discovery, keyboard command routing, inspector navigation, and focus restoration.
 - `scripts/capture_readme_assets.py` — real-browser desktop/mobile product QA and screenshot capture.
 - `.github/workflows/readme-assets.yml` — PR visual-QA artifact generation plus main-only README screenshot publication.
 
