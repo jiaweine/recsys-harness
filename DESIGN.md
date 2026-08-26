@@ -68,6 +68,8 @@ A successful screen should allow a technical reviewer to answer “what was the 
 - Workspace readiness appears as compact chips.
 - Completed runs expose a small telemetry matrix rather than a dashboard wall.
 - Verification has explicit PASS / CHECK language in addition to color.
+- Inspector tabs may expose compact counts, but those counts must come from the active runtime payload: progress reflects structured run events and evidence reflects inspectable evidence rows.
+- Runtime counts disappear when the task is cleared; never leave stale badges from a prior task.
 - Metrics must come from existing runtime output; never fabricate demo numbers.
 
 ### Main workspace
@@ -99,6 +101,7 @@ A successful screen should allow a technical reviewer to answer “what was the 
 - Requirements display label, current status, priority, and the reason or capability that can satisfy them.
 - Hypotheses display only structured label, status, confidence, and recorded evidence state; do not expose hidden model reasoning.
 - Exit criteria should be visible when present so a reviewer understands why the Harness can stop.
+- Long mission objectives are clamped in the inspector so requirements remain visible without turning the rail into a second document column.
 - Mission state is rendered only after the runtime returns a real mission object.
 
 ### Agent Trace
@@ -110,14 +113,17 @@ A successful screen should allow a technical reviewer to answer “what was the 
 - Reflection rows show changed requirements, changed hypotheses, next evidence gaps, and structured Critic coverage when present.
 - Verify rows surface blocked or unresolved items explicitly.
 - Completed traces default to verification/complete rows expanded; live traces default to the latest event expanded.
+- Internal requirement/hypothesis keys must be translated through the Mission Graph labels before being shown in a completed customer-facing trace.
 - Trace UI must never manufacture or reveal hidden chain-of-thought. It renders only application-owned structured events and summaries already present in the run payload.
 
 ### Control Plane
 - Permission boundaries are visible: strategy change authorization and network authorization are separate states.
+- Live permissions are tri-state: authorized, locked, or pending until a runtime boundary event confirms them.
 - “Authorized” does not mean “used”; completed UI must distinguish permission from actual strategy activation or network use.
 - Tool count and cost display used value against the real runtime budget when available.
 - Constraints appear as compact chips and should remain secondary to execution evidence.
 - Control Plane must update during a live run from emitted guard/execute/decision events, then reconcile against the completed result.
+- A recovered run must immediately clear stale reconnect messaging once a successful run payload arrives.
 
 ### Learning Ledger
 - Persistent memory is presented as execution episodes, trusted strategies, and currently active strategies.
@@ -143,10 +149,12 @@ A successful screen should allow a technical reviewer to answer “what was the 
 
 ### Evidence inspector
 - Inspector is supporting context, not a second primary canvas.
+- Desktop evidence rail should be wide enough for Mission/Trace scanning while preserving the main document axis; the current large-screen target is approximately 336px.
 - Progress tab contains Control Plane, telemetry, Mission Graph, and Agent Trace.
 - Evidence tab contains verification summary and inspectable evidence.
 - Workspace tab contains dataset context, capabilities, and the Learning Ledger.
 - On mobile, evidence becomes a bottom sheet while preserving task context behind it.
+- The mobile sheet stays inside the Graphite near-black surface ladder; do not reintroduce a light panel body inside the dark product.
 
 ## Shape, depth, motion
 
@@ -173,6 +181,18 @@ A successful screen should allow a technical reviewer to answer “what was the 
 - Frontend text must not leak third-party model/provider branding or internal ranking implementation terminology.
 - All `frontend/*.js` files are included in product-hygiene scanning and JavaScript syntax checks in CI.
 
+## Visual QA contract
+
+UI changes are verified against the **real running product**, not static mockups.
+
+- Pull requests that change product UI run FastAPI plus headless Chromium and upload a `visual-qa` artifact; PR runs never publish or rewrite README screenshots.
+- README screenshots are published only from `main`, after real capture and immutable CDN verification.
+- Browser QA must complete a real task and verify Run Snapshot, telemetry, Verification, Mission Graph, Agent Trace, Control Plane, and Learning Ledger from the completed payload.
+- Progress/evidence tab counts must match the real trace/evidence rows.
+- Desktop QA guards the evidence-rail width; mobile QA guards bottom-sheet bounds, visible page margins, dark-surface luminance, and 44px touch targets.
+- QA deliberately simulates a transient run-polling failure and verifies the product recovers without leaving stale reconnect state visible after completion.
+- Browser console errors and same-origin HTTP failures fail the visual QA run.
+
 ## Implementation
 
 The visual system is intentionally layered so product logic remains isolated:
@@ -184,6 +204,8 @@ The visual system is intentionally layered so product logic remains isolated:
 - `frontend/trace-ui.js` — renders live and completed structured run events and completed mission state.
 - `frontend/control-ui.css` — Control Plane and Learning Ledger presentation.
 - `frontend/control-ui.js` — renders live permissions/budget state plus completed durable-memory and rollback state.
+- `scripts/capture_readme_assets.py` — real-browser desktop/mobile product QA and screenshot capture.
+- `.github/workflows/readme-assets.yml` — PR visual-QA artifact generation plus main-only README screenshot publication.
 
 Product modules create their surfaces only when the corresponding real payload exists. This keeps empty product chrome out of simple tasks and preserves the original application behavior.
 
