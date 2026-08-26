@@ -109,17 +109,22 @@ jobs:
               trace_js = client.get('/assets/trace-ui.js')
               control_css = client.get('/assets/control-ui.css')
               control_js = client.get('/assets/control-ui.js')
+              nav_css = client.get('/assets/run-nav.css')
+              nav_js = client.get('/assets/run-nav.js')
               status = client.get('/api/status')
               capabilities = client.get('/api/capabilities')
           assert page.status_code == 200
           assert '序枢' in page.text and '灵境' not in page.text
           assert '/assets/trace-ui.css' in page.text and '/assets/trace-ui.js' in page.text
           assert '/assets/control-ui.css' in page.text and '/assets/control-ui.js' in page.text
+          assert '/assets/run-nav.css' in page.text and '/assets/run-nav.js' in page.text
           assert layout.status_code == 200 and 'Focused Workspace' in layout.text
           assert trace_css.status_code == 200 and 'Mission + Agent Trace Inspector' in trace_css.text
           assert trace_js.status_code == 200 and 'AGENT TRACE' in trace_js.text
           assert control_css.status_code == 200 and 'Control Plane + Learning Ledger' in control_css.text
           assert control_js.status_code == 200 and 'CONTROL PLANE' in control_js.text and 'LEARNING LEDGER' in control_js.text
+          assert nav_css.status_code == 200 and 'Run Navigator' in nav_css.text
+          assert nav_js.status_code == 200 and '运行导航' in nav_js.text and 'commandPalette' in nav_js.text
           assert status.status_code == 200 and status.json()['runtime']['evidence_utility_controller'] is True
           assert capabilities.status_code == 200 and capabilities.json()['multimodal']['attachments'] is True
           PY
