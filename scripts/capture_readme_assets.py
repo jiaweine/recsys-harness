@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import time
 from urllib.request import Request, urlopen
 
 from playwright.sync_api import sync_playwright
@@ -11,6 +12,7 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parents[1]
 ASSET_DIR = ROOT / "docs" / "readme-assets"
 BASE_URL = os.environ.get("RECSYS_CAPTURE_URL", "http://127.0.0.1:8765").rstrip("/")
+BASELINE_PROMPT = "最近搜索“露营灯”的结果不太准，帮我复现问题、定位原因，并探索一个可验证的改进方向，但先不要改变当前策略。"
 PROMPT = "最近搜索“露营灯”的结果不太准，结合附件帮我复现、诊断并探索一个可验证的改进方向，但先不要改变当前策略。"
 SCREENSHOTS = (
     "workbench.png",
@@ -21,6 +23,12 @@ SCREENSHOTS = (
     "mobile-evidence.png",
 )
 MOBILE_VIEWPORT = {"width": 393, "height": 852}
+
+
+def get_json(path: str) -> dict | list:
+    request = Request(f"{BASE_URL}{path}", method="GET")
+    with urlopen(request, timeout=10) as response:
+        return json.loads(response.read().decode("utf-8"))
 
 
 def post_json(path: str, payload: dict) -> dict:
@@ -35,12 +43,37 @@ def post_json(path: str, payload: dict) -> dict:
         return json.loads(response.read().decode("utf-8"))
 
 
+def wait_run(run_id: str, timeout: float = 35.0) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        row = get_json(f"/api/runs/{run_id}")
+        status = str(row.get("status") or "")
+        if status == "completed":
+            if not row.get("result"):
+                raise RuntimeError("Persisted baseline run completed without a result payload")
+            return row
+        if status in {"failed", "cancelled"}:
+            raise RuntimeError(f"Persisted baseline run ended unexpectedly: {status}")
+        time.sleep(0.2)
+    raise RuntimeError("Timed out preparing a persisted baseline run")
+
+
 def horizontal_overflow(page) -> float:
     return float(page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth"))
 
 
 def main() -> None:
     ASSET_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Build one real completed history run before opening the browser. Then create
+    # a newer empty conversation so the browser still starts on the clean workbench.
+    # Run Compare must later discover the completed history through persisted APIs.
+    baseline = post_json("/api/conversations", {"scene": "search", "title": "露营灯搜索历史基准"})
+    baseline_job = post_json(
+        f"/api/conversations/{baseline['id']}/messages",
+        {"content": BASELINE_PROMPT, "attachments": [], "allow_network": False},
+    )
+    wait_run(str(baseline_job["run_id"]))
     post_json("/api/conversations", {"scene": "search", "title": "露营灯搜索体验复核"})
 
     with sync_playwright() as p:
@@ -58,6 +91,9 @@ def main() -> None:
         )
         page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30_000)
         page.wait_for_function("document.getElementById('dataMeta').textContent.includes('内容')", timeout=15_000)
+
+        if page.locator(".compare-trigger").count():
+            raise RuntimeError("Run Compare appeared before the current conversation had a completed run")
 
         page.locator("#fileInput").set_input_files({
             "name": "search-context.json",
@@ -144,6 +180,31 @@ def main() -> None:
         if evidence_items and (evidence_badge.count() != 1 or evidence_badge.inner_text() != str(evidence_items)):
             raise RuntimeError("Evidence tab count is not synchronized with inspectable evidence")
 
+        # Run Compare is lazy: no history payloads are read until the user asks.
+        # Exercise a real persisted same-query history run and ensure the XHR path
+        # never contaminates the current product surfaces handled by fetch observers.
+        page.wait_for_selector(".compare-trigger", timeout=5_000)
+        snapshot_before_compare = page.locator("#resultSnapshot").inner_text()
+        verification_before_compare = page.locator("#verificationSummary").inner_text()
+        page.locator(".compare-trigger").click()
+        page.wait_for_selector("#runCompare:not([hidden])", timeout=8_000)
+        compare_text = page.locator("#runCompare").inner_text()
+        for label in ("RUN COMPARE", "同对象", "相同 Query", "露营灯", "RANK MOVEMENT"):
+            if label not in compare_text:
+                raise RuntimeError(f"Persisted same-query Run Compare lost required context: {label}")
+        compare_rank_rows = page.locator("#runCompare .compare-rank-row").count()
+        if compare_rank_rows < 3:
+            raise RuntimeError(f"Run Compare rendered too few real ranking rows: {compare_rank_rows}")
+        if page.locator("#runCompare .compare-metric").count() != 7:
+            raise RuntimeError("Run Compare did not render the factual run-level metric contract")
+        if page.locator("#resultSnapshot").inner_text() != snapshot_before_compare:
+            raise RuntimeError("History XHR contaminated the current Run Snapshot")
+        if page.locator("#verificationSummary").inner_text() != verification_before_compare:
+            raise RuntimeError("History XHR contaminated the current Verification surface")
+        page.locator("#runCompare .compare-close").click()
+        if not page.locator("#runCompare").evaluate("el => el.hidden"):
+            raise RuntimeError("Run Compare did not close cleanly")
+
         # Completed runs get a compact keyboard-first navigator. Exercise real
         # interaction rather than only checking that the injected DOM exists.
         page.wait_for_selector("#runJump:not([hidden])", timeout=5_000)
@@ -222,6 +283,10 @@ def main() -> None:
         mobile_nav_box = mobile_nav.bounding_box()
         if not mobile_nav_box or mobile_nav_box["height"] < 44 or mobile_nav_box["width"] < 44:
             raise RuntimeError(f"Mobile Run Navigator touch target is too small: {mobile_nav_box}")
+        compare_trigger = page.locator(".compare-trigger")
+        compare_box = compare_trigger.bounding_box()
+        if not compare_trigger.is_visible() or not compare_box or compare_box["height"] < 44 or compare_box["width"] < 44:
+            raise RuntimeError(f"Mobile Run Compare touch target is too small: {compare_box}")
         mobile_nav.click()
         page.wait_for_selector("#commandPalette:not([hidden])", timeout=3_000)
         page.keyboard.press("Escape")
@@ -262,7 +327,7 @@ def main() -> None:
         page.wait_for_timeout(150)
         page.screenshot(path=str(ASSET_DIR / "mobile-evidence.png"), full_page=False)
 
-        for selector in ("#sendBtn", "#attachBtn", "#networkBtn", "#newTaskBtn", "#runCommandMobile", "#inspectorToggle", "#inspectorClose"):
+        for selector in ("#sendBtn", "#attachBtn", "#networkBtn", "#newTaskBtn", "#runCommandMobile", ".compare-trigger", "#inspectorToggle", "#inspectorClose"):
             locator = page.locator(selector)
             if not locator.is_visible():
                 continue
