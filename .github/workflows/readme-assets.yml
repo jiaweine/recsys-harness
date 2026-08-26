@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
+      - "DESIGN.md"
       - "frontend/**"
       - "lingjing_harness/**"
       - "scripts/capture_readme_assets.py"
@@ -17,6 +18,7 @@ on:
   push:
     branches: [main]
     paths:
+      - "DESIGN.md"
       - "frontend/**"
       - "lingjing_harness/**"
       - "scripts/capture_readme_assets.py"
