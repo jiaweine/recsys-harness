@@ -111,6 +111,10 @@ def main() -> None:
         if "search_diagnosis" in page.locator("#agentTrace").inner_text():
             raise RuntimeError("Completed Trace leaked an internal requirement key")
 
+        desktop_inspector = page.locator("#inspector").bounding_box()
+        if not desktop_inspector or desktop_inspector["width"] < 330:
+            raise RuntimeError(f"Desktop evidence rail is too narrow for mission/trace content: {desktop_inspector}")
+
         page.wait_for_timeout(250)
         page.locator("#scrollArea").evaluate("el => { el.scrollTop = 0; }")
         page.screenshot(path=str(ASSET_DIR / "overview.png"))
@@ -142,6 +146,14 @@ def main() -> None:
             raise RuntimeError(f"Mobile evidence sheet must preserve task context above it: {sheet_box}")
         if sheet_box["x"] < 6 or sheet_box["x"] + sheet_box["width"] > MOBILE_VIEWPORT["width"] - 6:
             raise RuntimeError(f"Mobile evidence sheet must keep visible page margins: {sheet_box}")
+
+        inspector_luma = page.locator("#inspector .inspector-body").evaluate("""el => {
+          const values = (getComputedStyle(el).backgroundColor.match(/\d+/g) || []).slice(0, 3).map(Number);
+          const [r = 255, g = 255, b = 255] = values;
+          return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        }""")
+        if inspector_luma > 70:
+            raise RuntimeError(f"Mobile inspector escaped the Graphite dark surface hierarchy: luma={inspector_luma:.1f}")
 
         page.locator(".tab[data-tab='progress']").click()
         page.wait_for_timeout(150)
