@@ -66,7 +66,9 @@
     }
 
     const hint = navigator.platform?.toLowerCase().includes('mac') ? '⌘K' : 'Ctrl K';
-    document.querySelectorAll('#runJump kbd').forEach(node => { node.textContent = hint; });
+    document.querySelectorAll('#runJump kbd').forEach(node => {
+      if (node.textContent !== hint) node.textContent = hint;
+    });
   }
 
   function inspectorOnScreen() {
@@ -224,7 +226,6 @@
       if (button.disabled !== disabled) button.disabled = disabled;
     });
     if (!ready) setActive('');
-    if (!$('commandPalette')?.hidden) renderCommands();
   }
 
   function scheduleSync() {
