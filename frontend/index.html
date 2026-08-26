@@ -3,11 +3,15 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta name="theme-color" content="#f2f3f1" />
-  <meta name="color-scheme" content="light" />
+  <meta name="theme-color" content="#09090b" />
+  <meta name="color-scheme" content="dark" />
   <title>序枢 · 搜推智能工作台</title>
   <link rel="stylesheet" href="/assets/app.css" />
   <link rel="stylesheet" href="/assets/layout.css" />
+  <link rel="stylesheet" href="/assets/theme-graphite.css" />
+  <link rel="stylesheet" href="/assets/product-ui.css" />
+  <link rel="stylesheet" href="/assets/trace-ui.css" />
+  <link rel="stylesheet" href="/assets/control-ui.css" />
 </head>
 <body>
 <div class="auth-gate" id="authGate" hidden>
@@ -87,6 +91,7 @@
       </section>
 
       <div class="messages" id="messageList" aria-live="polite"></div>
+      <section class="result-snapshot" id="resultSnapshot" hidden aria-live="polite"></section>
 
       <section class="running" id="running" hidden aria-live="polite">
         <div class="run-meta"><span>正在执行</span><b id="runPercent">0%</b></div>
@@ -126,11 +131,13 @@
     <div class="inspector-body">
       <section class="panel active" id="panel-progress">
         <div class="state-row"><span>任务状态</span><b id="stateText">等待开始</b></div>
+        <div class="run-telemetry" id="runTelemetry" hidden></div>
         <div class="timeline" id="timeline"><div class="empty">开始一个任务后，这里会记录系统实际做过的每一步。</div></div>
         <div class="next-block"><span>继续追问</span><div id="suggestions"><button>先做一次全局体检</button><button>检查一个具体搜索</button></div></div>
       </section>
       <section class="panel" id="panel-evidence">
         <div class="section-intro"><span>判断依据</span><h3>只保留能复核的证据</h3><p>结果位置、执行检查和公开来源集中在这里；外部资料会单独标明。</p></div>
+        <div class="verification-summary" id="verificationSummary" hidden></div>
         <div class="evidence-list" id="evidenceList"><div class="empty">还没有执行结果。</div></div>
       </section>
       <section class="panel" id="panel-data">
@@ -150,6 +157,9 @@
 <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif,.json,.csv,.txt,.md,text/markdown,text/plain,text/csv,application/json" multiple hidden />
 <input id="dataFileInput" type="file" accept="application/json,.json" hidden />
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="/assets/product-ui.js"></script>
+<script src="/assets/trace-ui.js"></script>
+<script src="/assets/control-ui.js"></script>
 <script type="module" src="/assets/app.js"></script>
 </body>
 </html>

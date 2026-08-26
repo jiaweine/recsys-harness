@@ -1,8 +1,15 @@
 # Visual QA screenshots are captured from the real running product after motion settles.
-name: Refresh README product assets
+name: Visual QA / README product assets
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - "frontend/**"
+      - "lingjing_harness/**"
+      - "scripts/capture_readme_assets.py"
+      - "docs/readme-assets/architecture.svg"
+      - ".github/workflows/readme-assets.yml"
   push:
     branches: [main]
     paths:
@@ -65,6 +72,7 @@ jobs:
           retention-days: 5
 
       - name: Publish screenshots and advance README when CDN is ready
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
