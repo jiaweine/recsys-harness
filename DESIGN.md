@@ -173,6 +173,7 @@ A successful screen should allow a technical reviewer to answer “what was the 
 - Minimum interactive target remains approximately 44px on touch layouts where controls are frequently tapped.
 - Ranking and experiment tables must remain readable when signal columns wrap on narrow screens.
 - Trace summaries must remain understandable while collapsed; expanded details are supplementary.
+- Desktop and mobile product layouts must not introduce page-level horizontal scrolling.
 
 ## Product hygiene
 
@@ -187,11 +188,14 @@ UI changes are verified against the **real running product**, not static mockups
 
 - Pull requests that change product UI run FastAPI plus headless Chromium and upload a `visual-qa` artifact; PR runs never publish or rewrite README screenshots.
 - README screenshots are published only from `main`, after real capture and immutable CDN verification.
-- Browser QA must complete a real task and verify Run Snapshot, telemetry, Verification, Mission Graph, Agent Trace, Control Plane, and Learning Ledger from the completed payload.
+- Browser QA must complete a real task and verify Run Snapshot, Ranked Result Analysis, Strategy Experiment, telemetry, Verification, Mission Graph, Agent Trace, Control Plane, and Learning Ledger from the completed payload.
+- Search QA verifies real ranking rows and the `match`, `quality`, `freshness`, and `popularity` signal columns; strategy QA verifies independent gates plus current/candidate metric comparison.
+- The no-adaptation QA task must never be presented as if a candidate strategy was activated.
 - Progress/evidence tab counts must match the real trace/evidence rows.
-- Desktop QA guards the evidence-rail width; mobile QA guards bottom-sheet bounds, visible page margins, dark-surface luminance, and 44px touch targets.
+- Desktop QA guards the evidence-rail width and page-level horizontal overflow; mobile QA guards bottom-sheet bounds, visible page margins, dark-surface luminance, page-level horizontal overflow, and 44px touch targets.
 - QA deliberately simulates a transient run-polling failure and verifies the product recovers without leaving stale reconnect state visible after completion.
 - Browser console errors and same-origin HTTP failures fail the visual QA run.
+- The lead desktop capture is framed around ranked-result/experiment evidence, while the mobile progress capture is framed around real Agent Trace events so product documentation reflects the current console rather than legacy mockup composition.
 
 ## Implementation
 
