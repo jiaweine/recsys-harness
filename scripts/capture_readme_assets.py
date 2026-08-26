@@ -120,6 +120,10 @@ def main() -> None:
         if evidence_items and (evidence_badge.count() != 1 or evidence_badge.inner_text() != str(evidence_items)):
             raise RuntimeError("Evidence tab count is not synchronized with inspectable evidence")
 
+        stale_reconnect = page.locator("#toast").evaluate("el => el.classList.contains('show') && el.textContent.includes('连接暂时中断')")
+        if stale_reconnect:
+            raise RuntimeError("Recovered run left a stale reconnect notice visible after completion")
+
         desktop_inspector = page.locator("#inspector").bounding_box()
         if not desktop_inspector or desktop_inspector["width"] < 330:
             raise RuntimeError(f"Desktop evidence rail is too narrow for mission/trace content: {desktop_inspector}")
