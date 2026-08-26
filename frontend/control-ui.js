@@ -36,6 +36,13 @@
     return Math.max(0, Math.min(10, Math.round((num(value) / denominator) * 10)));
   }
 
+  function clearRecoveredToast() {
+    const node = $('toast');
+    if (node?.classList.contains('show') && node.textContent.includes('连接暂时中断')) {
+      node.classList.remove('show');
+    }
+  }
+
   function setTabCount(name, value) {
     const tab = document.querySelector(`.tab[data-tab="${name}"]`);
     if (!tab) return;
@@ -220,6 +227,7 @@
     ensureMounts();
     const node = $('runControlPlane');
     if (!node || !Array.isArray(events) || !events.length) return;
+    clearRecoveredToast();
     node.innerHTML = liveControlHtml(events, status);
     node.hidden = false;
     syncTabCounts(null, events);
@@ -232,6 +240,7 @@
   function renderCompleted(result) {
     if (!result || typeof result !== 'object') return;
     lastResult = result;
+    clearRecoveredToast();
     ensureMounts();
     const control = $('runControlPlane');
     const ledger = $('learningLedger');
