@@ -158,13 +158,29 @@
     if (label) label.textContent = '动作已发起';
   }
 
+  function normalizeMissionLabels() {
+    const labels = {
+      dismissed: '已排除',
+      resolved: '已解决',
+      supported: '被支持',
+      open: '观察中',
+    };
+    document.querySelectorAll('#missionSummary .hypothesis-row small').forEach(node => {
+      const key = node.textContent.trim();
+      if (labels[key]) node.textContent = labels[key];
+    });
+  }
+
   function renderLive(events, status) {
     ensureMounts();
     const node = $('runControlPlane');
     if (!node || !Array.isArray(events) || !events.length) return;
     node.innerHTML = liveControlHtml(events, status);
     node.hidden = false;
-    requestAnimationFrame(() => syncLiveTraceSummary(events));
+    requestAnimationFrame(() => {
+      syncLiveTraceSummary(events);
+      normalizeMissionLabels();
+    });
   }
 
   function renderCompleted(result) {
@@ -181,6 +197,7 @@
       ledger.innerHTML = learningHtml(result);
       ledger.hidden = false;
     }
+    requestAnimationFrame(normalizeMissionLabels);
   }
 
   function clear() {
@@ -227,6 +244,7 @@
   ensureMounts();
   const observer = new MutationObserver(() => {
     ensureMounts();
+    normalizeMissionLabels();
     if (lastResult && ($('runControlPlane')?.hidden || $('learningLedger')?.hidden)) renderCompleted(lastResult);
   });
   observer.observe(document.body, {subtree:true, childList:true});
