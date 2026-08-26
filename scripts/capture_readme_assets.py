@@ -35,6 +35,10 @@ def post_json(path: str, payload: dict) -> dict:
         return json.loads(response.read().decode("utf-8"))
 
 
+def horizontal_overflow(page) -> float:
+    return float(page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth"))
+
+
 def main() -> None:
     ASSET_DIR.mkdir(parents=True, exist_ok=True)
     post_json("/api/conversations", {"scene": "search", "title": "露营灯搜索体验复核"})
@@ -147,6 +151,9 @@ def main() -> None:
         desktop_inspector = page.locator("#inspector").bounding_box()
         if not desktop_inspector or desktop_inspector["width"] < 330:
             raise RuntimeError(f"Desktop evidence rail is too narrow for mission/trace content: {desktop_inspector}")
+        desktop_overflow = horizontal_overflow(page)
+        if desktop_overflow > 1:
+            raise RuntimeError(f"Desktop product introduced horizontal page overflow: {desktop_overflow}px")
 
         page.wait_for_timeout(250)
         page.locator("#scrollArea").evaluate("el => { el.scrollTop = 0; }")
@@ -164,6 +171,9 @@ def main() -> None:
         if page.locator("#inspector").evaluate("el => el.classList.contains('open')"):
             page.locator("#inspectorClose").click()
             page.wait_for_timeout(120)
+        mobile_overflow = horizontal_overflow(page)
+        if mobile_overflow > 1:
+            raise RuntimeError(f"Mobile product introduced horizontal page overflow: {mobile_overflow}px")
         page.locator("#scrollArea").evaluate("el => { el.scrollTop = 0; }")
         page.screenshot(path=str(ASSET_DIR / "mobile-workspace.png"), full_page=False)
 
