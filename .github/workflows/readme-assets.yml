@@ -8,6 +8,7 @@ on:
       - "frontend/**"
       - "lingjing_harness/**"
       - "scripts/capture_readme_assets.py"
+      - "scripts/check_run_library.py"
       - "docs/readme-assets/architecture.svg"
       - ".github/workflows/readme-assets.yml"
   push:
@@ -16,6 +17,7 @@ on:
       - "frontend/**"
       - "lingjing_harness/**"
       - "scripts/capture_readme_assets.py"
+      - "scripts/check_run_library.py"
       - "docs/readme-assets/architecture.svg"
       - ".github/workflows/readme-assets.yml"
 
@@ -57,6 +59,9 @@ jobs:
 
       - name: Capture real product screenshots
         run: python scripts/capture_readme_assets.py
+
+      - name: Verify Run Library states
+        run: python scripts/check_run_library.py
 
       - name: Upload visual QA bundle
         uses: actions/upload-artifact@v4
