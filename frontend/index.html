@@ -1,11 +1,12 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta name="theme-color" content="#09090b" />
-  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#f6f7f9" />
+  <meta name="color-scheme" content="light dark" />
   <title>序枢 · 搜推智能工作台</title>
+  <script src="/assets/theme.js"></script>
   <link rel="stylesheet" href="/assets/app.css" />
   <link rel="stylesheet" href="/assets/layout.css" />
   <link rel="stylesheet" href="/assets/theme-graphite.css" />
@@ -16,6 +17,7 @@
   <link rel="stylesheet" href="/assets/run-compare.css" />
   <link rel="stylesheet" href="/assets/run-library.css" />
   <link rel="stylesheet" href="/assets/run-context.css" />
+  <link rel="stylesheet" href="/assets/theme-modes.css" />
 </head>
 <body>
 <div class="auth-gate" id="authGate" hidden>
@@ -42,6 +44,10 @@
       <span class="status-chip quiet" id="networkStatus">联网研究 · 检查中</span>
     </div>
     <div class="top-actions">
+      <div class="theme-picker" role="group" aria-label="界面主题">
+        <button type="button" data-theme-choice="light" aria-pressed="true">常规</button>
+        <button type="button" data-theme-choice="dark" aria-pressed="false">暗色</button>
+      </div>
       <button class="top-link" id="importBtn">导入工作区</button>
       <button class="trace-toggle" id="inspectorToggle" aria-expanded="false" aria-controls="inspector">查看证据</button>
       <button class="avatar" id="lockBtn" type="button" aria-label="锁定工作区" hidden>XH</button>
