@@ -83,6 +83,34 @@ def main() -> None:
         page.locator("#input").fill(PROMPT)
         page.locator("#sendBtn").click()
         page.wait_for_function("document.getElementById('stateText').textContent === '已完成'", timeout=30_000)
+
+        # The completed engineering console must be backed by the actual run payload,
+        # not merely by decorative empty containers. Waiting on [hidden] also covers
+        # the async response-clone rendering used by the additive UI modules.
+        for selector in (
+            "#resultSnapshot:not([hidden])",
+            "#runTelemetry:not([hidden])",
+            "#verificationSummary:not([hidden])",
+            "#missionSummary:not([hidden])",
+            "#agentTrace:not([hidden])",
+            "#runControlPlane:not([hidden])",
+            "#learningLedger:not([hidden])",
+        ):
+            page.wait_for_selector(selector, state="attached", timeout=8_000)
+            if page.locator(selector).evaluate("el => el.hidden"):
+                raise RuntimeError(f"Completed engineering surface stayed hidden: {selector}")
+
+        if page.locator("#agentTrace .trace-step").count() < 6:
+            raise RuntimeError("Agent Trace did not render enough structured run events")
+        if page.locator("#missionSummary .mission-requirement").count() < 1:
+            raise RuntimeError("Mission Graph did not render evidence requirements")
+        if "CONTROL PLANE" not in page.locator("#runControlPlane").inner_text():
+            raise RuntimeError("Control Plane did not reconcile completed run boundaries")
+        if "LEARNING LEDGER" not in page.locator("#learningLedger").inner_text():
+            raise RuntimeError("Learning Ledger did not render durable state")
+        if "search_diagnosis" in page.locator("#agentTrace").inner_text():
+            raise RuntimeError("Completed Trace leaked an internal requirement key")
+
         page.wait_for_timeout(250)
         page.locator("#scrollArea").evaluate("el => { el.scrollTop = 0; }")
         page.screenshot(path=str(ASSET_DIR / "overview.png"))
