@@ -80,10 +80,7 @@
   async function hydrate() {
     hydrateQueued = false;
     const buttons = [...history.querySelectorAll('.history-item[data-id]')];
-    if (!buttons.length) {
-      if (firstPaint) firstPaint = false;
-      return;
-    }
+    if (!buttons.length) return;
     if ((firstPaint || selectFirstOnNextRender) && !currentId) currentId = buttons[0].dataset.id || null;
     firstPaint = false;
     selectFirstOnNextRender = false;
