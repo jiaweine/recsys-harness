@@ -37,18 +37,22 @@
   }
 
   function permissionCell(label, allowed, detail) {
-    return `<div class="control-cell ${allowed ? 'allowed' : 'locked'}">
+    const known = typeof allowed === 'boolean';
+    const tone = !known ? 'pending' : allowed ? 'allowed' : 'locked';
+    const state = !known ? '待确认' : allowed ? '已授权' : '锁定';
+    return `<div class="control-cell ${tone}">
       <span>${esc(label)}</span>
-      <b><i></i>${allowed ? '已授权' : '锁定'}</b>
+      <b><i></i>${state}</b>
       <small>${esc(detail)}</small>
     </div>`;
   }
 
-  function budgetCell(label, used, max, unit = '') {
+  function budgetCell(label, used, max) {
     const hasMax = Number.isFinite(Number(max)) && Number(max) > 0;
     const current = num(used);
     const maxValue = hasMax ? num(max) : null;
-    const value = hasMax ? `${current.toFixed(unit ? 1 : 0)} / ${maxValue}${unit}` : `${current.toFixed(unit ? 1 : 0)}${unit}`;
+    const decimals = label.includes('成本') ? 1 : 0;
+    const value = hasMax ? `${current.toFixed(decimals)} / ${maxValue}` : current.toFixed(decimals);
     return `<div class="control-cell budget">
       <span>${esc(label)}</span>
       <b>${esc(value)}</b>
@@ -58,12 +62,13 @@
 
   function liveControlHtml(events, status) {
     const rows = Array.isArray(events) ? events : [];
-    const guard = [...rows].reverse().find(event => event.phase === 'guard')?.payload || {};
+    const guard = [...rows].reverse().find(event => event.phase === 'guard')?.payload || null;
     const executes = rows.filter(event => event.phase === 'execute');
     const decisions = rows.filter(event => event.phase === 'decide');
     const cost = executes.reduce((sum, event) => sum + num(event.payload?.cost), 0);
     const cycles = Math.max(0, ...decisions.map(event => num(event.payload?.cycle)));
-    const hasGuard = Object.keys(guard).length > 0;
+    const adaptationPermission = guard ? !!guard.allow_adaptation : null;
+    const networkPermission = guard ? !!guard.allow_network : null;
 
     return `
       <div class="control-head">
@@ -71,10 +76,10 @@
         <strong class="control-run-state"><i></i>${status === 'cancel_requested' ? '停止中' : 'RUNNING'}</strong>
       </div>
       <div class="control-grid">
-        ${permissionCell('策略变化', hasGuard && !!guard.allow_adaptation, hasGuard ? '仅在本任务授权范围内' : '默认不改变当前策略')}
-        ${permissionCell('联网研究', hasGuard && !!guard.allow_network, hasGuard ? '仅使用公开来源' : '默认关闭')}
-        ${budgetCell('已用成本', cost, null, '')}
-        ${budgetCell('执行轮次', cycles, null, '')}
+        ${permissionCell('策略变化', adaptationPermission, guard ? '仅在本任务授权范围内' : '等待运行边界事件确认')}
+        ${permissionCell('联网研究', networkPermission, guard ? '仅使用公开来源' : '等待运行边界事件确认')}
+        ${budgetCell('已用成本', cost, null)}
+        ${budgetCell('执行轮次', cycles, null)}
       </div>`;
   }
 
@@ -95,8 +100,8 @@
       <div class="control-grid">
         ${permissionCell('策略变化', !!plan.allow_adaptation, activated ? '本轮已发生经验证的策略变化' : plan.allow_adaptation ? '已授权，但未自动改变当前策略' : '本轮禁止改变当前策略')}
         ${permissionCell('联网研究', !!plan.allow_network, networkUsed ? '本轮实际使用了公开资料' : plan.allow_network ? '已授权，但本轮未使用' : '本轮未授权联网')}
-        ${budgetCell('执行成本', autonomy.spent_cost, budget.max_cost, '')}
-        ${budgetCell('工具预算', autonomy.cycles, budget.max_tools, '')}
+        ${budgetCell('执行成本', autonomy.spent_cost, budget.max_cost)}
+        ${budgetCell('工具预算', autonomy.cycles, budget.max_tools)}
       </div>
       <div class="control-foot">
         <span>时间上限 <b>${num(budget.max_seconds)}s</b></span>
