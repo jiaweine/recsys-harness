@@ -127,7 +127,7 @@
       run: () => openInspector('progress', 'agentTrace'),
     },
     {
-      id: 'evidence', label: '判断依据', detail: 'Verification · Evidence · 可复核来源', key: '5',
+      id: 'evidence', label: '判断依据', detail: 'Verification · Evidence · 可复核证据与来源', key: '5',
       available: () => resultReady(), run: () => openInspector('evidence', 'verificationSummary'),
     },
     {
@@ -156,7 +156,7 @@
 
   function execute(command) {
     if (!command?.available()) return;
-    closePalette();
+    closePalette(false);
     setActive(command.id);
     command.run();
   }
@@ -202,13 +202,15 @@
     requestAnimationFrame(() => input?.focus());
   }
 
-  function closePalette() {
+  function closePalette(restoreFocus = true) {
     const palette = $('commandPalette');
     if (!palette || palette.hidden) return;
     palette.hidden = true;
     const target = returnFocus;
     returnFocus = null;
-    if (target instanceof HTMLElement && document.contains(target)) requestAnimationFrame(() => target.focus());
+    if (restoreFocus && target instanceof HTMLElement && document.contains(target)) {
+      requestAnimationFrame(() => target.focus());
+    }
   }
 
   function syncUi() {
@@ -226,6 +228,7 @@
       if (button.disabled !== disabled) button.disabled = disabled;
     });
     if (!ready) setActive('');
+    else if (!document.querySelector('#runJump [data-command].active')) setActive('summary');
   }
 
   function scheduleSync() {
@@ -268,7 +271,9 @@
   document.addEventListener('keydown', event => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
       event.preventDefault();
-      openPalette(document.activeElement);
+      const palette = $('commandPalette');
+      if (palette && !palette.hidden) closePalette();
+      else openPalette(document.activeElement);
       return;
     }
     const palette = $('commandPalette');
