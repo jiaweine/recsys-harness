@@ -10,6 +10,7 @@ on:
       - "scripts/capture_readme_assets.py"
       - "scripts/check_run_library.py"
       - "scripts/check_workspace_switcher.py"
+      - "scripts/check_run_context.py"
       - "docs/readme-assets/architecture.svg"
       - ".github/workflows/readme-assets.yml"
   push:
@@ -20,6 +21,7 @@ on:
       - "scripts/capture_readme_assets.py"
       - "scripts/check_run_library.py"
       - "scripts/check_workspace_switcher.py"
+      - "scripts/check_run_context.py"
       - "docs/readme-assets/architecture.svg"
       - ".github/workflows/readme-assets.yml"
 
@@ -67,6 +69,9 @@ jobs:
 
       - name: Verify Workspace Switcher
         run: python scripts/check_workspace_switcher.py
+
+      - name: Verify Run Context Strip
+        run: python scripts/check_run_context.py
 
       - name: Upload visual QA bundle
         uses: actions/upload-artifact@v4
