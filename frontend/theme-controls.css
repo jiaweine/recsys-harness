@@ -1,5 +1,84 @@
-/* Theme control sizing is isolated from surface colors so both modes share one interaction contract. */
+/* Final-loaded interaction and regular-theme contrast refinements. */
+.theme-picker{
+  height:34px;
+  gap:0;
+  padding:3px;
+  border-color:var(--line-strong);
+  background:var(--surface-3);
+  box-shadow:inset 0 0 0 1px rgba(24,24,27,.015);
+}
+.theme-picker::before{
+  content:"主题";
+  padding:0 8px 0 5px;
+  font-family:var(--ui);
+  font-size:10px;
+  font-weight:650;
+  color:var(--muted);
+  white-space:nowrap;
+}
+.theme-picker button{
+  height:26px;
+  min-width:44px;
+  padding:0 10px;
+  font-size:11px;
+}
+
+html[data-theme="light"] .theme-picker{
+  background:#f1f2f4;
+  border-color:#d8d9de;
+}
+html[data-theme="light"] .theme-picker::before{color:#7b7b85}
+html[data-theme="light"] .theme-picker button{color:#65656f}
+html[data-theme="light"] .theme-picker button:hover{background:#e7e8eb;color:#27272a}
+html[data-theme="light"] .theme-picker button.active{
+  background:#ffffff;
+  color:var(--accent-strong);
+  box-shadow:0 1px 2px rgba(24,24,27,.08),inset 0 0 0 1px #cfd1d7;
+}
+
+/* The regular workspace should read as white working canvas with clearly separated supporting rails. */
+html[data-theme="light"] .sidebar{border-right-color:#d9dbe0}
+html[data-theme="light"] .nav-label,
+html[data-theme="light"] .history-head{color:#7b7b85}
+html[data-theme="light"] .scene{color:#4f4f59}
+html[data-theme="light"] .scene small{color:#7f7f89}
+html[data-theme="light"] .scene.active{
+  box-shadow:inset 0 0 0 1px #cfd2d8,0 1px 3px rgba(24,24,27,.06);
+}
+html[data-theme="light"] .history-item b{color:#45454f}
+
+html[data-theme="light"] .inspector{border-left-color:#d9dbe0}
+html[data-theme="light"] .inspector-head,
+html[data-theme="light"] .tabs{background:#f7f7f8;border-bottom-color:#dfe1e5}
+html[data-theme="light"] .inspector-body,
+html[data-theme="light"] .panel{background:#fbfbfc}
+html[data-theme="light"] .tab{color:#65656f}
+html[data-theme="light"] .tab.active{color:var(--accent-strong)}
+html[data-theme="light"] .state-row{border-bottom-color:#d5d7dc;color:#2f2f36}
+html[data-theme="light"] .section-intro p,
+html[data-theme="light"] .timeline-row small,
+html[data-theme="light"] .evidence-item small{color:#74747e}
+
+/* Product evidence surfaces get slightly stronger hairlines so dense tables do not wash out. */
+html[data-theme="light"] .snapshot-head,
+html[data-theme="light"] .analysis-head,
+html[data-theme="light"] .experiment-head{background:#f7f7f8;border-color:#dcdee3}
+html[data-theme="light"] .snapshot-body,
+html[data-theme="light"] .run-telemetry,
+html[data-theme="light"] .verification-summary,
+html[data-theme="light"] .result-analysis-block,
+html[data-theme="light"] .experiment-block{
+  border-color:#dcdfe5;
+  box-shadow:0 1px 2px rgba(24,24,27,.025);
+}
+html[data-theme="light"] .snapshot-result,
+html[data-theme="light"] .snapshot-findings p,
+html[data-theme="light"] .verification-checks>div,
+html[data-theme="light"] .rank-row,
+html[data-theme="light"] .metric-compare>div{border-color:#e4e6ea}
+
 @media (max-width:720px){
   .theme-picker{height:46px;padding:0}
-  .theme-picker button{height:46px;min-width:48px;padding:0 8px}
+  .theme-picker::before{display:none}
+  .theme-picker button{height:46px;min-width:48px;padding:0 8px;font-size:10px}
 }
