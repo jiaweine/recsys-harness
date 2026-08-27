@@ -1,4 +1,4 @@
-"""Capture representative dark-theme product states for visual QA only."""
+"""Capture representative dark-theme product states and verify visible Charcoal depth."""
 from __future__ import annotations
 
 import os
@@ -15,7 +15,7 @@ DARK_ASSETS = ("qa-desktop-dark.png", "qa-mobile-dark-evidence.png")
 
 
 def luma(page, selector: str) -> float:
-    return float(page.locator(selector).evaluate("""el => {
+    return float(page.locator(selector).first.evaluate("""el => {
       const values = (getComputedStyle(el).backgroundColor.match(/\d+/g) || []).slice(0, 3).map(Number);
       const [r = 0, g = 0, b = 0] = values;
       return 0.2126 * r + 0.7152 * g + 0.0722 * b;
@@ -51,13 +51,27 @@ def main() -> None:
         page.locator('[data-theme-choice="dark"]').click()
         page.wait_for_function("document.documentElement.dataset.theme === 'dark'", timeout=3_000)
 
-        # Dark must remain layered Graphite rather than one undifferentiated black slab.
-        desktop_luma = {
-            selector: luma(page, selector)
-            for selector in ("body", ".topbar", ".sidebar", ".main", ".inspector")
+        # The dark theme must read as a real surface ladder, not several nearly-black aliases.
+        levels = {
+            "chrome": luma(page, ".sidebar"),
+            "workspace": luma(page, ".main"),
+            "panel": luma(page, "#resultAnalysis .result-analysis-block"),
+            "panel_head": luma(page, "#resultAnalysis .analysis-head"),
+            "composer": luma(page, ".composer"),
+            "inspector": luma(page, ".inspector"),
         }
-        if max(desktop_luma.values()) - min(desktop_luma.values()) < 4:
-            raise RuntimeError(f"Dark desktop surfaces collapsed into one tonal slab: {desktop_luma}")
+        if not levels["chrome"] < levels["workspace"] < levels["panel"] < levels["panel_head"]:
+            raise RuntimeError(f"Charcoal desktop surface ladder collapsed: {levels}")
+        if levels["workspace"] - levels["chrome"] < 4:
+            raise RuntimeError(f"Workspace is still visually fused with dark chrome: {levels}")
+        if levels["panel"] - levels["workspace"] < 6:
+            raise RuntimeError(f"Result panel does not lift enough from workspace: {levels}")
+        if levels["panel_head"] - levels["panel"] < 5:
+            raise RuntimeError(f"Panel header does not lift enough from panel body: {levels}")
+        if levels["composer"] - levels["workspace"] < 10:
+            raise RuntimeError(f"Composer is not sufficiently separated from workspace: {levels}")
+        if abs(levels["inspector"] - levels["chrome"]) > 1.5:
+            raise RuntimeError(f"Inspector no longer reads as application chrome: {levels}")
 
         # Desktop owns a persistent right rail, so its mobile-only inspector toggle is hidden.
         evidence_tab = page.locator('.tab[data-tab="evidence"]')
@@ -87,7 +101,14 @@ def main() -> None:
         overflow = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
         if overflow > 1:
             raise RuntimeError(f"Dark mobile theme introduced horizontal overflow: {overflow}px")
-        if luma(page, "#inspector .inspector-body") > 70:
+        mobile_main = luma(page, ".main")
+        mobile_sheet = luma(page, "#inspector .inspector-body")
+        mobile_tabs = luma(page, "#inspector .tabs")
+        if not mobile_main < mobile_sheet < mobile_tabs:
+            raise RuntimeError(
+                f"Dark mobile Bottom Sheet lost visible depth: main={mobile_main}, sheet={mobile_sheet}, tabs={mobile_tabs}"
+            )
+        if mobile_tabs > 70:
             raise RuntimeError("Dark mobile Evidence sheet escaped the Graphite surface range")
 
         page.screenshot(path=str(ASSET_DIR / "qa-mobile-dark-evidence.png"), full_page=False)

@@ -1,0 +1,204 @@
+/* Graphite Charcoal — dark-only depth layer. Regular light remains the default product theme. */
+html[data-theme="dark"]{
+  --canvas:#0b0d11;
+  --surface:#1b2028;
+  --surface-2:#202630;
+  --surface-3:#262e39;
+  --ink:#f5f7fa;
+  --ink-soft:#d8dde5;
+  --muted:#a8b0bb;
+  --muted-2:#7f8996;
+  --line:#303844;
+  --line-strong:#414b59;
+  --shadow:0 18px 48px rgba(0,0,0,.24);
+}
+
+html[data-theme="dark"],
+html[data-theme="dark"] body,
+html[data-theme="dark"] .shell{background:#0b0d11;color:var(--ink)}
+html[data-theme="dark"] .topbar{background:#0f1217;border-bottom-color:#2b333e}
+html[data-theme="dark"] .sidebar,
+html[data-theme="dark"] .inspector,
+html[data-theme="dark"] .inspector-head{background:#101319}
+html[data-theme="dark"] .sidebar{border-right-color:#2b333e}
+html[data-theme="dark"] .inspector{border-left-color:#2b333e}
+html[data-theme="dark"] .main,
+html[data-theme="dark"] .main-head,
+html[data-theme="dark"] .composer-wrap{background:#151820}
+html[data-theme="dark"] .main-head{border-bottom-color:#303844}
+html[data-theme="dark"] .scroll{background:#151820}
+
+/* Chrome and navigation. */
+html[data-theme="dark"] .status-chip,
+html[data-theme="dark"] .new-task{background:#1a1f27;border-color:#343d49}
+html[data-theme="dark"] .status-chip.quiet{background:transparent}
+html[data-theme="dark"] .new-task:hover{background:#202630;border-color:#414b59}
+html[data-theme="dark"] .scene:hover,
+html[data-theme="dark"] .history-item:hover{background:#181d24}
+html[data-theme="dark"] .scene.active{background:#202630;box-shadow:inset 0 0 0 1px #3a4451;color:#fff}
+html[data-theme="dark"] .history-item[aria-current="page"]{background:#1a1f27}
+html[data-theme="dark"] .history-head,
+html[data-theme="dark"] .history-item,
+html[data-theme="dark"] .sidebar-foot{border-color:#2a313b}
+html[data-theme="dark"] .avatar{background:#1b2028;border-color:#3a4451}
+html[data-theme="dark"] .theme-picker{background:#181d24;border-color:#343d49}
+html[data-theme="dark"] .theme-picker button:hover{background:#202630}
+html[data-theme="dark"] .theme-picker button.active{background:#262e39;box-shadow:inset 0 0 0 1px #414b59;color:#e5e7ff}
+
+/* Welcome / conversation / composer. */
+html[data-theme="dark"] .hero-signal,
+html[data-theme="dark"] .prompt-board{background:#181d24;border-color:#323a45}
+html[data-theme="dark"] .hero-signal>div,
+html[data-theme="dark"] .prompt-board,
+html[data-theme="dark"] .board-head,
+html[data-theme="dark"] .prompt-board button{border-color:#303844}
+html[data-theme="dark"] .board-head{background:#1b2028}
+html[data-theme="dark"] .prompt-board button{background:#181d24}
+html[data-theme="dark"] .prompt-board button:hover{background:#202630}
+html[data-theme="dark"] .msg.user .bubble{background:#1c222b;border-color:#3a4350;border-left-color:var(--accent)}
+html[data-theme="dark"] .context-chip,
+html[data-theme="dark"] .message-attachment{background:#1a1f27;border-color:#343d49}
+html[data-theme="dark"] .running{background:rgba(94,106,210,.10);border-color:rgba(139,147,232,.32)}
+html[data-theme="dark"] .run-stop{background:#1d232b;border-color:#3a4450}
+html[data-theme="dark"] .run-line{background:#303844}
+html[data-theme="dark"] .composer{background:#202630;border-color:#424c59;box-shadow:0 18px 48px rgba(0,0,0,.22),inset 0 1px 0 rgba(255,255,255,.035)}
+html[data-theme="dark"] .composer:focus-within{border-color:#6974c9;box-shadow:0 0 0 3px rgba(94,106,210,.12),0 20px 50px rgba(0,0,0,.24)}
+html[data-theme="dark"] .composer-foot,
+html[data-theme="dark"] .attachment-tray{border-color:#343d49}
+html[data-theme="dark"] .tool-btn:hover{background:#272e38;border-color:#414b58}
+
+/* Inspector chrome and base content. */
+html[data-theme="dark"] .inspector-body,
+html[data-theme="dark"] .panel{background:#12161c}
+html[data-theme="dark"] .inspector-head,
+html[data-theme="dark"] .tabs{border-bottom-color:#303844}
+html[data-theme="dark"] .tabs{background:#12161c}
+html[data-theme="dark"] .tab.active{color:#e0e3ff;border-color:var(--accent)}
+html[data-theme="dark"] .state-row{background:#181d24;border-color:#343d49}
+html[data-theme="dark"] .timeline:before{background:#303844}
+html[data-theme="dark"] .timeline-row>span{background:#1b2028;border-color:#3a4451}
+html[data-theme="dark"] .timeline-row.done>span{background:rgba(94,106,210,.18);border-color:rgba(139,147,232,.46)}
+html[data-theme="dark"] .evidence-item,
+html[data-theme="dark"] .capability-lines>div{border-color:#303844}
+html[data-theme="dark"] .data-grid,
+html[data-theme="dark"] .data-cell{background:#1b2028;border-color:#343d49}
+html[data-theme="dark"] .import-line{background:#1b2028;border-color:#3a4451}
+html[data-theme="dark"] .import-line:hover{background:#202630;border-color:#4b5665}
+
+/* Product intelligence: panel bodies lift above workspace, headers lift once more. */
+html[data-theme="dark"] .snapshot-head,
+html[data-theme="dark"] .analysis-head,
+html[data-theme="dark"] .experiment-head{background:#202630;border-color:#343d49}
+html[data-theme="dark"] .snapshot-body,
+html[data-theme="dark"] .result-analysis-block,
+html[data-theme="dark"] .experiment-block,
+html[data-theme="dark"] .run-telemetry,
+html[data-theme="dark"] .verification-summary{background:#1b2028;border-color:#343d49}
+html[data-theme="dark"] .snapshot-findings,
+html[data-theme="dark"] .diagnosis-strip,
+html[data-theme="dark"] .experiment-gates,
+html[data-theme="dark"] .experiment-foot,
+html[data-theme="dark"] .verification-foot{background:#181d24;border-color:#303844}
+html[data-theme="dark"] .analysis-head>b,
+html[data-theme="dark"] .snapshot-state,
+html[data-theme="dark"] .verification-badge,
+html[data-theme="dark"] .experiment-status,
+html[data-theme="dark"] .experiment-gate{background:#202630;border-color:#3a4451}
+html[data-theme="dark"] .rank-row,
+html[data-theme="dark"] .snapshot-result,
+html[data-theme="dark"] .snapshot-findings p,
+html[data-theme="dark"] .verification-checks>div,
+html[data-theme="dark"] .metric-compare>div{border-color:#2a313b}
+html[data-theme="dark"] .rank-row:hover{background:#1e242d}
+html[data-theme="dark"] .metric-compare-head{background:#202630;border-color:#343d49}
+html[data-theme="dark"] .result-signal em{background:#343d49}
+
+/* Mission / trace / control / durable learning surfaces. */
+html[data-theme="dark"] .run-control-plane,
+html[data-theme="dark"] .learning-ledger,
+html[data-theme="dark"] .mission-summary,
+html[data-theme="dark"] .agent-trace{background:#1b2028;border-color:#343d49}
+html[data-theme="dark"] .control-head,
+html[data-theme="dark"] .learning-head,
+html[data-theme="dark"] .mission-head,
+html[data-theme="dark"] .trace-head{background:#202630;border-color:#343d49}
+html[data-theme="dark"] .telemetry-grid,
+html[data-theme="dark"] .control-grid,
+html[data-theme="dark"] .learning-stats,
+html[data-theme="dark"] .trace-overview,
+html[data-theme="dark"] .trace-facts{background:#343d49;border-color:#343d49}
+html[data-theme="dark"] .telemetry-card,
+html[data-theme="dark"] .control-cell,
+html[data-theme="dark"] .learning-stats>span,
+html[data-theme="dark"] .trace-overview>span,
+html[data-theme="dark"] .trace-facts>span{background:#202630}
+html[data-theme="dark"] .control-foot,
+html[data-theme="dark"] .learning-foot,
+html[data-theme="dark"] .mission-exit,
+html[data-theme="dark"] .trace-observation,
+html[data-theme="dark"] .trace-gap,
+html[data-theme="dark"] .trace-alternatives{background:#181d24;border-color:#303844}
+html[data-theme="dark"] .control-constraints{background:#191e25;border-color:#303844}
+html[data-theme="dark"] .mission-requirement,
+html[data-theme="dark"] .hypothesis-row,
+html[data-theme="dark"] .trace-step{border-color:#2a313b}
+html[data-theme="dark"] .trace-step{background:#1b2028}
+html[data-theme="dark"] .trace-step summary:hover,
+html[data-theme="dark"] .trace-step[open] summary{background:#202630}
+html[data-theme="dark"] .trace-node i{background:#1b2028}
+html[data-theme="dark"] .trace-cycle,
+html[data-theme="dark"] .trace-head-actions button,
+html[data-theme="dark"] .tab-count,
+html[data-theme="dark"] .trace-chips span{background:#202630;border-color:#3a4451}
+
+/* Navigation / compare / context surfaces added after the original Graphite skin. */
+html[data-theme="dark"] .run-context-strip,
+html[data-theme="dark"] .run-jump,
+html[data-theme="dark"] .command-palette,
+html[data-theme="dark"] .run-compare,
+html[data-theme="dark"] .run-library{border-color:#303844}
+html[data-theme="dark"] .run-context-strip,
+html[data-theme="dark"] .run-jump,
+html[data-theme="dark"] .command-palette,
+html[data-theme="dark"] .run-compare{background:#181d24}
+
+html[data-theme="dark"] .auth-gate{background:#0b0d11}
+html[data-theme="dark"] .auth-panel,
+html[data-theme="dark"] .auth-panel input{background:#1b2028;border-color:#3a4451}
+
+@media (max-width:1000px){
+  html[data-theme="dark"] .sidebar,
+  html[data-theme="dark"] .inspector{background:#101319}
+  html[data-theme="dark"] .main,
+  html[data-theme="dark"] .main-head{background:#151820}
+  html[data-theme="dark"] .scene.active{background:#202630;box-shadow:inset 0 0 0 1px #3a4451}
+}
+
+@media (max-width:720px){
+  html[data-theme="dark"] body,
+  html[data-theme="dark"] .shell{background:#0d1015}
+  html[data-theme="dark"] .topbar,
+  html[data-theme="dark"] .sidebar{background:#101319}
+  html[data-theme="dark"] .main,
+  html[data-theme="dark"] .composer-wrap{background:#151820}
+  html[data-theme="dark"] .trace-toggle,
+  html[data-theme="dark"] .new-task{background:#1b2028;border-color:#3a4451}
+  html[data-theme="dark"] .scene-nav{background:#191e25;border-color:#343d49}
+  html[data-theme="dark"] .scene.active{background:#262e39;box-shadow:inset 0 0 0 1px #414b59}
+  html[data-theme="dark"] .inspector,
+  html[data-theme="dark"] .inspector-head,
+  html[data-theme="dark"] .inspector-body,
+  html[data-theme="dark"] .panel{background:#151a21}
+  html[data-theme="dark"] .inspector{border-color:#414b59;box-shadow:0 0 0 100vmax rgba(5,7,10,.55),0 -18px 60px rgba(0,0,0,.34)}
+  html[data-theme="dark"] .inspector-head{border-bottom-color:#303844}
+  html[data-theme="dark"] .inspector-head:before{background:#66717f}
+  html[data-theme="dark"] .inspector-head button{background:#202630;border-color:#414b59}
+  html[data-theme="dark"] .tabs{background:#1b2028;border-color:#343d49}
+  html[data-theme="dark"] .tab.active{background:#262e39;box-shadow:inset 0 0 0 1px #414b59}
+  html[data-theme="dark"] .state-row{background:#1b2028;border-color:#3a4451}
+  html[data-theme="dark"] .timeline-row>span{background:#1b2028}
+  html[data-theme="dark"] .data-grid,
+  html[data-theme="dark"] .data-cell{background:#1b2028;border-color:#343d49}
+  html[data-theme="dark"] .capability-lines>div{background:#181d24}
+  html[data-theme="dark"] .composer{background:#202630}
+}
