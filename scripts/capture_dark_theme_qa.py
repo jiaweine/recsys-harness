@@ -43,7 +43,6 @@ def main() -> None:
         for selector in (
             "#resultSnapshot:not([hidden])",
             "#resultAnalysis:not([hidden])",
-            "#strategyExperiment:not([hidden])",
             "#verificationSummary:not([hidden])",
             "#agentTrace:not([hidden])",
         ):
@@ -62,7 +61,8 @@ def main() -> None:
 
         page.locator("#inspectorToggle").click()
         page.locator('.tab[data-tab="evidence"]').click()
-        page.locator("#strategyExperiment").evaluate("el => el.scrollIntoView({block:'end'})")
+        page.wait_for_selector("#evidenceList .evidence-item", state="attached", timeout=5_000)
+        page.locator("#resultAnalysis").evaluate("el => el.scrollIntoView({block:'center'})")
         page.wait_for_timeout(240)
         page.screenshot(path=str(ASSET_DIR / "qa-desktop-dark.png"), full_page=False)
 
