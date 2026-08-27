@@ -1,4 +1,4 @@
-"""Verify ranked results and evidence navigate to each other without invented identity."""
+"""Verify ranked-result traceability and scoped follow-up stay grounded in real evidence."""
 from __future__ import annotations
 
 import os
@@ -8,6 +8,7 @@ from playwright.sync_api import sync_playwright
 
 BASE_URL = os.environ.get("RECSYS_CAPTURE_URL", "http://127.0.0.1:8765").rstrip("/")
 PROMPT = "检查搜索“露营灯”的当前结果，只做复现和证据核对，不改变策略。"
+USER_NOTE = "补充：保留这段用户要求。"
 
 
 def wait_for_completed_search(page) -> None:
@@ -18,7 +19,18 @@ def wait_for_completed_search(page) -> None:
     page.wait_for_function("document.getElementById('stateText').textContent === '已完成'", timeout=30_000)
     page.wait_for_selector('#resultAnalysis:not([hidden]) .rank-row[data-evidence-linked="true"]', timeout=10_000)
     page.wait_for_selector("#evidenceList .evidence-item", state="attached", timeout=10_000)
-    page.wait_for_selector("#evidenceList .evidence-item[data-result-linked='true']", state="attached", timeout=10_000)
+    page.wait_for_selector("#evidenceList .evidence-item[data-result-linked='true'][data-followup-linked='true']", state="attached", timeout=10_000)
+
+
+def matching_evidence(page, expected_title: str, expected_rank: int):
+    rows = page.locator("#evidenceList .evidence-item[data-result-linked='true']")
+    for index in range(rows.count()):
+        row = rows.nth(index)
+        if row.get_attribute("data-result-title") != expected_title:
+            continue
+        if int(row.get_attribute("data-result-rank") or "0") == expected_rank:
+            return row
+    raise RuntimeError("Could not resolve the persisted evidence row by exact title + rank identity")
 
 
 def assert_selected_evidence(page, expected_title: str, expected_rank: int) -> None:
@@ -55,12 +67,51 @@ def assert_selected_rank(page, expected_title: str, expected_rank: int) -> None:
     )
 
 
-def reverse_button_for_target(page):
-    target = page.locator("#evidenceList .evidence-item.evidence-target")
-    button = target.locator(".evidence-rank-link")
+def reverse_button(page, title: str, rank: int):
+    button = matching_evidence(page, title, rank).locator(".evidence-rank-link")
     if button.count() != 1:
         raise RuntimeError("Matched evidence did not expose exactly one reverse Result action")
     return button
+
+
+def assert_scoped_followup(page, title: str, rank: int, *, mobile: bool) -> None:
+    item = matching_evidence(page, title, rank)
+    button = item.locator(".evidence-followup-link")
+    if button.count() != 1 or not button.is_visible():
+        raise RuntimeError("Mapped Evidence row lost its scoped follow-up action")
+    if title not in (button.get_attribute("aria-label") or ""):
+        raise RuntimeError("Scoped follow-up accessibility label lost the real ranked-result title")
+    if mobile:
+        box = button.bounding_box()
+        if not box or box["height"] < 44 or box["width"] < 44:
+            raise RuntimeError(f"Mobile scoped follow-up lost its 44px touch target: {box}")
+
+    detail = item.locator("small").inner_text().strip()
+    message_count = page.locator("#messageList .msg").count()
+    composer = page.locator("#input")
+    composer.fill(USER_NOTE)
+    button.click()
+
+    if mobile:
+        page.wait_for_function("document.getElementById('inspectorToggle').getAttribute('aria-expanded') === 'false'", timeout=5_000)
+    elif page.locator("#inspectorToggle").get_attribute("aria-expanded") != "true":
+        raise RuntimeError("Desktop scoped follow-up incorrectly closed the persistent Evidence rail")
+
+    page.wait_for_function("document.activeElement?.id === 'input'", timeout=2_500)
+    value = composer.input_value()
+    if USER_NOTE not in value:
+        raise RuntimeError("Scoped follow-up overwrote an existing user draft")
+    if title not in value or f"第 {rank} 位" not in value:
+        raise RuntimeError("Scoped follow-up draft lost the exact ranked-result identity")
+    if "先不要改变当前策略" not in value:
+        raise RuntimeError("Scoped follow-up draft lost the no-strategy-change boundary")
+    evidence_prefix = detail[: min(28, len(detail))]
+    if evidence_prefix and evidence_prefix not in value:
+        raise RuntimeError("Scoped follow-up draft is not grounded in the selected persisted evidence detail")
+    page.wait_for_timeout(120)
+    if page.locator("#messageList .msg").count() != message_count:
+        raise RuntimeError("Scoped follow-up must prepare an editable draft, never auto-send a new turn")
+    composer.fill("")
 
 
 def main() -> None:
@@ -88,12 +139,14 @@ def main() -> None:
         if title not in (link.get_attribute("aria-label") or ""):
             raise RuntimeError("Evidence action accessibility label lost the real result title")
 
-        # Desktop round trip: Rank -> Evidence -> same Rank. The persistent rail stays open.
+        # Desktop: Rank -> Evidence -> editable evidence-grounded follow-up -> same Rank.
         link.click()
         page.wait_for_function("document.getElementById('inspectorToggle').getAttribute('aria-expanded') === 'true'", timeout=5_000)
         page.wait_for_selector("#evidenceList .evidence-item.evidence-target", timeout=5_000)
         assert_selected_evidence(page, title, rank)
-        reverse = reverse_button_for_target(page)
+        assert_scoped_followup(page, title, rank, mobile=False)
+
+        reverse = reverse_button(page, title, rank)
         if not reverse.is_visible() or title not in (reverse.get_attribute("aria-label") or ""):
             raise RuntimeError("Desktop Evidence row lost its reverse Result action or title identity")
         reverse.click()
@@ -102,7 +155,7 @@ def main() -> None:
         if page.locator("#inspector").evaluate("el => getComputedStyle(el).display === 'none'"):
             raise RuntimeError("Desktop reverse navigation incorrectly removed the persistent Evidence rail")
 
-        # Return to Evidence once more, then validate the complete mobile round trip.
+        # Move into the real mobile layout with the sheet closed.
         first_row.locator(".rank-evidence-link").click()
         page.wait_for_selector("#evidenceList .evidence-item.evidence-target", timeout=5_000)
         assert_selected_evidence(page, title, rank)
@@ -125,11 +178,19 @@ def main() -> None:
         if mobile_link.evaluate("el => getComputedStyle(el).opacity") != "0":
             raise RuntimeError("Mobile full-row evidence action must remain visually transparent")
 
+        # Mobile follow-up closes the Bottom Sheet and returns keyboard focus to the existing Composer.
         mobile_link.click()
         page.wait_for_function("document.getElementById('inspectorToggle').getAttribute('aria-expanded') === 'true'", timeout=5_000)
         page.wait_for_selector("#evidenceList .evidence-item.evidence-target", timeout=5_000)
         assert_selected_evidence(page, title, rank)
-        mobile_reverse = reverse_button_for_target(page)
+        assert_scoped_followup(page, title, rank, mobile=True)
+
+        # Re-open the same evidence and still preserve the independent Evidence -> Rank round trip.
+        mobile_link.click()
+        page.wait_for_function("document.getElementById('inspectorToggle').getAttribute('aria-expanded') === 'true'", timeout=5_000)
+        page.wait_for_selector("#evidenceList .evidence-item.evidence-target", timeout=5_000)
+        assert_selected_evidence(page, title, rank)
+        mobile_reverse = reverse_button(page, title, rank)
         reverse_box = mobile_reverse.bounding_box()
         if not reverse_box or reverse_box["height"] < 44 or reverse_box["width"] < 44:
             raise RuntimeError(f"Mobile reverse Result action lost its 44px touch target: {reverse_box}")
@@ -140,9 +201,9 @@ def main() -> None:
 
         overflow = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
         if overflow > 1:
-            raise RuntimeError(f"Bidirectional evidence navigation introduced page-level mobile overflow: {overflow}px")
+            raise RuntimeError(f"Evidence traceability/follow-up introduced page-level mobile overflow: {overflow}px")
         if browser_errors:
-            raise RuntimeError("Browser errors during result/evidence round-trip QA:\n" + "\n".join(browser_errors))
+            raise RuntimeError("Browser errors during evidence traceability/follow-up QA:\n" + "\n".join(browser_errors))
         browser.close()
 
 
