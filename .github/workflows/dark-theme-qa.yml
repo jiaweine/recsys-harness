@@ -1,0 +1,63 @@
+name: Dark theme visual QA
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "frontend/**"
+      - "scripts/capture_dark_theme_qa.py"
+      - ".github/workflows/dark-theme-qa.yml"
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - "scripts/capture_dark_theme_qa.py"
+      - ".github/workflows/dark-theme-qa.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  capture-dark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      LINGJING_DATA_DIR: /tmp/recsys-dark-theme-qa
+      RECSYS_CAPTURE_URL: http://127.0.0.1:8765
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install app and Chromium
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Start Recsys Harness
+        run: |
+          rm -rf "$LINGJING_DATA_DIR"
+          python -m uvicorn lingjing_harness.api:app --host 127.0.0.1 --port 8765 > /tmp/recsys-dark-theme.log 2>&1 &
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8765/api/status >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/recsys-dark-theme.log
+          exit 1
+
+      - name: Capture real dark-theme product states
+        run: python scripts/capture_dark_theme_qa.py
+
+      - name: Upload dark-theme visual QA
+        uses: actions/upload-artifact@v4
+        with:
+          name: dark-theme-visual-qa
+          path: |
+            docs/readme-assets/qa-desktop-dark.png
+            docs/readme-assets/qa-mobile-dark-evidence.png
+          retention-days: 5
