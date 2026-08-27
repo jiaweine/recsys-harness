@@ -25,6 +25,22 @@
     document.querySelector('.tab[data-tab="evidence"]')?.click();
   }
 
+  function focusCanBeReclaimed(active) {
+    if (!active || active === document.body) return true;
+    return active.id === 'inspectorToggle'
+      || active.id === 'inspectorClose'
+      || active.classList?.contains('rank-evidence-link')
+      || active.classList?.contains('tab');
+  }
+
+  function settleEvidenceFocus(item, attempt = 0) {
+    if (!item.isConnected || document.activeElement === item) return;
+    if (attempt > 0 && !focusCanBeReclaimed(document.activeElement)) return;
+    item.focus({preventScroll:true});
+    if (document.activeElement === item || attempt >= 4) return;
+    setTimeout(() => settleEvidenceFocus(item, attempt + 1), 45 + attempt * 25);
+  }
+
   function highlightEvidence(item) {
     const prior = highlightTimers.get(item);
     if (prior) clearTimeout(prior);
@@ -39,16 +55,16 @@
       behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
       block: 'center',
     });
-    item.focus({preventScroll:true});
+    requestAnimationFrame(() => settleEvidenceFocus(item));
     highlightTimers.set(item, setTimeout(() => item.classList.remove('evidence-target'), 1800));
   }
 
   function openEvidence(title, rank) {
     selectEvidenceTab();
-    requestAnimationFrame(() => {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
       const item = findEvidence(title, rank);
       if (item) highlightEvidence(item);
-    });
+    }));
   }
 
   function decorateRow(row) {
