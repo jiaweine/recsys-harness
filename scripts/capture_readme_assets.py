@@ -92,6 +92,10 @@ def main() -> None:
         page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30_000)
         page.wait_for_function("document.getElementById('dataMeta').textContent.includes('内容')", timeout=15_000)
 
+        capture_theme = page.locator("html").get_attribute("data-theme")
+        if capture_theme != "light":
+            raise RuntimeError(f"README product capture must use the regular light theme by default, got {capture_theme!r}")
+
         if page.locator(".compare-trigger").count():
             raise RuntimeError("Run Compare appeared before the current conversation had a completed run")
 
@@ -311,8 +315,13 @@ def main() -> None:
           const [r = 255, g = 255, b = 255] = values;
           return 0.2126 * r + 0.7152 * g + 0.0722 * b;
         }""")
-        if inspector_luma > 70:
-            raise RuntimeError(f"Mobile inspector escaped the Graphite dark surface hierarchy: luma={inspector_luma:.1f}")
+        active_theme = page.locator("html").get_attribute("data-theme")
+        if active_theme == "light" and inspector_luma < 235:
+            raise RuntimeError(f"Regular-theme mobile inspector lost its light surface hierarchy: luma={inspector_luma:.1f}")
+        if active_theme == "dark" and inspector_luma > 70:
+            raise RuntimeError(f"Dark-theme mobile inspector escaped the Graphite surface hierarchy: luma={inspector_luma:.1f}")
+        if active_theme not in {"light", "dark"}:
+            raise RuntimeError(f"Mobile inspector has an unknown theme state: {active_theme!r}")
 
         page.locator(".tab[data-tab='progress']").click()
         page.wait_for_timeout(120)
