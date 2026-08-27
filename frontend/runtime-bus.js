@@ -8,6 +8,8 @@
     parseErrors: 0,
     jsonReads: 0,
     cloneReads: 0,
+    sourceClones: 0,
+    virtualClones: 0,
   };
 
   function trackedPath(path) {
@@ -20,6 +22,7 @@
     stats.matchedResponses += 1;
     let payloadPromise;
     try {
+      stats.sourceClones += 1;
       payloadPromise = response.clone().json().then(payload => {
         stats.parsedResponses += 1;
         return payload;
@@ -32,7 +35,19 @@
       return response;
     }
 
-    const wrap = target => new Proxy(target, {
+    const virtualClone = () => {
+      stats.cloneReads += 1;
+      stats.virtualClones += 1;
+      return Object.freeze({
+        json() {
+          stats.jsonReads += 1;
+          return payloadPromise;
+        },
+        clone: virtualClone,
+      });
+    };
+
+    return new Proxy(response, {
       get(current, property) {
         if (property === 'json') {
           return () => {
@@ -40,18 +55,11 @@
             return payloadPromise;
           };
         }
-        if (property === 'clone') {
-          return () => {
-            stats.cloneReads += 1;
-            return wrap(current.clone());
-          };
-        }
+        if (property === 'clone') return virtualClone;
         const value = Reflect.get(current, property, current);
         return typeof value === 'function' ? value.bind(current) : value;
       },
     });
-
-    return wrap(response);
   }
 
   window.XushuRuntimeBus = {
