@@ -1,4 +1,4 @@
-"""Verify regular light and dark workspace themes against the real product."""
+"""Verify regular light and layered Charcoal dark workspace themes against the real product."""
 from __future__ import annotations
 
 import os
@@ -43,11 +43,11 @@ def assert_desktop_theme(page, theme: str) -> None:
             ".inspector": "rgb(250, 250, 250)",
         },
         "dark": {
-            "body": "rgb(9, 9, 11)",
-            ".topbar": "rgb(14, 14, 16)",
-            ".sidebar": "rgb(13, 13, 15)",
-            ".main": "rgb(16, 16, 18)",
-            ".inspector": "rgb(13, 13, 15)",
+            "body": "rgb(11, 13, 17)",
+            ".topbar": "rgb(15, 18, 23)",
+            ".sidebar": "rgb(16, 19, 25)",
+            ".main": "rgb(21, 24, 32)",
+            ".inspector": "rgb(16, 19, 25)",
         },
     }[theme]
     assert_selected_theme(page, theme)
@@ -55,6 +55,12 @@ def assert_desktop_theme(page, theme: str) -> None:
         actual = rgb(page, selector)
         if actual != expected_color:
             raise RuntimeError(f"{theme} desktop {selector} background drifted: {actual} != {expected_color}")
+
+    if theme == "dark":
+        chrome = luma(page, ".sidebar")
+        workspace = luma(page, ".main")
+        if workspace - chrome < 4:
+            raise RuntimeError(f"Charcoal dark workspace collapsed back into chrome: chrome={chrome}, workspace={workspace}")
 
 
 def assert_mobile_theme(page, theme: str) -> None:
@@ -69,6 +75,8 @@ def assert_mobile_theme(page, theme: str) -> None:
         too_light = {selector: value for selector, value in values.items() if value > 70}
         if too_light:
             raise RuntimeError(f"Dark mobile theme escaped the Graphite surface ladder: {too_light}")
+        if values[".main"] - values["body"] < 6:
+            raise RuntimeError(f"Charcoal mobile workspace lost depth from the shell: {values}")
 
 
 def main() -> None:
@@ -86,15 +94,15 @@ def main() -> None:
         page.reload(wait_until="domcontentloaded")
         page.wait_for_function("document.body.classList.contains('ready')", timeout=15_000)
 
-        # A new user gets the regular light workspace, not a near-black canvas.
+        # A new user gets the regular light workspace, not a dark canvas.
         assert_desktop_theme(page, "light")
         if page.locator('meta[name="theme-color"]').get_attribute("content") != "#f6f7f9":
             raise RuntimeError("Regular theme did not publish its light browser chrome color")
 
         page.locator('[data-theme-choice="dark"]').click()
         assert_desktop_theme(page, "dark")
-        if page.locator('meta[name="theme-color"]').get_attribute("content") != "#09090b":
-            raise RuntimeError("Dark theme did not publish its Graphite browser chrome color")
+        if page.locator('meta[name="theme-color"]').get_attribute("content") != "#101319":
+            raise RuntimeError("Dark theme did not publish its Charcoal browser chrome color")
         page.reload(wait_until="domcontentloaded")
         page.wait_for_function("document.body.classList.contains('ready')", timeout=15_000)
         assert_desktop_theme(page, "dark")
