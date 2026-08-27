@@ -17,7 +17,6 @@ def wait_for_completed_search(page) -> None:
     page.locator("#sendBtn").click()
     page.wait_for_function("document.getElementById('stateText').textContent === '已完成'", timeout=30_000)
     page.wait_for_selector('#resultAnalysis:not([hidden]) .rank-row[data-evidence-linked="true"]', timeout=10_000)
-    # Evidence is already rendered from the completed payload but remains inside the inactive Inspector tab.
     page.wait_for_selector("#evidenceList .evidence-item", state="attached", timeout=10_000)
 
 
@@ -33,11 +32,10 @@ def assert_selected_evidence(page, expected_title: str, expected_rank: int) -> N
     detail = target.locator("small").inner_text().strip()
     if f"第 {expected_rank} 位" not in detail:
         raise RuntimeError(f"Evidence navigation matched the right title but wrong ranked evidence: {detail!r}")
-    focused = page.evaluate(
-        "document.activeElement?.classList.contains('evidence-item') && document.activeElement?.classList.contains('evidence-target')"
+    page.wait_for_function(
+        "document.activeElement?.classList.contains('evidence-item') && document.activeElement?.classList.contains('evidence-target')",
+        timeout=2_000,
     )
-    if not focused:
-        raise RuntimeError("Evidence navigation did not move keyboard focus to the matched evidence row")
 
 
 def main() -> None:
@@ -70,8 +68,6 @@ def main() -> None:
         page.wait_for_selector("#evidenceList .evidence-item.evidence-target", timeout=5_000)
         assert_selected_evidence(page, title, rank)
 
-        # On desktop the evidence rail is persistent and its close affordance is intentionally hidden.
-        # Switch to the real mobile layout first, then close the bottom sheet and re-open it from the ranked row.
         page.set_viewport_size({"width": 393, "height": 852})
         page.wait_for_timeout(180)
         close = page.locator("#inspectorClose")
