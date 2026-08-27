@@ -107,6 +107,7 @@ jobs:
               layout = client.get('/assets/layout.css')
               theme_css = client.get('/assets/theme-modes.css')
               theme_controls = client.get('/assets/theme-controls.css')
+              dark_charcoal = client.get('/assets/dark-charcoal.css')
               theme_js = client.get('/assets/theme.js')
               trace_css = client.get('/assets/trace-ui.css')
               trace_js = client.get('/assets/trace-ui.js')
@@ -128,6 +129,7 @@ jobs:
           assert '序枢' in page.text and '灵境' not in page.text
           assert 'data-theme="light"' in page.text and '常规' in page.text and '暗色' in page.text
           assert '/assets/theme.js' in page.text and '/assets/theme-modes.css' in page.text and '/assets/theme-controls.css' in page.text
+          assert '/assets/dark-charcoal.css' in page.text
           assert '/assets/trace-ui.css' in page.text and '/assets/trace-ui.js' in page.text
           assert '/assets/control-ui.css' in page.text and '/assets/control-ui.js' in page.text
           assert '/assets/run-nav.css' in page.text and '/assets/run-nav.js' in page.text
@@ -138,6 +140,7 @@ jobs:
           assert layout.status_code == 200 and 'Focused Workspace' in layout.text
           assert theme_css.status_code == 200 and 'Dual-theme workspace' in theme_css.text and 'data-theme="light"' in theme_css.text
           assert theme_controls.status_code == 200 and 'Theme control sizing' in theme_controls.text
+          assert dark_charcoal.status_code == 200 and 'Graphite Charcoal' in dark_charcoal.text and 'data-theme="dark"' in dark_charcoal.text
           assert theme_js.status_code == 200 and 'xushu-theme' in theme_js.text and 'data-theme-choice' in theme_js.text
           assert trace_css.status_code == 200 and 'Mission + Agent Trace Inspector' in trace_css.text
           assert trace_js.status_code == 200 and 'AGENT TRACE' in trace_js.text
