@@ -14,7 +14,7 @@
 
   function updateChrome(theme) {
     const themeColor = document.querySelector('meta[name="theme-color"]');
-    if (themeColor) themeColor.setAttribute('content', theme === 'dark' ? '#09090b' : '#f6f7f9');
+    if (themeColor) themeColor.setAttribute('content', theme === 'dark' ? '#101319' : '#f6f7f9');
     document.querySelectorAll('[data-theme-choice]').forEach(button => {
       const active = button.dataset.themeChoice === theme;
       button.setAttribute('aria-pressed', String(active));
