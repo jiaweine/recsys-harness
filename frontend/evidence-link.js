@@ -7,6 +7,24 @@
     return [...document.querySelectorAll('#evidenceList .evidence-item')];
   }
 
+  function rankRows() {
+    return [...document.querySelectorAll('#resultAnalysis .rank-row')];
+  }
+
+  function rankIdentity(row) {
+    const title = normalize(row.dataset.evidenceTitle || row.querySelector('.rank-title > b')?.textContent);
+    const rank = Number(row.dataset.evidenceRank || normalize(row.querySelector('.rank-index')?.textContent));
+    return {title, rank:Number.isFinite(rank) && rank > 0 ? rank : null};
+  }
+
+  function evidenceIdentity(item) {
+    const title = normalize(item.querySelector('b')?.textContent);
+    const detail = normalize(item.querySelector('small')?.textContent);
+    const match = detail.match(/第\s*(\d+)\s*位/);
+    const rank = match ? Number(match[1]) : null;
+    return {title, rank:Number.isFinite(rank) && rank > 0 ? rank : null};
+  }
+
   function findEvidence(title, rank) {
     const wanted = normalize(title);
     if (!wanted) return null;
@@ -14,6 +32,18 @@
     const position = Number(rank);
     if (Number.isFinite(position) && position > 0) {
       const positioned = matches.find(item => normalize(item.querySelector('small')?.textContent).includes(`第 ${position} 位`));
+      if (positioned) return positioned;
+    }
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  function findRank(title, rank) {
+    const wanted = normalize(title);
+    if (!wanted) return null;
+    const matches = rankRows().filter(row => rankIdentity(row).title === wanted);
+    const position = Number(rank);
+    if (Number.isFinite(position) && position > 0) {
+      const positioned = matches.find(row => rankIdentity(row).rank === position);
       if (positioned) return positioned;
     }
     return matches.length === 1 ? matches[0] : null;
@@ -59,6 +89,24 @@
     highlightTimers.set(item, setTimeout(() => item.classList.remove('evidence-target'), 1800));
   }
 
+  function highlightRank(row) {
+    const prior = highlightTimers.get(row);
+    if (prior) clearTimeout(prior);
+    document.querySelectorAll('.rank-row.rank-target').forEach(node => {
+      if (node !== row) node.classList.remove('rank-target');
+    });
+    row.classList.remove('rank-target');
+    row.offsetWidth;
+    row.classList.add('rank-target');
+    row.tabIndex = -1;
+    row.scrollIntoView({
+      behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+      block: 'center',
+    });
+    requestAnimationFrame(() => row.focus({preventScroll:true}));
+    highlightTimers.set(row, setTimeout(() => row.classList.remove('rank-target'), 1800));
+  }
+
   function openEvidence(title, rank) {
     selectEvidenceTab();
     requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -67,16 +115,24 @@
     }));
   }
 
+  function openRank(title, rank) {
+    const row = findRank(title, rank);
+    if (!row) return;
+    const inspector = document.getElementById('inspector');
+    const close = document.getElementById('inspectorClose');
+    const mobileSheet = matchMedia('(max-width: 720px)').matches;
+    if (mobileSheet && inspector?.classList.contains('open') && close) close.click();
+    requestAnimationFrame(() => requestAnimationFrame(() => highlightRank(row)));
+  }
+
   function decorateRow(row) {
     if (row.dataset.evidenceLinked === 'true') return;
-    const titleNode = row.querySelector('.rank-title > b');
-    const title = normalize(titleNode?.textContent);
-    const rank = Number(normalize(row.querySelector('.rank-index')?.textContent));
+    const {title, rank} = rankIdentity(row);
     if (!title) return;
 
     row.dataset.evidenceLinked = 'true';
     row.dataset.evidenceTitle = title;
-    if (Number.isFinite(rank) && rank > 0) row.dataset.evidenceRank = String(rank);
+    if (rank) row.dataset.evidenceRank = String(rank);
 
     const titleWrap = row.querySelector('.rank-title');
     if (titleWrap && !titleWrap.querySelector('.rank-evidence-link')) {
@@ -89,9 +145,30 @@
     }
   }
 
+  function decorateEvidence(item) {
+    if (item.dataset.resultLinked === 'true') return;
+    const {title, rank} = evidenceIdentity(item);
+    if (!title) return;
+    const row = findRank(title, rank);
+    if (!row) return;
+
+    item.dataset.resultLinked = 'true';
+    item.dataset.resultTitle = title;
+    if (rank) item.dataset.resultRank = String(rank);
+    if (!item.querySelector('.evidence-rank-link')) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'evidence-rank-link';
+      button.textContent = '结果';
+      button.setAttribute('aria-label', `回到 ${title} 的排名结果`);
+      item.appendChild(button);
+    }
+  }
+
   function decorate() {
     queued = false;
-    document.querySelectorAll('#resultAnalysis .rank-row').forEach(decorateRow);
+    rankRows().forEach(decorateRow);
+    evidenceItems().forEach(decorateEvidence);
   }
 
   function schedule() {
@@ -101,16 +178,25 @@
   }
 
   document.addEventListener('click', event => {
-    const button = event.target.closest('.rank-evidence-link');
-    if (!button) return;
-    const row = button.closest('#resultAnalysis .rank-row[data-evidence-linked="true"]');
-    if (!row) return;
-    openEvidence(row.dataset.evidenceTitle, row.dataset.evidenceRank);
+    const evidenceButton = event.target.closest('.rank-evidence-link');
+    if (evidenceButton) {
+      const row = evidenceButton.closest('#resultAnalysis .rank-row[data-evidence-linked="true"]');
+      if (row) openEvidence(row.dataset.evidenceTitle, row.dataset.evidenceRank);
+      return;
+    }
+    const rankButton = event.target.closest('.evidence-rank-link');
+    if (!rankButton) return;
+    const item = rankButton.closest('#evidenceList .evidence-item[data-result-linked="true"]');
+    if (!item) return;
+    openRank(item.dataset.resultTitle, item.dataset.resultRank);
   });
 
   const observer = new MutationObserver(mutations => {
     if (mutations.some(mutation => [...mutation.addedNodes].some(node =>
-      node.nodeType === 1 && (node.matches?.('.rank-row, #resultAnalysis') || node.querySelector?.('.rank-row'))
+      node.nodeType === 1 && (
+        node.matches?.('.rank-row, #resultAnalysis, .evidence-item, #evidenceList')
+        || node.querySelector?.('.rank-row, .evidence-item')
+      )
     ))) schedule();
   });
   observer.observe(document.body, {subtree:true, childList:true});
