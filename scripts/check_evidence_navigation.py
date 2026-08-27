@@ -1,4 +1,4 @@
-"""Verify ranked results navigate to the exact existing evidence entry."""
+"""Verify ranked results and evidence navigate to each other without invented identity."""
 from __future__ import annotations
 
 import os
@@ -18,6 +18,7 @@ def wait_for_completed_search(page) -> None:
     page.wait_for_function("document.getElementById('stateText').textContent === '已完成'", timeout=30_000)
     page.wait_for_selector('#resultAnalysis:not([hidden]) .rank-row[data-evidence-linked="true"]', timeout=10_000)
     page.wait_for_selector("#evidenceList .evidence-item", state="attached", timeout=10_000)
+    page.wait_for_selector("#evidenceList .evidence-item[data-result-linked='true']", state="attached", timeout=10_000)
 
 
 def assert_selected_evidence(page, expected_title: str, expected_rank: int) -> None:
@@ -36,6 +37,30 @@ def assert_selected_evidence(page, expected_title: str, expected_rank: int) -> N
         "document.activeElement?.classList.contains('evidence-item') && document.activeElement?.classList.contains('evidence-target')",
         timeout=2_000,
     )
+
+
+def assert_selected_rank(page, expected_title: str, expected_rank: int) -> None:
+    target = page.locator("#resultAnalysis .rank-row.rank-target")
+    if target.count() != 1:
+        raise RuntimeError("Evidence-to-result navigation did not highlight exactly one ranked row")
+    actual = target.locator(".rank-title > b").inner_text().strip()
+    if actual != expected_title:
+        raise RuntimeError(f"Reverse navigation matched the wrong ranked title: {actual!r} != {expected_title!r}")
+    actual_rank = int(target.get_attribute("data-evidence-rank") or "0")
+    if actual_rank != expected_rank:
+        raise RuntimeError(f"Reverse navigation matched the wrong rank: {actual_rank} != {expected_rank}")
+    page.wait_for_function(
+        "document.activeElement?.classList.contains('rank-row') && document.activeElement?.classList.contains('rank-target')",
+        timeout=2_000,
+    )
+
+
+def reverse_button_for_target(page):
+    target = page.locator("#evidenceList .evidence-item.evidence-target")
+    button = target.locator(".evidence-rank-link")
+    if button.count() != 1:
+        raise RuntimeError("Matched evidence did not expose exactly one reverse Result action")
+    return button
 
 
 def main() -> None:
@@ -63,11 +88,24 @@ def main() -> None:
         if title not in (link.get_attribute("aria-label") or ""):
             raise RuntimeError("Evidence action accessibility label lost the real result title")
 
+        # Desktop round trip: Rank -> Evidence -> same Rank. The persistent rail stays open.
         link.click()
         page.wait_for_function("document.getElementById('inspectorToggle').getAttribute('aria-expanded') === 'true'", timeout=5_000)
         page.wait_for_selector("#evidenceList .evidence-item.evidence-target", timeout=5_000)
         assert_selected_evidence(page, title, rank)
+        reverse = reverse_button_for_target(page)
+        if not reverse.is_visible() or title not in (reverse.get_attribute("aria-label") or ""):
+            raise RuntimeError("Desktop Evidence row lost its reverse Result action or title identity")
+        reverse.click()
+        page.wait_for_selector("#resultAnalysis .rank-row.rank-target", timeout=5_000)
+        assert_selected_rank(page, title, rank)
+        if page.locator("#inspector").evaluate("el => getComputedStyle(el).display === 'none'"):
+            raise RuntimeError("Desktop reverse navigation incorrectly removed the persistent Evidence rail")
 
+        # Return to Evidence once more, then validate the complete mobile round trip.
+        first_row.locator(".rank-evidence-link").click()
+        page.wait_for_selector("#evidenceList .evidence-item.evidence-target", timeout=5_000)
+        assert_selected_evidence(page, title, rank)
         page.set_viewport_size({"width": 393, "height": 852})
         page.wait_for_timeout(180)
         close = page.locator("#inspectorClose")
@@ -84,19 +122,27 @@ def main() -> None:
             raise RuntimeError(f"Mobile ranked result is not a safe evidence touch target: {row_box}")
         if not link_box or link_box["height"] < 44 or link_box["width"] < row_box["width"] - 2:
             raise RuntimeError(f"Mobile evidence action does not cover the ranked row: row={row_box}, link={link_box}")
-        opacity = mobile_link.evaluate("el => getComputedStyle(el).opacity")
-        if opacity != "0":
-            raise RuntimeError(f"Mobile full-row evidence action should be visually transparent, got opacity={opacity}")
+        if mobile_link.evaluate("el => getComputedStyle(el).opacity") != "0":
+            raise RuntimeError("Mobile full-row evidence action must remain visually transparent")
+
         mobile_link.click()
         page.wait_for_function("document.getElementById('inspectorToggle').getAttribute('aria-expanded') === 'true'", timeout=5_000)
         page.wait_for_selector("#evidenceList .evidence-item.evidence-target", timeout=5_000)
         assert_selected_evidence(page, title, rank)
+        mobile_reverse = reverse_button_for_target(page)
+        reverse_box = mobile_reverse.bounding_box()
+        if not reverse_box or reverse_box["height"] < 44 or reverse_box["width"] < 44:
+            raise RuntimeError(f"Mobile reverse Result action lost its 44px touch target: {reverse_box}")
+        mobile_reverse.click()
+        page.wait_for_function("document.getElementById('inspectorToggle').getAttribute('aria-expanded') === 'false'", timeout=5_000)
+        page.wait_for_selector("#resultAnalysis .rank-row.rank-target", timeout=5_000)
+        assert_selected_rank(page, title, rank)
 
         overflow = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
         if overflow > 1:
-            raise RuntimeError(f"Evidence navigation introduced page-level mobile overflow: {overflow}px")
+            raise RuntimeError(f"Bidirectional evidence navigation introduced page-level mobile overflow: {overflow}px")
         if browser_errors:
-            raise RuntimeError("Browser errors during result evidence navigation QA:\n" + "\n".join(browser_errors))
+            raise RuntimeError("Browser errors during result/evidence round-trip QA:\n" + "\n".join(browser_errors))
         browser.close()
 
 
