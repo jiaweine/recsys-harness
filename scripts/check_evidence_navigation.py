@@ -1,4 +1,4 @@
-"""Verify ranked-result traceability and scoped follow-up stay grounded in real evidence."""
+"""Verify evidence interactions and shared runtime JSON parsing in the real product."""
 from __future__ import annotations
 
 import os
@@ -114,6 +114,33 @@ def assert_scoped_followup(page, title: str, rank: int, *, mobile: bool) -> None
     composer.fill("")
 
 
+def assert_runtime_response_cache(page) -> None:
+    page.wait_for_function(
+        "window.XushuRuntimeBus?.snapshot && (() => { const s = window.XushuRuntimeBus.snapshot(); return s.matchedResponses > 0 && s.parsedResponses === s.matchedResponses; })()",
+        timeout=3_000,
+    )
+    stats = page.evaluate("window.XushuRuntimeBus.snapshot()")
+    if stats["parseErrors"] != 0:
+        raise RuntimeError(f"Shared runtime response cache saw JSON parse errors: {stats}")
+    if stats["parsedResponses"] != stats["matchedResponses"]:
+        raise RuntimeError(f"Runtime JSON was not parsed exactly once per matched response: {stats}")
+    if stats["cloneReads"] < stats["matchedResponses"] * 3:
+        raise RuntimeError(f"Expected the three existing UI consumers to keep reading response clones: {stats}")
+    if stats["jsonReads"] < stats["matchedResponses"] * 4:
+        raise RuntimeError(f"Expected app.js plus three UI consumers to share each parsed payload: {stats}")
+    if stats["parsedResponses"] >= stats["jsonReads"]:
+        raise RuntimeError(f"Shared parsing did not reduce duplicate JSON work: {stats}")
+
+    for selector, label in (
+        ("#resultSnapshot:not([hidden])", "Run Snapshot"),
+        ("#agentTrace:not([hidden])", "Agent Trace"),
+        ("#runControlPlane:not([hidden])", "Control Plane"),
+        ("#learningLedger:not([hidden])", "Learning Ledger"),
+    ):
+        if page.locator(selector).count() != 1:
+            raise RuntimeError(f"{label} did not render after shared runtime response parsing")
+
+
 def main() -> None:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -126,7 +153,10 @@ def main() -> None:
         page.wait_for_function("document.body.classList.contains('ready')", timeout=15_000)
         if page.locator("html").get_attribute("data-theme") != "light":
             raise RuntimeError("Evidence navigation QA must start from the default regular theme")
+        if not page.evaluate("Boolean(window.XushuRuntimeBus?.snapshot)"):
+            raise RuntimeError("Shared runtime response cache did not initialize before product consumers")
         wait_for_completed_search(page)
+        assert_runtime_response_cache(page)
 
         first_row = page.locator('#resultAnalysis .rank-row[data-evidence-linked="true"]').first
         title = first_row.locator(".rank-title > b").inner_text().strip()
@@ -203,7 +233,7 @@ def main() -> None:
         if overflow > 1:
             raise RuntimeError(f"Evidence traceability/follow-up introduced page-level mobile overflow: {overflow}px")
         if browser_errors:
-            raise RuntimeError("Browser errors during evidence traceability/follow-up QA:\n" + "\n".join(browser_errors))
+            raise RuntimeError("Browser errors during shared-response/evidence QA:\n" + "\n".join(browser_errors))
         browser.close()
 
 
