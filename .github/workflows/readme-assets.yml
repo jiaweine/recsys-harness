@@ -13,6 +13,7 @@ on:
       - "scripts/check_workspace_switcher.py"
       - "scripts/check_run_context.py"
       - "scripts/check_theme_modes.py"
+      - "scripts/check_evidence_navigation.py"
       - "docs/readme-assets/architecture.svg"
       - ".github/workflows/readme-assets.yml"
   push:
@@ -26,6 +27,7 @@ on:
       - "scripts/check_workspace_switcher.py"
       - "scripts/check_run_context.py"
       - "scripts/check_theme_modes.py"
+      - "scripts/check_evidence_navigation.py"
       - "docs/readme-assets/architecture.svg"
       - ".github/workflows/readme-assets.yml"
 
@@ -79,6 +81,9 @@ jobs:
 
       - name: Verify regular and dark theme modes
         run: python scripts/check_theme_modes.py
+
+      - name: Verify ranked result evidence navigation
+        run: python scripts/check_evidence_navigation.py
 
       - name: Upload visual QA bundle
         uses: actions/upload-artifact@v4
