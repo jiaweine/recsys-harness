@@ -59,17 +59,24 @@ def main() -> None:
         if max(desktop_luma.values()) - min(desktop_luma.values()) < 4:
             raise RuntimeError(f"Dark desktop surfaces collapsed into one tonal slab: {desktop_luma}")
 
-        page.locator("#inspectorToggle").click()
-        page.locator('.tab[data-tab="evidence"]').click()
+        # Desktop owns a persistent right rail, so its mobile-only inspector toggle is hidden.
+        evidence_tab = page.locator('.tab[data-tab="evidence"]')
+        if not evidence_tab.is_visible():
+            raise RuntimeError("Desktop Evidence tab disappeared from the persistent inspector rail")
+        evidence_tab.click()
         page.wait_for_selector("#evidenceList .evidence-item", state="attached", timeout=5_000)
         page.locator("#resultAnalysis").evaluate("el => el.scrollIntoView({block:'center'})")
         page.wait_for_timeout(240)
         page.screenshot(path=str(ASSET_DIR / "qa-desktop-dark.png"), full_page=False)
 
+        # On mobile the same inspector becomes an explicit Bottom Sheet.
         page.set_viewport_size({"width": 393, "height": 852})
         page.wait_for_timeout(220)
         if not page.locator("#inspector").evaluate("el => el.classList.contains('open')"):
-            page.locator("#inspectorToggle").click()
+            toggle = page.locator("#inspectorToggle")
+            if not toggle.is_visible():
+                raise RuntimeError("Mobile Evidence Bottom Sheet lost its visible open control")
+            toggle.click()
             page.wait_for_selector("#inspector.open", timeout=5_000)
         page.locator('.tab[data-tab="evidence"]').click()
         page.wait_for_timeout(160)
