@@ -120,6 +120,8 @@ jobs:
               library_js = client.get('/assets/run-library.js')
               context_css = client.get('/assets/run-context.css')
               context_js = client.get('/assets/run-context.js')
+              evidence_link_css = client.get('/assets/evidence-link.css')
+              evidence_link_js = client.get('/assets/evidence-link.js')
               status = client.get('/api/status')
               capabilities = client.get('/api/capabilities')
           assert page.status_code == 200
@@ -132,6 +134,7 @@ jobs:
           assert '/assets/run-compare.css' in page.text and '/assets/run-compare.js' in page.text
           assert '/assets/run-library.css' in page.text and '/assets/run-library.js' in page.text
           assert '/assets/run-context.css' in page.text and '/assets/run-context.js' in page.text
+          assert '/assets/evidence-link.css' in page.text and '/assets/evidence-link.js' in page.text
           assert layout.status_code == 200 and 'Focused Workspace' in layout.text
           assert theme_css.status_code == 200 and 'Dual-theme workspace' in theme_css.text and 'data-theme="light"' in theme_css.text
           assert theme_controls.status_code == 200 and 'Theme control sizing' in theme_controls.text
@@ -148,6 +151,8 @@ jobs:
           assert library_js.status_code == 200 and 'history-state' in library_js.text and 'aria-current' in library_js.text
           assert context_css.status_code == 200 and 'Run Context Strip' in context_css.text
           assert context_js.status_code == 200 and 'runContextStrip' in context_js.text and 'resultTargets' in context_js.text
+          assert evidence_link_css.status_code == 200 and 'Ranked result' in evidence_link_css.text
+          assert evidence_link_js.status_code == 200 and 'evidenceLinked' in evidence_link_js.text and 'findEvidence' in evidence_link_js.text
           assert status.status_code == 200 and status.json()['runtime']['evidence_utility_controller'] is True
           assert capabilities.status_code == 200 and capabilities.json()['multimodal']['attachments'] is True
           PY
