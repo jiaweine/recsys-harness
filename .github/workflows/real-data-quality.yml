@@ -1,8 +1,5 @@
 name: Real Data Quality
 on:
-  push:
-    paths:
-      - '.github/workflows/real-data-quality.yml'
   workflow_dispatch:
 
 jobs:
