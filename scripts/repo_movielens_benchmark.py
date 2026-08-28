@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from hashlib import blake2b
 import json
 
 import numpy as np
@@ -21,6 +22,7 @@ from repo_recommender_benchmark import (
 
 MAX_USERS = 200
 MIN_POSITIVE_HISTORY = 8
+SPLIT_SEED = 42
 
 
 def _dataset() -> tuple[Catalog, object, list[str], list[str]]:
@@ -71,6 +73,15 @@ def _dataset() -> tuple[Catalog, object, list[str], list[str]]:
 
 def _mean(values: list[float]) -> float:
     return round(float(np.mean(values)), 6) if values else 0.0
+
+
+def _split_fingerprint(test) -> str:
+    coo = test.tocoo()
+    payload = "|".join(
+        f"{int(user)}:{int(item)}:{float(value):.6f}"
+        for user, item, value in zip(coo.row, coo.col, coo.data)
+    )
+    return blake2b(payload.encode("utf-8"), digest_size=8).hexdigest()
 
 
 def _reference_diagnostics(
@@ -140,7 +151,13 @@ def _reference_diagnostics(
 
 def main() -> None:
     source, interactions, user_ids, item_ids = _dataset()
-    train, test = leave_k_out_split(interactions, K=1, random_state=42)
+
+    # implicit.leave_k_out_split currently shuffles tails through NumPy's global
+    # RNG inside _take_tails, so setting only random_state is not sufficient for
+    # reproducibility. Seed both paths while still delegating the split itself to
+    # implicit's implementation.
+    np.random.seed(SPLIT_SEED)
+    train, test = leave_k_out_split(interactions, K=1, random_state=SPLIT_SEED)
     reference_catalog = _training_catalog(source, train, user_ids, item_ids)
 
     models = {
@@ -151,7 +168,7 @@ def main() -> None:
             alpha=1.0,
             iterations=20,
             use_gpu=False,
-            random_state=42,
+            random_state=SPLIT_SEED,
         ),
         "implicit_bpr": BayesianPersonalizedRanking(
             factors=32,
@@ -160,7 +177,7 @@ def main() -> None:
             iterations=80,
             use_gpu=False,
             verify_negative_samples=True,
-            random_state=42,
+            random_state=SPLIT_SEED,
         ),
         "implicit_bm25_item_item": BM25Recommender(K=40, K1=1.2, B=0.75),
     }
@@ -180,7 +197,9 @@ def main() -> None:
                     "max_users": MAX_USERS,
                     "minimum_positive_history": MIN_POSITIVE_HISTORY,
                 },
-                "protocol": "implicit.leave_k_out_split(K=1, random_state=42)",
+                "protocol": "implicit.leave_k_out_split(K=1) + global NumPy seed",
+                "split_seed": SPLIT_SEED,
+                "split_fingerprint": _split_fingerprint(test),
                 "users": len(user_ids),
                 "items": len(item_ids),
                 "train_events": int(train.nnz),
