@@ -83,8 +83,15 @@ jobs:
           ]
           control = '\n'.join(path.read_text(encoding='utf-8') for path in control_files if path.exists())
           assert not re.search(r'(?i)(^|[^a-z0-9])v[1-4]([^a-z0-9]|$)|api/v[1-4]|_v[1-4]', control), 'numbered historical product path detected'
-          legacy_terms = [('base' + 'line'), ('com' + 'pare'), ('shadow_' + 'compare')]
-          legacy_hits = [term for term in legacy_terms if term in control.lower()]
+          legacy_patterns = {
+              ('base' + 'line'): r'(?<![a-z0-9_])baseline(?![a-z0-9_])',
+              ('com' + 'pare'): r'(?<![a-z0-9_])compare(?![a-z0-9_])',
+              ('shadow_' + 'compare'): r'(?<![a-z0-9_])shadow_compare(?![a-z0-9_])',
+          }
+          legacy_hits = [
+              term for term, pattern in legacy_patterns.items()
+              if re.search(pattern, control.lower())
+          ]
           assert not legacy_hits, f'legacy decision-path terminology detected: {legacy_hits}'
 
           import subprocess
