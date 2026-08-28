@@ -33,6 +33,38 @@ class OwnedPolicy:
         self.capabilities = capabilities or inferred or RUNTIME_CAPABILITIES
         self.deliberation = deliberation or DeliberationEngine(self.capabilities)
 
+    @classmethod
+    def _network_explicitly_requested(cls, text: str) -> bool:
+        lowered = str(text or "").lower()
+        return any(hint in lowered for hint in cls.NETWORK_HINTS)
+
+    @staticmethod
+    def _local_evidence_can_close(state: RunState) -> bool:
+        """Whether owned execution has already produced a clean local close.
+
+        The network toggle is an authority grant, not a requirement to spend an
+        external request. Once the trajectory critic says the critical/high
+        evidence graph is closed and owned evidence exists, a network action that
+        was not explicitly requested has no mandatory role left. Failed local
+        execution keeps the fallback available because external context may still
+        help explain an otherwise incomplete run.
+        """
+
+        critic = state.critic or {}
+        if not bool(critic.get("ready")):
+            return False
+        if critic.get("unresolved_contradictions"):
+            return False
+        if any(row.get("status") == "failed" for row in state.actions):
+            return False
+        local_evidence = any(row.get("kind") != "external" for row in state.evidence)
+        completed_audit = any(
+            row.get("status") == "completed"
+            and str(row.get("tool") or "").endswith("audit")
+            for row in state.actions
+        )
+        return local_evidence or completed_audit
+
     def plan(
         self,
         text: str,
@@ -60,14 +92,17 @@ class OwnedPolicy:
         user = self._extract_user(source, catalog) if mode in {"recommend", "both"} else None
         deny = any(k in lowered for k in self.NO_ADAPT_HINTS)
         allow = any(k in lowered for k in self.ADAPT_HINTS) and not deny
-        network = bool(allow_network or any(k in lowered for k in self.NETWORK_HINTS))
+        network_requested = self._network_explicitly_requested(user_text)
+        network = bool(allow_network or network_requested)
         constraints = []
         if deny:
             constraints.append("不改变当前工作区策略")
         if "先" in lowered and ("离线" in lowered or "复核" in lowered):
             constraints.append("先完成离线验证")
-        if network:
-            constraints.append("外部资料只作为证据，不参与策略晋升")
+        if network_requested:
+            constraints.append("按用户要求补充外部资料；外部资料只作为证据，不参与策略晋升")
+        elif network:
+            constraints.append("允许在本地证据不足时补充外部资料；外部资料不参与策略晋升")
         return AgentPlan(
             mode=mode,
             goal=user_text,
@@ -91,12 +126,28 @@ class OwnedPolicy:
         *,
         policy_bonus,
     ) -> Decision:
-        return self.deliberation.decide(
+        decision = self.deliberation.decide(
             plan,
             state,
             tools,
             policy_bonus=policy_bonus,
         )
+        if decision.step is None:
+            return decision
+
+        spec = next((row for row in tools if row.name == decision.step.tool), None)
+        if (
+            spec is not None
+            and spec.risk == "network"
+            and plan.allow_network
+            and not self._network_explicitly_requested(plan.goal)
+            and self._local_evidence_can_close(state)
+        ):
+            return Decision(
+                None,
+                "本地关键证据已经闭合；联网只是获得许可而非用户明确要求，继续外部请求的边际价值不足",
+            )
+        return decision
 
     def reflect(self, plan: AgentPlan, state: RunState, action: dict):
         return self.deliberation.reflect(plan, state, action)
