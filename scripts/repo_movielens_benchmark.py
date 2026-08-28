@@ -8,7 +8,7 @@ import numpy as np
 from implicit.als import AlternatingLeastSquares
 from implicit.bpr import BayesianPersonalizedRanking
 from implicit.datasets.movielens import get_movielens
-from implicit.evaluation import leave_k_out_split
+from implicit.evaluation import train_test_split
 from implicit.nearest_neighbours import BM25Recommender
 
 from lingjing_harness.algorithms import RecommendationEngine
@@ -23,6 +23,7 @@ from repo_recommender_benchmark import (
 MAX_USERS = 200
 MIN_POSITIVE_HISTORY = 8
 SPLIT_SEED = 42
+TRAIN_PERCENTAGE = 0.8
 
 
 def _dataset() -> tuple[Catalog, object, list[str], list[str]]:
@@ -77,9 +78,12 @@ def _mean(values: list[float]) -> float:
 
 def _split_fingerprint(test) -> str:
     coo = test.tocoo()
-    payload = "|".join(
-        f"{int(user)}:{int(item)}:{float(value):.6f}"
+    rows = sorted(
+        (int(user), int(item), float(value))
         for user, item, value in zip(coo.row, coo.col, coo.data)
+    )
+    payload = "|".join(
+        f"{user}:{item}:{value:.6f}" for user, item, value in rows
     )
     return blake2b(payload.encode("utf-8"), digest_size=8).hexdigest()
 
@@ -99,12 +103,13 @@ def _reference_diagnostics(
     graph_saturated_share: list[float] = []
     profile_positive_share: list[float] = []
     target_candidates = 0
+    target_events = 0
 
     for user_index, user_id in enumerate(user_ids):
-        target_indices = test.getrow(user_index).indices
-        if len(target_indices) != 1:
+        target_indices = [int(index) for index in test.getrow(user_index).indices]
+        if not target_indices:
             continue
-        target_id = item_ids[int(target_indices[0])]
+        target_events += len(target_indices)
         prepared = engine.prepare(user_id)
         if not prepared:
             continue
@@ -121,18 +126,19 @@ def _reference_diagnostics(
             sum(value > 0.0 for value in profile_values) / len(profile_values)
         )
 
-        target = next(
-            (row for row in prepared if row["item"].item_id == target_id),
-            None,
-        )
-        if target is None:
-            continue
-        target_candidates += 1
-        target_graph.append(float(target["graph"]))
-        target_profile.append(float(target["profile_fit"]))
+        prepared_by_id = {row["item"].item_id: row for row in prepared}
+        for target_index in target_indices:
+            target_id = item_ids[target_index]
+            target = prepared_by_id.get(target_id)
+            if target is None:
+                continue
+            target_candidates += 1
+            target_graph.append(float(target["graph"]))
+            target_profile.append(float(target["profile_fit"]))
 
     return {
-        "target_candidate_coverage": round(target_candidates / max(1, len(user_ids)), 6),
+        "target_events": target_events,
+        "target_candidate_coverage": round(target_candidates / max(1, target_events), 6),
         "target_graph_nonzero_share": round(
             sum(value > 0.0 for value in target_graph) / max(1, len(target_graph)),
             6,
@@ -151,13 +157,11 @@ def _reference_diagnostics(
 
 def main() -> None:
     source, interactions, user_ids, item_ids = _dataset()
-
-    # implicit.leave_k_out_split currently shuffles tails through NumPy's global
-    # RNG inside _take_tails, so setting only random_state is not sufficient for
-    # reproducibility. Seed both paths while still delegating the split itself to
-    # implicit's implementation.
-    np.random.seed(SPLIT_SEED)
-    train, test = leave_k_out_split(interactions, K=1, random_state=SPLIT_SEED)
+    train, test = train_test_split(
+        interactions,
+        train_percentage=TRAIN_PERCENTAGE,
+        random_state=SPLIT_SEED,
+    )
     reference_catalog = _training_catalog(source, train, user_ids, item_ids)
 
     models = {
@@ -197,7 +201,7 @@ def main() -> None:
                     "max_users": MAX_USERS,
                     "minimum_positive_history": MIN_POSITIVE_HISTORY,
                 },
-                "protocol": "implicit.leave_k_out_split(K=1) + global NumPy seed",
+                "protocol": "implicit.train_test_split(train_percentage=0.8, random_state=42)",
                 "split_seed": SPLIT_SEED,
                 "split_fingerprint": _split_fingerprint(test),
                 "users": len(user_ids),
