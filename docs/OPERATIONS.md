@@ -26,6 +26,31 @@ Before reporting a revision mismatch, the worker calls the same workspace synchr
 
 A workspace update making readiness temporarily false is expected. It should not make liveness false, because an update is a traffic-readiness condition rather than a process failure.
 
+## Container runtime boundary
+
+The repository image is built in two stages. The builder produces the project wheel and its runtime dependency wheels from `pyproject.toml`; the final image installs those wheels with `--no-index`. Development-only dependencies such as `pytest` and `httpx` are not installed into the runtime image.
+
+The final container also keeps mutable state separate from application code:
+
+```text
+application / installed package  -> read-only runtime surface
+LINGJING_DATA_DIR                 -> /data
+container user                    -> xushu (non-root)
+```
+
+`/data` is declared as a Docker volume. In production, mount a durable volume there if conversations, run checkpoints, strategy memory, attachments and imported workspace data must survive container replacement.
+
+For a host bind mount, make sure the host directory is writable by the container's `xushu` user. A named Docker volume avoids most host UID/GID mismatches.
+
+The `Container QA` workflow builds the actual image and verifies that:
+
+- runtime imports succeed without the source checkout;
+- development-only Python dependencies are absent;
+- the configured container user is non-root;
+- protected production mode starts successfully;
+- the Docker health state reaches `healthy`;
+- `/api/status` remains authenticated while health endpoints remain available.
+
 ## Container healthcheck
 
 The repository Docker image uses `/health/ready` as its `HEALTHCHECK` target:
