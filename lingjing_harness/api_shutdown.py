@@ -145,20 +145,30 @@ def install_shutdown_boundary(core: Any) -> None:
     @asynccontextmanager
     async def graceful_lifespan(app: Any):
         shutdown_event.clear()
+        # Rebind the public readiness view for every lifespan.  The runner keeps
+        # the private event in its closure, while callers outside a live lifespan
+        # must never inherit a previous shutdown's sticky state.
+        core.SHUTDOWN_EVENT = shutdown_event
         core.SHUTDOWN_PENDING_RUNS = 0
-        async with original_lifespan(app):
-            try:
-                yield
-            finally:
-                # Keep the original heartbeat alive during the grace window.  Runs
-                # that reach a checkpoint hand themselves off immediately; runs
-                # still inside a bounded tool keep their old lease until the
-                # original lifespan exits and heartbeat renewal stops.
-                shutdown_event.set()
-                active = [task for task in set(run_tasks.values()) if not task.done()]
-                if active:
-                    _, pending = await asyncio.wait(active, timeout=grace_seconds)
-                    core.SHUTDOWN_PENDING_RUNS = len(pending)
+        try:
+            async with original_lifespan(app):
+                try:
+                    yield
+                finally:
+                    # Keep the original heartbeat alive during the grace window.
+                    # Runs that reach a checkpoint hand themselves off immediately;
+                    # runs still inside a bounded tool keep their old lease until
+                    # the original lifespan exits and heartbeat renewal stops.
+                    shutdown_event.set()
+                    active = [task for task in set(run_tasks.values()) if not task.done()]
+                    if active:
+                        _, pending = await asyncio.wait(active, timeout=grace_seconds)
+                        core.SHUTDOWN_PENDING_RUNS = len(pending)
+        finally:
+            # Pending executor runners still close over the old, set event and
+            # therefore cannot resume work.  Only the exported readiness view is
+            # replaced so a later test/client/lifespan cannot observe stale state.
+            core.SHUTDOWN_EVENT = threading.Event()
 
     core._execute = interruptible_execute
     core.app.router.lifespan_context = graceful_lifespan
