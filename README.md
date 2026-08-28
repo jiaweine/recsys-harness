@@ -126,6 +126,8 @@ xushu-harness "做一次全局体检"
       ↓
 Business Reward + Domain Guardrails
       ↓
+Replay / Counterfactual Evaluation
+      ↓
 Future Temporal Holdout
       ↓
 Confidence + Regression Gates
@@ -163,7 +165,7 @@ Revalidation / Retirement
     </td>
     <td width="33%" valign="top">
       <strong>Business-aware Evaluation</strong><br><br>
-      RewardSpec 定义业务价值；relevance、coverage、freshness、cold-start 等指标作为独立 guardrail，共同决定候选是否值得信任。
+      RewardSpec 与独立 guardrail 共同评估候选；具备显式 policy probability contract 时，可进一步运行 IPS / SNIPS / DR、overlap diagnostics 与 experiment eligibility gate。
     </td>
     <td width="33%" valign="top">
       <strong>Mixed Strategy Evolution</strong><br><br>
@@ -253,9 +255,9 @@ RewardSpec 由业务定义：
 
 同一 contract 可以表达电商、内容、社区和搜索等不同业务目标。优化器负责搜索策略，业务价值定义保持独立。
 
-## 3 · Logged Replay + Temporal Holdout
+## 3 · Logged Replay + Counterfactual OPE + Temporal Holdout
 
-候选策略对历史 request 重新排名，并基于记录到的 production outcome 形成 request-level policy value：
+候选策略可以先对历史 request 重新排名，并基于记录到的 production outcome 形成 request-level policy value：
 
 ```text
 historical request
@@ -272,6 +274,25 @@ request-level policy value
 ```
 
 评估报告保留 `business_reward`、coverage、request scores、estimator 与 propensity 信息，让策略比较始终拥有可追踪的 evidence。
+
+当接入方能够提供 logging policy 与 target policy 对**同一个 logged action** 的显式概率时，序枢还提供 contextual-bandit OPE：
+
+```text
+CounterfactualRecord
+       ↓
+IPS / SNIPS / optional DR
+       ↓
+raw + clipped ESS
+support / overlap diagnostics
+       ↓
+bootstrap confidence
+       ↓
+ExperimentCriteria
+       ↓
+eligible_for_online_test
+```
+
+Experiment gate 使用 raw importance-weight ESS、support coverage、clipped share、estimated delta 与 probability-positive 等显式阈值判断候选是否具备进入受控线上实验的证据；这个 decision 不会自动授予 activation authority。详见 [`docs/COUNTERFACTUAL_EXPERIMENTS.md`](docs/COUNTERFACTUAL_EXPERIMENTS.md)。
 
 随后，production events 按 request identity 与时间进入 future holdout：
 
@@ -380,6 +401,8 @@ Serving adapter 会统一外部返回结果的 identity、去重与 score 约束
 
 Elasticsearch、OpenSearch、Vespa、内部 rank API、已有 recommendation service 都可以通过 adapter 纳入统一评估流程，而不需要改变原有 serving architecture。
 
+如果已有策略系统能够导出对 logged action 的 logging / target action probabilities，也可以直接接入 `CounterfactualRecord`，在同一项目里完成 IPS / SNIPS / DR 与 controlled-experiment eligibility evaluation。
+
 ---
 
 # 生产数据契约
@@ -469,6 +492,7 @@ NDCG / Recall / cold / coverage                       + RewardSpec
 - [`docs/README.md`](docs/README.md) — documentation index；
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system architecture；
 - [`docs/HARNESS_CONTRACT.md`](docs/HARNESS_CONTRACT.md) — Harness contract；
+- [`docs/COUNTERFACTUAL_EXPERIMENTS.md`](docs/COUNTERFACTUAL_EXPERIMENTS.md) — IPS / SNIPS / DR and experiment gates；
 - [`docs/VERTICAL_EVOLUTION.md`](docs/VERTICAL_EVOLUTION.md) — vertical evolution；
 - [`docs/DATA_FORMAT.md`](docs/DATA_FORMAT.md) — production data contract；
 - [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md) — acceptance criteria。
@@ -548,6 +572,7 @@ CI 覆盖：
 - Mission / Deliberation / Harness contracts；
 - mixed genome / capability stages；
 - production reward / temporal request split / bootstrap；
+- IPS / SNIPS / DR + experiment eligibility contracts；
 - serving adapter validation；
 - strategy lifecycle / recovery / fencing；
 - CLI / wheel clean install；
@@ -561,6 +586,8 @@ CI 覆盖：
 frontend/                          序枢产品 UI
 lingjing_harness/
   production.py                    RewardSpec / ExposureEvent / temporal replay / bootstrap
+  counterfactual.py                explicit IPS / SNIPS / DR + overlap diagnostics
+  experiments.py                   counterfactual evidence → controlled experiment gate
   adapters.py                      existing-system serving adapters
   domain.py                        Catalog + training data + production evidence
   algorithms/
@@ -579,7 +606,7 @@ lingjing_harness/
     memory.py                      episodic / procedural / policy memory
   api.py                           API / auth / workspace / recovery
   store.py                         runs / leases / revisions / shared rate limit
-docs/                              architecture / contracts / data / acceptance
+docs/                              architecture / contracts / data / OPE / acceptance
 ```
 
 </details>
