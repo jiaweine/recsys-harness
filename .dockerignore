@@ -1,0 +1,36 @@
+# Version-control and local environment metadata
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+
+# Local Python environments and caches
+.venv
+venv
+__pycache__
+**/__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Mutable runtime state must never enter the Docker build context
+data
+*.db
+*.sqlite
+*.sqlite3
+
+# Build/test outputs
+build
+dist
+*.egg-info
+coverage.xml
+junit.xml
+
+# OS/editor noise
+.DS_Store
+.idea
+.vscode
