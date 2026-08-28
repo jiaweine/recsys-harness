@@ -1,0 +1,29 @@
+name: Optimizer Quality
+on:
+  push:
+    paths:
+      - 'lingjing_harness/algorithms/**'
+      - 'scripts/repo_optimizer_benchmark.py'
+      - '.github/workflows/optimizer-quality.yml'
+  pull_request:
+    paths:
+      - 'lingjing_harness/algorithms/**'
+      - 'scripts/repo_optimizer_benchmark.py'
+      - '.github/workflows/optimizer-quality.yml'
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Install Optuna repository release
+        run: pip install 'optuna==4.9.0'
+      - name: Compare mixed-genome evolution with TPE
+        run: python scripts/repo_optimizer_benchmark.py
