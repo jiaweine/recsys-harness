@@ -29,6 +29,14 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "httpx>=0.27"]
+semantic = ["FlagEmbedding==1.4.2"]
+collaborative = ["implicit==0.7.3"]
+optimizer = ["optuna==4.9.0"]
+advanced = [
+  "FlagEmbedding==1.4.2",
+  "implicit==0.7.3",
+  "optuna==4.9.0",
+]
 
 [project.scripts]
 xushu-harness = "lingjing_harness.cli:main"
