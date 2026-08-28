@@ -17,6 +17,8 @@ from .production_evolution import (
     evolve_recommend as _evolve_recommend,
     evolve_search as _evolve_search,
 )
+from .recommend import RecommendConfig
+from .recommend_validation import prepare_recommend_relevance
 from .segment_credit import attach_recommend_portfolio, attach_search_portfolio
 
 
@@ -61,6 +63,74 @@ def _trust_evidence_gate(result: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _recommend_relevance_gate(
+    catalog: Any,
+    current: Any,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    """Attach cached interaction-temporal relevance evidence to promotion.
+
+    Business reward remains the primary production objective. This gate prevents
+    a candidate from being promoted when its warm recommendation relevance
+    materially regresses on the same point-in-time interaction slices. Item-side
+    features are intentionally reported as snapshot features by the prepared
+    evaluator, so this is a regression guardrail rather than a claim of full
+    historical-feature reconstruction.
+    """
+
+    candidate_raw = result.get("candidate_config")
+    if not result.get("evaluation_ready") or not isinstance(candidate_raw, dict):
+        return result
+
+    prepared = prepare_recommend_relevance(
+        catalog,
+        current,
+        users_override=current.known_users(),
+        k=10,
+    )
+    reference = prepared.evaluate(current.config)
+    candidate = prepared.evaluate(RecommendConfig(**candidate_raw))
+    samples = min(int(reference.get("users", 0)), int(candidate.get("users", 0)))
+    available = bool(reference.get("available") and candidate.get("available") and samples >= 3)
+    ndcg_delta = float(candidate.get("model", {}).get("ndcg", 0.0)) - float(
+        reference.get("model", {}).get("ndcg", 0.0)
+    )
+    mrr_delta = float(candidate.get("model", {}).get("mrr", 0.0)) - float(
+        reference.get("model", {}).get("mrr", 0.0)
+    )
+    safe = not available or (ndcg_delta >= -0.01 and mrr_delta >= -0.015)
+
+    gated = dict(result)
+    gated["relevance_validation"] = {
+        "available": available,
+        "samples": samples,
+        "protocol": reference.get("protocol"),
+        "temporal_scope": reference.get("temporal_scope"),
+        "point_in_time_item_features": reference.get("point_in_time_item_features"),
+        "minimum_target_weight": reference.get("minimum_target_weight"),
+        "prepared_slices": reference.get("prepared_slices", samples),
+        "reference_ndcg": float(reference.get("model", {}).get("ndcg", 0.0)),
+        "candidate_ndcg": float(candidate.get("model", {}).get("ndcg", 0.0)),
+        "ndcg_delta": round(ndcg_delta, 4),
+        "reference_mrr": float(reference.get("model", {}).get("mrr", 0.0)),
+        "candidate_mrr": float(candidate.get("model", {}).get("mrr", 0.0)),
+        "mrr_delta": round(mrr_delta, 4),
+        "passed": safe,
+    }
+    gated["relevance_guardrail_passed"] = safe
+    if not safe:
+        gated["safe_to_try"] = False
+        blockers = list(gated.get("trust_blocked_by") or [])
+        if "recommend_relevance_regression" not in blockers:
+            blockers.append("recommend_relevance_regression")
+        gated["trust_blocked_by"] = blockers
+        if gated.get("trusted"):
+            gated["trusted"] = False
+        if "business_trusted" in gated:
+            gated["business_trusted"] = False
+    return gated
+
+
 def evolve_search(catalog: Any, current: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
     remembered = kwargs.get("remembered")
     result = _trust_evidence_gate(_evolve_search(catalog, current, *args, **kwargs))
@@ -75,6 +145,7 @@ def evolve_search(catalog: Any, current: Any, *args: Any, **kwargs: Any) -> dict
 def evolve_recommend(catalog: Any, current: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
     remembered = kwargs.get("remembered")
     result = _trust_evidence_gate(_evolve_recommend(catalog, current, *args, **kwargs))
+    result = _recommend_relevance_gate(catalog, current, result)
     return attach_recommend_portfolio(
         catalog,
         current,
