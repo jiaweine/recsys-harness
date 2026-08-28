@@ -14,7 +14,7 @@
 
 **Observe · Diagnose · Replay · Evolve · Holdout · Verify · Activate · Rollback · Learn**
 
-[快速启动](#快速启动) · [真实产品](#真实产品) · [为什么是序枢](#为什么是序枢) · [核心能力](#核心能力) · [工作原理](#工作原理) · [系统接入](#existing-system-integration) · [架构](#系统架构) · [数据契约](#生产数据契约)
+[快速启动](#快速启动) · [真实产品](#真实产品) · [为什么是序枢](#为什么是序枢) · [核心能力](#核心能力) · [工作原理](#工作原理) · [系统接入](#existing-system-integration) · [架构](#系统架构) · [文档](docs/README.md) · [参与贡献](CONTRIBUTING.md)
 
 </div>
 
@@ -466,6 +466,7 @@ NDCG / Recall / cold / coverage                       + RewardSpec
 
 进一步阅读：
 
+- [`docs/README.md`](docs/README.md) — documentation index；
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system architecture；
 - [`docs/HARNESS_CONTRACT.md`](docs/HARNESS_CONTRACT.md) — Harness contract；
 - [`docs/VERTICAL_EVOLUTION.md`](docs/VERTICAL_EVOLUTION.md) — vertical evolution；
@@ -530,6 +531,8 @@ LINGJING_TRUST_PROXY_IP
 ---
 
 # 开发与质量门槛
+
+贡献指南：[`CONTRIBUTING.md`](CONTRIBUTING.md)。Issue 与 Pull Request 入口使用结构化模板，鼓励提交可复现步骤、验证 evidence 与受影响 contract。
 
 ```bash
 python -m pip install -e ".[dev]"
