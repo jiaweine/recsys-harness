@@ -9,6 +9,7 @@ from lingjing_harness.domain import Catalog
 from lingjing_harness.production import evaluate_logged_policy, request_groups
 from .search import SearchEngine
 from .recommend import RecommendationEngine
+from .recommend_validation import audit_recommend_relevance
 
 MAX_AUDIT_QUERIES = 32
 MAX_AUDIT_USERS = 32
@@ -199,6 +200,7 @@ def audit_recommend(catalog: Catalog, engine: RecommendationEngine, *, users_ove
     all_users = known_users if users_override is None else [user for user in users_override if user in known_set]
     users = _stable_sample(all_users, MAX_AUDIT_USERS, lambda user: user)
     cold = audit_cold_start(catalog, engine, slice_key="audit", samples=3)
+    relevance = audit_recommend_relevance(catalog, engine, users_override=users)
     business = _business_recommend(catalog, engine)
 
     if not users:
@@ -269,6 +271,24 @@ def audit_recommend(catalog: Catalog, engine: RecommendationEngine, *, users_ove
             "cold_start_samples": cold["samples"],
             "details": details,
         }
+
+    model_relevance = relevance["model"]
+    popularity_relevance = relevance["popularity_baseline"]
+    result.update(
+        {
+            "relevance_available": relevance["available"],
+            "relevance_users": relevance["users"],
+            "relevance_protocol": relevance["protocol"],
+            "relevance_k": relevance["k"],
+            "relevance_hit_rate": model_relevance["hit_rate"],
+            "relevance_recall": model_relevance["recall"],
+            "relevance_mrr": model_relevance["mrr"],
+            "relevance_ndcg": model_relevance["ndcg"],
+            "popularity_relevance_ndcg": popularity_relevance["ndcg"],
+            "relevance_ndcg_delta_vs_popularity": relevance["delta_vs_popularity"]["ndcg"],
+            "relevance": relevance,
+        }
+    )
     result["business_reward_available"] = business is not None
     if business is not None:
         result.update(
