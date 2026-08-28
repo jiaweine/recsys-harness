@@ -1,4 +1,5 @@
 from dataclasses import asdict
+import time
 
 import pytest
 
@@ -234,3 +235,87 @@ def test_active_recommendation_rolls_back_on_cold_start_regression(monkeypatch):
     assert tools.recommend.config == RecommendConfig()
     assert memory.active_skill(key, "recommend") is None
     assert any(row["domain"] == "recommend" for row in tools.rollback_events)
+
+
+def test_active_recommendation_rolls_back_on_temporal_relevance_regression(monkeypatch):
+    catalog = build_sample_catalog()
+    memory = AgentMemory()
+    key = catalog_fingerprint(catalog)
+    raw = asdict(RecommendConfig())
+    raw["rerank_strategy"] = "semantic_mmr"
+    memory.remember_strategy(
+        key,
+        "recommend",
+        raw,
+        score=1.0,
+        evidence=10,
+        status="active",
+        payload={"validated_at": 0.0},
+    )
+
+    import lingjing_harness.runtime.tools_core as tools_core
+    import lingjing_harness.runtime.tools_production as tools_production
+
+    def fake_proxy_audit(_catalog, _engine):
+        return {
+            "users": 5,
+            "quality": 0.8,
+            "coverage": 0.8,
+            "cold_start_quality": 0.8,
+        }
+
+    class FakePrepared:
+        def evaluate(self, config):
+            degraded = config.rerank_strategy == "semantic_mmr"
+            return {
+                "available": True,
+                "users": 5,
+                "protocol": "strict_temporal_leave_one_out",
+                "temporal_scope": "interactions_only",
+                "point_in_time_item_features": False,
+                "model": {
+                    "ndcg": 0.20 if degraded else 0.50,
+                    "mrr": 0.22 if degraded else 0.52,
+                },
+            }
+
+    monkeypatch.setattr(tools_core, "audit_recommend", fake_proxy_audit)
+    monkeypatch.setattr(
+        tools_production,
+        "prepare_recommend_relevance",
+        lambda *_args, **_kwargs: FakePrepared(),
+    )
+    tools = ToolRegistry(catalog, memory)
+    assert tools.recommend.config == RecommendConfig()
+    assert memory.active_skill(key, "recommend") is None
+    assert any(
+        row["domain"] == "recommend" and "temporal relevance" in row["reason"]
+        for row in tools.rollback_events
+    )
+
+
+def test_fresh_active_recommendation_skips_relevance_revalidation(monkeypatch):
+    catalog = build_sample_catalog()
+    memory = AgentMemory()
+    key = catalog_fingerprint(catalog)
+    raw = asdict(RecommendConfig())
+    raw["rerank_strategy"] = "semantic_mmr"
+    memory.remember_strategy(
+        key,
+        "recommend",
+        raw,
+        score=1.0,
+        evidence=10,
+        status="active",
+        payload={"validated_at": time.time(), "validation": {"quality": 0.8}},
+    )
+
+    import lingjing_harness.runtime.tools_production as tools_production
+
+    def must_not_prepare(*_args, **_kwargs):
+        raise AssertionError("fresh strategy must not rebuild temporal relevance slices")
+
+    monkeypatch.setattr(tools_production, "prepare_recommend_relevance", must_not_prepare)
+    tools = ToolRegistry(catalog, memory)
+    assert tools.recommend.config.rerank_strategy == "semantic_mmr"
+    assert memory.active_skill(key, "recommend") is not None

@@ -13,6 +13,7 @@ from lingjing_harness.algorithms import (
     audit_search,
     evolve_recommend,
     evolve_search,
+    prepare_recommend_relevance,
 )
 from lingjing_harness.algorithms.capabilities import config_from_mapping
 from lingjing_harness.production import request_groups
@@ -65,6 +66,15 @@ class ToolRegistry(CoreToolRegistry):
         return clone
 
     def _validate_active_strategies(self) -> None:
+        # Capture whether recommendation validation was due before the core layer
+        # refreshes validated_at. Relevance follows the same TTL as every other
+        # active-strategy guardrail instead of being recomputed on every registry
+        # construction.
+        recommend_before = self.memory.active_skill(self.catalog_key, "recommend")
+        recommend_validation_due = bool(
+            recommend_before and not self._validation_is_fresh(recommend_before)
+        )
+
         # Business regression is checked *before* the core validation can mark a
         # strategy fresh. Otherwise a proxy-only refresh could accidentally hide
         # a production-reward regression for the whole validation TTL.
@@ -103,23 +113,104 @@ class ToolRegistry(CoreToolRegistry):
                     float(active_report.get("quality", 0.0)),
                 )
 
-        # Existing relevance/coverage/cold-start checks remain mandatory.
+        # Existing search relevance plus recommendation proxy/coverage/cold-start
+        # checks remain mandatory and own the shared validation TTL.
         super()._validate_active_strategies()
 
-        # If the strategy survived both business and proxy checks, persist one
-        # validation record that states both values explicitly.
+        # Recommendation promotion carries an interaction-temporal relevance
+        # guardrail. Revalidation enforces the same invariant on the exact same
+        # prepared temporal slices, but only when the normal validation cycle is
+        # due. This avoids rebuilding historical slices on every ToolRegistry fork.
+        relevance_validation: tuple[str, dict[str, Any]] | None = None
+        recommend_skill = self.memory.active_skill(self.catalog_key, "recommend")
+        if recommend_validation_due and recommend_skill:
+            prepared = prepare_recommend_relevance(
+                self.catalog,
+                self.recommend,
+                users_override=self.recommend.known_users(),
+                k=10,
+            )
+            active_relevance = prepared.evaluate(self.recommend.config)
+            default_relevance = prepared.evaluate(RecommendConfig())
+            samples = min(
+                int(active_relevance.get("users", 0) or 0),
+                int(default_relevance.get("users", 0) or 0),
+            )
+            relevance_available = bool(
+                active_relevance.get("available")
+                and default_relevance.get("available")
+                and samples >= 3
+            )
+            ndcg_delta = float(active_relevance.get("model", {}).get("ndcg", 0.0)) - float(
+                default_relevance.get("model", {}).get("ndcg", 0.0)
+            )
+            mrr_delta = float(active_relevance.get("model", {}).get("mrr", 0.0)) - float(
+                default_relevance.get("model", {}).get("mrr", 0.0)
+            )
+            regression = relevance_available and (
+                ndcg_delta < -0.01 or mrr_delta < -0.015
+            )
+            if regression:
+                retired = self.memory.retire_active(
+                    self.catalog_key,
+                    "recommend",
+                    reason="active recommendation strategy regressed on interaction-temporal relevance",
+                )
+                self.recommend = self.recommend.with_config(RecommendConfig())
+                if retired:
+                    self.rollback_events.append({"domain": "recommend", **retired})
+            else:
+                relevance_validation = (
+                    str(recommend_skill["fingerprint"]),
+                    {
+                        "relevance_available": relevance_available,
+                        "relevance_users": samples,
+                        "relevance_protocol": active_relevance.get("protocol"),
+                        "relevance_temporal_scope": active_relevance.get("temporal_scope"),
+                        "point_in_time_item_features": active_relevance.get("point_in_time_item_features"),
+                        "relevance_ndcg": float(active_relevance.get("model", {}).get("ndcg", 0.0)),
+                        "default_relevance_ndcg": float(default_relevance.get("model", {}).get("ndcg", 0.0)),
+                        "relevance_ndcg_delta": round(ndcg_delta, 4),
+                        "relevance_mrr": float(active_relevance.get("model", {}).get("mrr", 0.0)),
+                        "default_relevance_mrr": float(default_relevance.get("model", {}).get("mrr", 0.0)),
+                        "relevance_mrr_delta": round(mrr_delta, 4),
+                    },
+                )
+                if "recommend" not in business_pass:
+                    existing = dict((recommend_skill.get("payload") or {}).get("validation") or {})
+                    existing.update(relevance_validation[1])
+                    self.memory.mark_skill_validation(
+                        self.catalog_key,
+                        "recommend",
+                        str(recommend_skill["fingerprint"]),
+                        metrics=existing,
+                    )
+
+        # If a strategy survived business plus domain guardrails, persist one
+        # validation record that merges the core metrics with business/relevance
+        # evidence instead of replacing one evidence family with another.
         for domain, (fingerprint, reward, proxy_quality) in business_pass.items():
             skill = self.memory.active_skill(self.catalog_key, domain)
             if not skill or str(skill.get("fingerprint")) != fingerprint:
                 continue
+            metrics: dict[str, Any] = dict((skill.get("payload") or {}).get("validation") or {})
+            metrics.update(
+                {
+                    "business_reward": reward,
+                    "proxy_quality": proxy_quality,
+                }
+            )
+            if (
+                domain == "recommend"
+                and relevance_validation is not None
+                and relevance_validation[0] == fingerprint
+            ):
+                metrics.update(relevance_validation[1])
             self.memory.mark_skill_validation(
                 self.catalog_key,
                 domain,
                 fingerprint,
-                metrics={
-                    "business_reward": reward,
-                    "proxy_quality": proxy_quality,
-                },
+                metrics=metrics,
             )
 
     @staticmethod
@@ -143,6 +234,7 @@ class ToolRegistry(CoreToolRegistry):
             "robustness": result.get("robustness", {}),
             "evaluation_basis": result.get("evaluation_basis", "proxy_metrics"),
             "business_validation": result.get("business_validation", {}),
+            "relevance_validation": result.get("relevance_validation", {}),
             "credit_learning": result.get("credit_learning", {}),
         }
         if activate:

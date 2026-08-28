@@ -7,7 +7,11 @@ from .capabilities import (
 )
 from .search import SearchConfig, SearchEngine
 from .recommend import RecommendConfig, RecommendationEngine
-from .recommend_validation import audit_recommend_relevance
+from .recommend_validation import (
+    PreparedRecommendRelevance,
+    audit_recommend_relevance,
+    prepare_recommend_relevance,
+)
 from .segments import (
     SegmentRouter,
     SearchRequestFeatures,
@@ -41,6 +45,8 @@ __all__ = [
     "SearchEngine",
     "RecommendConfig",
     "RecommendationEngine",
+    "PreparedRecommendRelevance",
+    "prepare_recommend_relevance",
     "SegmentRouter",
     "SearchRequestFeatures",
     "RecommendRequestFeatures",

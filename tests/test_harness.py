@@ -60,11 +60,26 @@ def test_eval_gated_evolution_learns_without_activating_when_user_denies_change(
     assert result["evolution"]["memory"]["skills"] >= 1
 
 
-def test_explicit_autonomous_optimization_can_activate_and_future_runs_recall_it(tmp_path):
+def test_autonomous_optimization_learns_without_serving_activation_authority(tmp_path):
     memory = AgentMemory(tmp_path / "memory.db")
     catalog = build_sample_catalog()
-    first = AgentHarness(catalog, memory=memory).run("看看用户 u-lin 的推荐，自动优化并持续学习")
+    result = AgentHarness(catalog, memory=memory).run("看看用户 u-lin 的推荐，自动优化并持续学习")
+    evolve = next(row for row in result["actions"] if row["tool"] == "recommend.evolve")
+    assert result["plan"]["allow_adaptation"] is False
+    assert evolve["result"]["learned"] is True
+    assert evolve["result"]["activated"] is False
+    assert result["evolution"]["memory"]["active_strategies"] == 0
+    assert any("未授予激活权限" in row for row in result["plan"]["constraints"])
+
+
+def test_explicit_activation_can_activate_and_future_runs_recall_it(tmp_path):
+    memory = AgentMemory(tmp_path / "memory.db")
+    catalog = build_sample_catalog()
+    first = AgentHarness(catalog, memory=memory).run(
+        "看看用户 u-lin 的推荐，自动优化并持续学习，验证通过后上线这个策略"
+    )
     evolve = next(row for row in first["actions"] if row["tool"] == "recommend.evolve")
+    assert first["plan"]["allow_adaptation"] is True
     assert evolve["result"]["activated"] is True
     assert first["evolution"]["memory"]["active_strategies"] == 1
     second = AgentHarness(catalog, memory=memory).run("继续看看用户 u-lin 的推荐体验")
@@ -178,7 +193,9 @@ def test_fork_reuses_features_but_picks_up_new_active_strategy(tmp_path):
     memory = AgentMemory(tmp_path / "memory.db")
     base = AgentHarness(build_sample_catalog(), memory=memory)
     child = base.fork()
-    learned = child.run("检查用户 u-lin 的推荐体验，自动优化并持续学习")
+    learned = child.run(
+        "检查用户 u-lin 的推荐体验，自动优化并持续学习，验证通过后上线这个策略"
+    )
     evolve = next(row for row in learned["actions"] if row["tool"] == "recommend.evolve")
     assert evolve["result"]["activated"] is True
     next_run = base.fork()
