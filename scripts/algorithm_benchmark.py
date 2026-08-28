@@ -12,6 +12,18 @@ from lingjing_harness.algorithms import (
 from lingjing_harness.sample_data import build_sample_catalog
 
 
+def _query_rows(report: dict) -> dict[str, dict]:
+    return {
+        str(row["query"]): {
+            "ndcg": row["ndcg"],
+            "recall": row["recall"],
+            "mrr": row["mrr"],
+            "top": row["top"],
+        }
+        for row in report.get("details", [])
+    }
+
+
 def main() -> None:
     catalog = build_sample_catalog()
 
@@ -47,6 +59,8 @@ def main() -> None:
                 float(search.get("quality", 0.0)) - float(lexical.get("quality", 0.0)),
                 4,
             ),
+            "hybrid_queries": _query_rows(search),
+            "lexical_queries": _query_rows(lexical),
         },
         "recommend": {
             "temporal_protocol": recommend.get("relevance_protocol"),
