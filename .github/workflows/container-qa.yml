@@ -1,0 +1,79 @@
+name: Container QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - pyproject.toml
+      - lingjing_harness/**
+      - frontend/**
+      - .github/workflows/container-qa.yml
+  pull_request:
+    paths:
+      - Dockerfile
+      - pyproject.toml
+      - lingjing_harness/**
+      - frontend/**
+      - .github/workflows/container-qa.yml
+  workflow_dispatch:
+
+jobs:
+  production-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build production image
+        run: docker build -t recsys-harness:ci .
+
+      - name: Verify runtime dependency boundary
+        run: |
+          docker run --rm --entrypoint python recsys-harness:ci -c "import importlib.util, lingjing_harness; assert importlib.util.find_spec('pytest') is None; assert importlib.util.find_spec('httpx') is None"
+
+      - name: Start protected container
+        run: |
+          docker run -d --name recsys-harness-ci \
+            -e LINGJING_ENV=production \
+            -e LINGJING_ACCESS_TOKEN=container-ci-access-token-1234 \
+            -e LINGJING_COOKIE_SECURE=0 \
+            -p 8765:8765 \
+            recsys-harness:ci
+
+      - name: Verify container identity and health
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8765/health/ready >/dev/null; then
+              break
+            fi
+            if [ "$i" = 30 ]; then
+              docker logs recsys-harness-ci
+              exit 1
+            fi
+            sleep 1
+          done
+
+          for i in {1..45}; do
+            health="$(docker inspect -f '{{.State.Health.Status}}' recsys-harness-ci)"
+            if [ "$health" = "healthy" ]; then
+              break
+            fi
+            if [ "$health" = "unhealthy" ] || [ "$i" = 45 ]; then
+              docker logs recsys-harness-ci
+              exit 1
+            fi
+            sleep 1
+          done
+
+          test "$(docker inspect -f '{{.Config.User}}' recsys-harness-ci)" = "xushu"
+          test "$(docker exec recsys-harness-ci python -c 'import os; print(os.geteuid())')" != "0"
+          test "$(curl -sS -o /tmp/status.json -w '%{http_code}' http://127.0.0.1:8765/api/status)" = "401"
+          test "$(curl -sS -o /tmp/live.json -w '%{http_code}' http://127.0.0.1:8765/health/live)" = "200"
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker logs recsys-harness-ci || true
+
+      - name: Stop container
+        if: always()
+        run: docker rm -f recsys-harness-ci || true
