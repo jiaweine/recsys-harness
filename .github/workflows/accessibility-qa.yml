@@ -13,6 +13,9 @@ on:
       - ".github/workflows/accessibility-qa.yml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   browser:
     runs-on: ubuntu-latest

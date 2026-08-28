@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - Dockerfile
+      - .dockerignore
       - pyproject.toml
       - lingjing_harness/**
       - frontend/**
@@ -12,11 +13,15 @@ on:
   pull_request:
     paths:
       - Dockerfile
+      - .dockerignore
       - pyproject.toml
       - lingjing_harness/**
       - frontend/**
       - .github/workflows/container-qa.yml
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   production-image:
