@@ -10,7 +10,7 @@ from implicit.datasets.movielens import get_movielens
 from implicit.evaluation import leave_k_out_split
 
 from lingjing_harness.domain import Catalog, Interaction, Item
-from scripts.repo_recommender_benchmark import (
+from repo_recommender_benchmark import (
     XushuImplicitEvaluationAdapter,
     _metrics,
     _training_catalog,
