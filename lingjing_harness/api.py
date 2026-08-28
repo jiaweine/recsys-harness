@@ -19,6 +19,7 @@ from fastapi import HTTPException
 from . import api_core as _core
 from .api_shutdown import install_shutdown_boundary
 from .proxy_trust import TRUSTED_PROXY_NETWORKS, client_key as _proxy_client_key
+from .rate_limit_maintenance import install_rate_limit_maintenance
 from .workspace_identity import workspace_fingerprint
 
 
@@ -33,6 +34,10 @@ _core.CATALOG_REVISION = workspace_fingerprint(_core.catalog)
 # surface while refusing attacker-controlled X-Forwarded-For from untrusted peers.
 _core._client_key = _proxy_client_key
 _core.TRUSTED_PROXY_NETWORKS = TRUSTED_PROXY_NETWORKS
+
+# Keep the shared SQLite rate-limit table bounded on a deterministic maintenance
+# schedule.  Allowance/counter semantics remain owned by WorkspaceStore.
+install_rate_limit_maintenance(_core.store)
 
 
 # Full run snapshots grow with every action, observation and event.  Persisting
