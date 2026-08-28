@@ -20,8 +20,35 @@ class OwnedPolicy:
     SEARCH_HINTS = ("搜", "搜索", "查询", "找不到", "关键词", "结果不准", "无结果", "搜索体验")
     REC_HINTS = ("推荐", "首页", "feed", "猜你喜欢", "分发", "曝光", "推荐体验", "个性化")
     EXPLORE_HINTS = ("优化", "提升", "改进", "实验", "候选", "试试", "调整", "进化", "学习")
-    ADAPT_HINTS = ("自动优化", "自主优化", "自动学习", "持续优化", "可以调整", "直接优化", "允许调整")
-    NO_ADAPT_HINTS = ("不要上线", "先不要上线", "别上线", "不修改", "不要修改", "只检查", "只看", "不改变", "先离线")
+    # ``allow_adaptation`` is retained in AgentPlan for checkpoint/API compatibility,
+    # but its authority meaning is intentionally narrow: it authorizes changing the
+    # active serving strategy. Exploring, validating and learning a candidate is
+    # controlled by ``explore`` and never implies activation on its own.
+    ACTIVATE_HINTS = (
+        "上线",
+        "激活",
+        "应用策略",
+        "应用这个策略",
+        "直接生效",
+        "立即生效",
+        "设为当前",
+        "作为当前策略",
+        "切换策略",
+        "部署策略",
+    )
+    NO_ACTIVATE_HINTS = (
+        "不要上线",
+        "先不要上线",
+        "别上线",
+        "不要激活",
+        "先不要激活",
+        "不修改",
+        "不要修改",
+        "只检查",
+        "只看",
+        "不改变",
+        "先离线",
+    )
     NETWORK_HINTS = ("联网", "网上", "外部资料", "最新资料", "最新信息", "行业趋势", "同类产品", "公开资料", "查网页")
 
     def __init__(
@@ -90,13 +117,15 @@ class OwnedPolicy:
         explore = any(k in lowered for k in self.EXPLORE_HINTS)
         query = self._extract_query(source, catalog) if mode in {"search", "both"} else None
         user = self._extract_user(source, catalog) if mode in {"recommend", "both"} else None
-        deny = any(k in lowered for k in self.NO_ADAPT_HINTS)
-        allow = any(k in lowered for k in self.ADAPT_HINTS) and not deny
+        deny_activation = any(k in lowered for k in self.NO_ACTIVATE_HINTS)
+        allow_activation = any(k in lowered for k in self.ACTIVATE_HINTS) and not deny_activation
         network_requested = self._network_explicitly_requested(user_text)
         network = bool(allow_network or network_requested)
         constraints = []
-        if deny:
+        if deny_activation:
             constraints.append("不改变当前工作区策略")
+        elif explore and not allow_activation:
+            constraints.append("未授予激活权限；候选只验证和学习，不改变当前工作区策略")
         if "先" in lowered and ("离线" in lowered or "复核" in lowered):
             constraints.append("先完成离线验证")
         if network_requested:
@@ -109,7 +138,7 @@ class OwnedPolicy:
             query=query,
             user_id=user,
             explore=explore,
-            allow_adaptation=allow,
+            allow_adaptation=allow_activation,
             allow_network=network,
             constraints=tuple(constraints),
             steps=[],
