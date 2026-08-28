@@ -7,6 +7,7 @@ from .capabilities import (
 )
 from .search import SearchConfig, SearchEngine
 from .recommend import RecommendConfig, RecommendationEngine
+from .recommend_validation import audit_recommend_relevance
 from .segments import (
     SegmentRouter,
     SearchRequestFeatures,
@@ -49,6 +50,7 @@ __all__ = [
     "audit_cold_start",
     "audit_search",
     "audit_recommend",
+    "audit_recommend_relevance",
     "evolve_search",
     "evolve_recommend",
     "evaluate_logged_policy",
