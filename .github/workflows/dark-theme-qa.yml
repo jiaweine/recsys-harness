@@ -25,9 +25,9 @@ jobs:
       LINGJING_DATA_DIR: /tmp/recsys-dark-theme-qa
       RECSYS_CAPTURE_URL: http://127.0.0.1:8765
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -54,7 +54,7 @@ jobs:
         run: python scripts/capture_dark_theme_qa.py
 
       - name: Upload dark-theme visual QA
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dark-theme-visual-qa
           path: |

@@ -50,9 +50,9 @@ jobs:
       LINGJING_DATA_DIR: /tmp/recsys-readme-capture
       RECSYS_CAPTURE_URL: http://127.0.0.1:8765
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -97,7 +97,7 @@ jobs:
         run: python scripts/check_runtime_response_cache.py
 
       - name: Upload visual QA bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: visual-qa
           path: |
@@ -117,7 +117,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
@@ -136,7 +136,7 @@ jobs:
 
       - name: Download verified visual QA bundle
         if: steps.freshness.outputs.publish == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: visual-qa
           path: docs/readme-assets
