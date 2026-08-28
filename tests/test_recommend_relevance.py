@@ -14,8 +14,9 @@ def test_sample_recommender_beats_popularity_on_temporal_relevance():
     assert report["available"] is True
     assert report["users"] == 5
     assert report["protocol"] == "strict_temporal_leave_one_out"
-    assert report["model"]["hit_rate"] >= report["popularity_baseline"]["hit_rate"]
-    assert report["model"]["ndcg"] > report["popularity_baseline"]["ndcg"]
+    popularity = report["popularity_baseline"]
+    assert report["model"]["hit_rate"] >= popularity["hit_rate"]
+    assert report["model"]["ndcg"] > popularity["ndcg"]
     assert report["delta_vs_popularity"]["ndcg"] > 0.0
 
 
