@@ -1,0 +1,27 @@
+name: External Semantic Quality
+on:
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Install Sentence Transformers repository release
+        run: pip install 'sentence-transformers==6.0.0'
+      - name: Compare multilingual semantic retrieval
+        env:
+          HF_HUB_DOWNLOAD_TIMEOUT: '120'
+        run: python scripts/repo_search_benchmark.py
+      - name: Install FlagEmbedding repository release
+        run: pip install 'FlagEmbedding==1.4.2'
+      - name: Compare Chinese retrieval model
+        env:
+          HF_HUB_DOWNLOAD_TIMEOUT: '120'
+        run: python scripts/repo_search_bge_benchmark.py
