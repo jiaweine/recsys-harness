@@ -14,7 +14,7 @@
 
 **Business Reward · Temporal Replay · Mixed Strategy Genome · Independent Guardrails · Durable Recovery**
 
-[产品](#真实产品) · [价值闭环](#生产价值闭环) · [Agent Harness](#agent-harness) · [自进化](#垂直自进化) · [接入](#existing-system-integration) · [启动](#快速启动) · [数据](#生产数据契约) · [架构](#系统架构) · [边界](#能力边界与扩展面)
+[产品](#真实产品) · [价值闭环](#生产价值闭环) · [Agent Harness](#agent-harness) · [自进化](#垂直自进化) · [接入](#existing-system-integration) · [启动](#快速启动) · [配置](#配置) · [数据](#生产数据契约) · [架构](#系统架构) · [可靠性](#可靠性与安全)
 
 </div>
 
@@ -28,7 +28,7 @@
 </p>
 <p align="center"><sub>一个任务面：目标、对话、运行状态、证据、附件与可恢复执行保持在同一上下文。</sub></p>
 
-> **Real product, real browser.** 截图来自仓库实际启动的应用。CI 使用真实浏览器验证桌面/移动流程，并把 README 资产固定到不可变 commit。
+> **Real product, real browser.** 截图来自仓库实际启动的应用。CI 使用真实浏览器验证桌面与移动流程，并把 README 资产固定到不可变 commit。
 
 <table>
   <tr>
@@ -68,36 +68,33 @@
 
 序枢不是“又一个推荐模型库”，也不是“让 Agent 多调用几个工具”。
 
-它面向搜推团队长期反复发生、却经常散落在日志、Notebook、实验平台、代码仓库和人工经验里的工作：
+它面向搜推团队最核心的一条工作链：**从异常和机会出发，形成可验证策略，再把验证结果沉淀为可持续复用的系统能力。**
 
 ```text
-线上 / 离线异常
-    ↓
-到底是 query、候选、排序、冷启动、探索还是数据问题？
-    ↓
-应该先试哪种改动？
-    ↓
-这个候选只是 proxy metric 更高，还是业务真的更好？
-    ↓
-验证有没有污染 temporal holdout？
-    ↓
-证据是否足以进入 durable trust？
-    ↓
-谁有权限激活？
-    ↓
-退化以后谁负责发现、退休和恢复？
+线上 / 离线信号
+      ↓
+问题定位与证据收集
+      ↓
+策略候选生成
+      ↓
+业务回放 + Domain Guardrails
+      ↓
+Future Temporal Holdout
+      ↓
+置信度与回归门槛
+      ↓
+Trusted Strategy Memory
+      ↓
+Permissioned Activation
+      ↓
+Revalidation / Retirement
 ```
 
-序枢把这些步骤变成同一条可追踪的证据链。
+传统搜推优化往往分散在日志、Notebook、实验平台、代码仓库和个人经验里。序枢把这些步骤收进同一个可追踪的证据链，让每一次优化都能回答三个问题：
 
-| 序枢负责 | 序枢不假装负责 |
-| --- | --- |
-| 任务编排、真实工具执行、证据采集 | 用一个“总分”掩盖业务目标 |
-| Search / Recommendation reference engine | 强迫企业迁移 serving stack |
-| production reward replay 与 temporal holdout | 把 logged replay 包装成完整无偏 OPE |
-| mixed strategy evolution 与独立 guardrail | 让 optimizer 改写 RewardSpec |
-| trust / activate / revalidate / retire lifecycle | 在没有用户权限时自动改生产策略 |
-| durable run / checkpoint / recovery / fencing | 用一次漂亮结果换取永久信任 |
+1. **为什么要改？** —— 异常、目标与证据是什么；
+2. **为什么这个候选更好？** —— 业务 reward 与独立 guardrail 是否共同支持；
+3. **为什么可以信任？** —— 是否经过独立 holdout、回归门槛和权限控制。
 
 ### 产品级指标
 
@@ -106,25 +103,26 @@
 - **MTTD / MTTDg**：异常出现到发现、诊断需要多久；
 - **Experiment lead time**：一个策略想法到可信验证需要多久；
 - **Bad-candidate rejection**：多少坏策略在进入线上实验前被拦住；
-- **Rollback latency**：生产回放退化到自动退休策略需要多久；
-- **Validated uplift**：累计产生多少经过业务 reward + 独立验证支持的改进。
+- **Rollback latency**：退化出现到策略退休需要多久；
+- **Validated uplift**：累计产生多少经过业务 reward 与独立验证支持的改进。
 
 ---
 
 # 生产价值闭环
 
-Coverage、diversity、freshness、novelty、cold-start 等指标很重要，但它们不等于业务价值：
+序枢把 **业务价值** 与 **体验保护指标** 分开建模。
+
+coverage、diversity、freshness、novelty、cold-start、NDCG、Recall 等指标负责描述相关性、覆盖和体验结构；业务 reward 则负责回答候选策略是否真正改善了目标结果。
 
 ```text
-更高 diversity
-+ 更高 freshness
-+ 更高 coverage
-≠ 一定更高 CTR / CVR / GMV / watch time / retention
+Business Reward      → primary routing objective
+Domain Guardrails    → relevance / experience constraints
+Temporal Holdout     → generalization evidence
+Confidence / Gates   → trust criteria
+Strategy Memory      → reusable strategy knowledge
 ```
 
-序枢把 **业务 reward** 与 **体验 guardrail** 明确分层：业务定义价值，guardrail 负责阻止局部收益破坏整体体验。
-
-## 1 · RewardSpec：业务定义价值
+## 1 · RewardSpec：由业务定义价值
 
 ```json
 {
@@ -148,16 +146,16 @@ Coverage、diversity、freshness、novelty、cold-start 等指标很重要，但
 configured weight(event) × event.value
 ```
 
-业务可以直接表达自己的价值函数：
+业务可以用同一份 contract 表达不同目标：
 
 - 电商：purchase / GMV / refund；
 - 内容：watch time / completion / skip；
 - 社区：follow / dwell / hide；
 - 搜索：click / conversion / reformulation penalty。
 
-> **RewardSpec 是产品 contract，不是进化 gene。** optimizer 没有权限把业务目标偷偷改成更容易优化的指标。
+> **RewardSpec 是业务 contract，而不是 evolution gene。** 优化器搜索策略，业务价值定义保持独立。
 
-## 2 · ExposureEvent：记录真实展示与结果
+## 2 · ExposureEvent：保留真实曝光上下文
 
 生产评估与用户画像行为分开存储。
 
@@ -177,15 +175,13 @@ request_id
  metadata
 ```
 
-`interactions` 可以构造用户 profile；`events` 回答另一类问题：
+`interactions` 用于构造 profile；`events` 用于描述真实 request、策略版本、曝光位置与最终 outcome。
 
-> 哪个真实 request、由哪个策略、在什么位置展示了什么，最后发生了什么？
-
-这是 production replay、temporal holdout、策略版本追踪和回归判断的基础。
+这让 replay、temporal holdout、策略版本追踪与业务 reward 基于同一套可审计事实工作。
 
 ## 3 · Logged replay
 
-候选策略会对历史 request 重新执行排名，并用业务 reward 对排名结果打分。
+候选策略会对历史 request 重新执行排名，并基于记录到的业务 outcome 计算 request-level policy value。
 
 ```text
 historical request
@@ -203,7 +199,7 @@ optional capped inverse propensity
 request-level policy value
 ```
 
-报告包含：
+评估结果显式报告：
 
 ```text
 business_reward
@@ -213,20 +209,18 @@ estimator
 propensity_rows
 ```
 
-### 统计语义
-
-这一层的 estimator 明确命名为：
+Estimator 类型保持可见：
 
 ```text
 logged_replay
 propensity_weighted_logged_replay
 ```
 
-它不是“完整无偏 OPE”。没有历史曝光的 item 没有真实 outcome；README 不把 ranking replay 的证据强度夸大成 counterfactual certainty。
+不同 evaluation basis、数据覆盖度和估计方式都会进入 evidence，策略比较始终保留可追踪的统计语义。
 
 ## 4 · Temporal future holdout
 
-生产 events 不使用普通 hash/random split 作为默认泛化假设。
+生产 events 按 request identity 与时间切分 discovery / holdout：
 
 ```text
 older request identities
@@ -240,16 +234,16 @@ newer request identities
 future holdout
 ```
 
-硬约束：
+核心约束：
 
-- 一个 `request_id` 不能跨 discovery / holdout；
+- 同一个 `request_id` 不跨 discovery / holdout；
 - future holdout 时间晚于 discovery；
-- business holdout 与 Search relevance / Rec warm-user guardrail holdout 是两套独立证据；
-- 一个 future request 不足以获得 durable trust。
+- business holdout 与 Search relevance / Rec warm-user guardrail holdout 使用独立证据；
+- durable trust 需要多 request 的 future evidence。
 
-## 5 · Paired bootstrap confidence
+## 5 · Paired confidence
 
-在 future holdout 上按相同 `request_id` 比较 reference 与 candidate：
+在 future holdout 上，reference 与 candidate 按相同 `request_id` 做 paired comparison：
 
 ```text
 candidate(request) - reference(request)
@@ -259,13 +253,13 @@ paired bootstrap
 delta + CI95 + probability_positive
 ```
 
-样本不足不会被“漂亮置信区间”掩盖；public trust gate 至少需要两个 paired future request，同时要求 domain guardrail 有独立 holdout。
+策略进入 trusted memory，由 uplift、置信度、future evidence 与 domain regression gate 共同决定，而不是只看单次最优分数。
 
 ---
 
 # Agent Harness
 
-## Mission-driven，而不是固定 tool sequence
+序枢把搜推优化建模成 **Mission-driven evidence loop**，而不是固定 tool sequence。
 
 ```text
 Goal + Authority
@@ -289,36 +283,31 @@ replan        close
        Result Verifier
 ```
 
-每个 Evidence Requirement 带：
+每个 Evidence Requirement 都包含：
 
 ```text
 key · domain · tool · priority
 prerequisites · status · satisfied_by
 ```
 
-Harness 追的是**还缺什么证据**，不是“固定流程走到第几步”。
+Harness 追踪的是**还缺什么证据才能完成任务**，并根据 observation、contradiction 和 verifier 结果持续更新 mission state。
 
-## Mission compiler 的职责边界
+一次 Search / Recommendation mission 可以同时拥有：
 
-`DeliberationEngine` 承担一部分 Search / Recommendation mission semantics，例如搜索复现、推荐 audit、候选验证等 requirement；Evolution search space 则由 schema / capability 驱动。
-
-这不是隐藏在 README 后面的实现细节，而是架构职责划分：
-
-```text
-Mission semantics
-    ↓
-Deliberation / requirements
-    ↓
-Capability-registry execution space
-    ↓
-Evidence-driven selection
-```
+- 明确目标；
+- 可见 authority；
+- 可恢复 trajectory；
+- 结构化 evidence；
+- 可验证 conclusion；
+- 可复用 strategy memory。
 
 ---
 
 # 垂直自进化
 
 ## Mixed Strategy Genome
+
+序枢把连续参数与离散 capability 放在同一个 strategy genome 中搜索：
 
 ```text
 Strategy Genome
@@ -331,20 +320,20 @@ Strategy Genome
    └─ Rec: profile / candidate / cold-start / exploration / rerank
 ```
 
-`CapabilityRegistry` 只声明 **what exists**；数据和验证决定 **what wins**。
+`CapabilityRegistry` 声明 **what exists**；数据、reward 与 guardrail 决定 **what wins**。
 
 ## 两种 evaluation basis
 
-### 本地 / demo 数据
+### Offline / demo evaluation
 
-没有 RewardSpec + production events 时：
+在没有 production events 的工作区，系统使用 domain metrics 构造可重复的离线 evaluation：
 
 ```text
 evaluation_basis = proxy_metrics
 business_trusted = false
 ```
 
-系统仍可以评估：
+包括：
 
 - Search NDCG / Recall / MRR；
 - Recommendation coverage / freshness / diversity / novelty；
@@ -352,9 +341,11 @@ business_trusted = false
 - robustness；
 - capability / continuous response surface。
 
-这些 proxy 用于体验质量与算法诊断，不会被写成“业务增长”。
+这些指标用于验证排序行为、体验结构与策略响应面。
 
-### Production reward 数据
+### Production reward evaluation
+
+当 RewardSpec + production events 存在时，策略进入 production value loop：
 
 ```text
 Mixed Genome
@@ -376,7 +367,7 @@ Paired Confidence + Regression Gates
 Trusted Strategy Memory
 ```
 
-业务 reward 是主要 routing objective；NDCG / Recall、coverage、freshness、cold-start 和 worst-slice 回到更合理的位置：**保护体验的 guardrail**。
+业务 reward 负责主要 routing；NDCG / Recall、coverage、freshness、cold-start 与 worst-slice metrics 作为独立 guardrail，避免局部收益破坏整体体验。
 
 ---
 
@@ -399,23 +390,22 @@ periodic validation
    └─ pass → keep active
 ```
 
-当 production reward 存在时：
+Production-aware strategy memory 保存：
 
-- strategy memory 的 score 优先保存 business reward；
-- memory payload 保存 `evaluation_basis` 和 `business_validation`；
-- business regression 在 proxy validation 之前检查；
-- proxy-only refresh 不能把 business regression 隐藏整个 TTL；
-- Harness fork 保持 production-aware ToolRegistry。
+- strategy score；
+- `evaluation_basis`；
+- `business_validation`；
+- guardrail evidence；
+- activation authority；
+- revalidation / retirement state。
 
-**Trusted 不等于 Active。** 进入 durable trust 只代表证据达标；真正激活仍需要显式用户 authority。
+**Trusted 与 Active 分层。** 策略先通过证据门槛进入 durable trust，再根据显式 authority 进入 active lifecycle。
 
 ---
 
 # Existing system integration
 
-序枢的内建 Search / Recommendation 是 reference engine，不是企业必须迁移到的目标 serving 架构。
-
-对既有系统的接入入口是 read-only serving adapter contract：
+序枢内建 Search / Recommendation reference engine，同时支持把已有 serving system 作为真实评估对象接入。
 
 ```python
 from lingjing_harness import (
@@ -438,17 +428,15 @@ report = evaluate_logged_policy(
 )
 ```
 
-外部返回结果会：
+Serving adapter 会对外部返回结果执行统一约束：
 
 - 统一成 `id`；
 - 去重；
 - 拒绝非有限 score；
 - 保持确定排名；
-- 直接进入同一套 business replay。
+- 进入同一套 business replay 与 evidence loop。
 
-因此 Elasticsearch、OpenSearch、Vespa、内部 rank API、已有 recommendation service 都可以先作为**真实评估对象**接入。
-
-> external adapter 遵循 read-only evaluation contract。修改外部 production policy 需要接入方提供显式 typed write / experiment contract；序枢不会猜远端参数后直接修改生产服务。
+因此 Elasticsearch、OpenSearch、Vespa、内部 rank API、已有 recommendation service 都可以通过 adapter 纳入统一评估流程，而不需要先迁移 serving architecture。
 
 ---
 
@@ -531,7 +519,7 @@ LINGJING_COOKIE_SECURE
 LINGJING_TRUST_PROXY_IP
 ```
 
-外部搜索和本地多模态感知是可选能力；production access token、secure cookie 与 trusted proxy 配置用于部署访问边界。
+外部搜索和本地多模态感知按需启用；production access token、secure cookie 与 trusted proxy 配置用于部署访问控制。
 
 ---
 
@@ -579,10 +567,7 @@ recommend_replay_requests
 business_reward_ready
 ```
 
-`data.inspect` 会把工作区区分为：
-
-- 已有 production reward evidence；
-- 只能做 proxy evaluation。
+`data.inspect` 会把 evaluation basis 与可用 production evidence 暴露给 Harness，作为任务规划与验证依据。
 
 ---
 
@@ -637,9 +622,9 @@ Acceptance：[`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md)
 
 ---
 
-# 可靠性与安全边界
+# 可靠性与安全
 
-工程层面持续要求这些 invariant 成立：
+序枢把可靠性约束放在 runtime、evidence、strategy 与 production value loop 中共同执行：
 
 - Mission Graph / checkpoint resume；
 - adaptive invocation idempotency；
@@ -653,50 +638,18 @@ Acceptance：[`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md)
 - network permission isolation；
 - stale worker 不得覆盖较新的 durable state。
 
-生产价值层额外要求：
+Production value invariants：
 
 ```text
 business reward != proxy quality
 request identity cannot cross temporal split
-one future request cannot certify durable trust
+durable trust requires future evidence
 business regression can retire active strategy
 proxy validation cannot hide business regression
 RewardSpec cannot be evolved by optimizer
 ```
 
-这些规则的目标不是让系统“更保守”，而是让每次自动化改进都能回答：**依据是什么、谁允许的、失败后怎么恢复。**
-
----
-
-# 能力边界与扩展面
-
-序枢核心聚焦在 **可验证、可授权、可回滚的搜推改进闭环**。有些能力适合通过显式 contract 扩展，而不是在核心里用隐式假设硬编码。
-
-## Counterfactual OPE
-
-`logged_replay` 与 `propensity_weighted_logged_replay` 保持 ranking replay 语义。若业务要使用 IPS / SNIPS / Doubly Robust，需要额外提供能成立的 stochastic-policy / propensity / direct-model contract，而不是从 rank score 或 position 猜概率。
-
-## Online experiments
-
-A/B、interleaving、canary、traffic allocation 应通过 typed experiment adapter 接入。离线可信候选只能获得“值得进入下一层验证”的资格，不自动等价于线上激活。
-
-## External writes
-
-对外部 Elasticsearch / Vespa / rank service 的自动写入必须有显式 schema、authority、版本和 rollback contract。read-only adapter 与 write authority 分离。
-
-## Segment-conditioned portfolio
-
-不同 query / user / session pathology 可以映射到不同 verified strategy basin；这类 routing 应继续遵循独立 holdout、最小证据量与 regression gate。
-
-## Multi-objective optimization
-
-Latency、P99、infra cost 可以与业务 reward、relevance、coverage 一起进入 Pareto 选择，但不能用成本指标覆盖业务价值或 guardrail 失败。
-
-## Capability-driven mission compilation
-
-更多 domain requirement 可以逐步下沉到 capability declaration；无论 compiler 如何扩展，Mission Graph 都必须保留 prerequisite、evidence requirement 与 authority semantics。
-
-> README 只声明仓库能够证明的能力。扩展面写清 contract 和边界，不把计划能力提前包装成已交付能力。
+这些规则让每次自动化改进都能回答：**依据是什么、谁允许的、失败后怎么恢复。**
 
 ---
 
@@ -706,7 +659,7 @@ Latency、P99、infra cost 可以与业务 reward、relevance、coverage 一起�
 frontend/                          序枢产品 UI
 lingjing_harness/
   production.py                    RewardSpec / ExposureEvent / temporal replay / bootstrap
-  adapters.py                      existing-system read-only serving adapters
+  adapters.py                      existing-system serving adapters
   domain.py                        Catalog + training data + production evidence
   algorithms/
     search.py                      Search mixed genome + execution stages
