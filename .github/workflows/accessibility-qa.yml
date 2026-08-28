@@ -1,0 +1,50 @@
+name: Accessibility QA
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - "scripts/check_accessibility_boundaries.py"
+      - ".github/workflows/accessibility-qa.yml"
+  pull_request:
+    paths:
+      - "frontend/**"
+      - "scripts/check_accessibility_boundaries.py"
+      - ".github/workflows/accessibility-qa.yml"
+  workflow_dispatch:
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      LINGJING_DATA_DIR: /tmp/recsys-accessibility-qa
+      LINGJING_ENV: production
+      LINGJING_ACCESS_TOKEN: accessibility-ci-token-1234
+      LINGJING_COOKIE_SECURE: "0"
+      RECSYS_ACCESSIBILITY_URL: http://127.0.0.1:8766
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install app and Chromium
+        run: |
+          pip install -r requirements.txt playwright
+          pip install -e . --no-deps
+          python -m playwright install --with-deps chromium
+      - name: Start protected product
+        run: |
+          rm -rf "$LINGJING_DATA_DIR"
+          python -m uvicorn lingjing_harness.api:app --host 127.0.0.1 --port 8766 > /tmp/recsys-accessibility.log 2>&1 &
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8766/api/auth/status >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/recsys-accessibility.log
+          exit 1
+      - name: Verify keyboard and focus boundaries
+        run: python scripts/check_accessibility_boundaries.py
