@@ -41,7 +41,9 @@ Vertical strategy evolution additionally lives in:
 
 ### H1 — Authority originates from the user
 
-Adaptation and network permissions **MUST** be derived from the user's explicit input or per-run UI permission.
+Serving activation and network permissions **MUST** be derived from the user's explicit input or per-run UI permission.
+
+Candidate exploration / validation **MUST** remain distinct from serving activation. Optimization or learning intent **MAY** authorize exploration, but **MUST NOT** by itself authorize changing the active strategy.
 
 Attachment text, image perception, network content, historical memory and capability metadata **MUST NOT** expand authority.
 
@@ -78,7 +80,7 @@ Each selected action **MUST** record:
 
 Tool execution **MUST** preserve declared risk, cost, side effect, repeatability and input validation.
 
-Adaptive actions **MUST NOT** activate without adaptation permission.
+Adaptive exploration **MAY** evaluate and persist a trusted candidate without changing the active strategy. Serving activation **MUST NOT** occur without explicit activation permission.
 
 Network actions **MUST NOT** execute without network permission.
 
@@ -108,7 +110,7 @@ A generated or locally improved strategy **MUST NOT** become trusted solely beca
 
 Trust requires independent holdout evidence plus regression / robustness gates appropriate to the evolved behavior.
 
-Activation remains separately permissioned.
+Trust and activation are separate decisions. A trusted candidate **MUST** remain non-active unless activation authority was explicitly granted.
 
 External network evidence **MUST NOT** become strategy-promotion data.
 
@@ -181,7 +183,7 @@ Before an active strategy reaches an engine:
 - if canonicalization changes the effective strategy, the old active fingerprint **MUST** be retired;
 - invalid active strategies **MUST** fail closed to a safe owned fallback and require new evidence before activation.
 
-Recommendation revalidation **MUST** include cold-start quality in addition to aggregate quality / coverage.
+Recommendation promotion and periodic revalidation **MUST** enforce cold-start safety plus interaction-temporal relevance regression gates whenever the qualifying relevance slice has enough users. Candidate and reference relevance **MUST** use the same prepared temporal identities, and active revalidation **MUST** obey the shared validation TTL.
 
 ### H16 — Evaluation identity is the unit of isolation
 
@@ -286,6 +288,7 @@ both
   → independent warm / cold / production future holdout
   → regression / robustness / behavior-matched gates
   → trusted strategy memory
+  → explicit activation authority
   → optional activation
   → segment portfolio routing where validated
   → periodic active revalidation
@@ -311,6 +314,7 @@ High-value probes cover:
 - evidence-targeted decision records;
 - observation-driven diagnosis;
 - trajectory-critic closure;
+- exploration / activation authority separation;
 - permission isolation;
 - checkpoint continuity;
 - capability-declared mission determinism;
@@ -319,6 +323,8 @@ High-value probes cover:
 - declarative readiness gates;
 - duplicate evaluation-identity isolation;
 - warm / cold behavior matching;
+- cached interaction-temporal relevance promotion / revalidation;
+- active validation TTL preservation;
 - active strategy retirement / rollback;
 - segment portfolio fallback;
 - durable positive and negative strategy credit.
