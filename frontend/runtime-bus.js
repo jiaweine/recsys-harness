@@ -80,3 +80,5 @@
     }
   };
 })();
+
+void import('/assets/a11y.js');
