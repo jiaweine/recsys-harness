@@ -10,6 +10,7 @@ from .harness import AgentHarness, RunCancelled
 from .memory import AgentMemory, catalog_fingerprint
 from .mission_compiler import MissionCompiler
 from .network import NetworkResearch
+from .optimizer_tools import OptimizerToolRegistry
 from .perception import PerceptionEngine
 from .policy import OwnedPolicy
 from .tools import ToolRegistry
@@ -23,6 +24,7 @@ __all__ = [
     "RUNTIME_CAPABILITIES", "MissionCompiler",
     "DeliberationEngine", "TrajectoryCritic",
     "NetworkResearch",
+    "OptimizerToolRegistry",
     "PerceptionEngine",
     "OwnedPolicy",
     "ToolRegistry",
