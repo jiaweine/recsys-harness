@@ -61,6 +61,79 @@ def test_terminal_run_read_replaces_stale_active_snapshot_with_full_durable_resu
     api_module.store.delete_run(run_id)
 
 
+def test_active_run_poll_reads_full_snapshot_only_after_terminal_transition(monkeypatch):
+    conversation = api_module.store.create_conversation("cheap active polling", "search")
+    run_id = "job-active-poll-hot-path"
+    now = time.time()
+    running = {
+        "run_id": run_id,
+        "conversation_id": conversation["id"],
+        "goal": "poll",
+        "status": "running",
+        "events": [{"progress": 10}],
+        "result": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    api_module.store.delete_run(run_id)
+    assert api_module.store.reserve_run(
+        run_id,
+        conversation["id"],
+        "poll",
+        running,
+        owner_id=api_module.WORKER_ID,
+        lease_seconds=30,
+    )
+    with api_module.RUN_LOCK:
+        api_module.RUNS[run_id] = copy.deepcopy(running)
+
+    original_status = api_module.store.run_status
+    original_get = api_module.store.get_run
+    calls = {"status": 0, "snapshot": 0}
+
+    def counted_status(target: str):
+        calls["status"] += 1
+        return original_status(target)
+
+    def counted_get(target: str):
+        calls["snapshot"] += 1
+        return original_get(target)
+
+    monkeypatch.setattr(api_module.store, "run_status", counted_status)
+    monkeypatch.setattr(api_module.store, "get_run", counted_get)
+
+    for _ in range(25):
+        row = api_module.get_run(run_id)
+        assert row["status"] == "running"
+        assert row["result"] is None
+
+    assert calls == {"status": 25, "snapshot": 0}
+
+    completed = {
+        **running,
+        "status": "completed",
+        "result": {"answer": "done", "events": [{"progress": 100}]},
+        "updated_at": time.time(),
+    }
+    api_module.store.save_run(
+        run_id,
+        conversation["id"],
+        "poll",
+        "completed",
+        completed,
+        owner_id=api_module.WORKER_ID,
+    )
+
+    row = api_module.get_run(run_id)
+    assert row["status"] == "completed"
+    assert row["result"]["answer"] == "done"
+    assert calls == {"status": 26, "snapshot": 1}
+
+    with api_module.RUN_LOCK:
+        api_module.RUNS.pop(run_id, None)
+    api_module.store.delete_run(run_id)
+
+
 def _catalog_with_events(*, reward_click: float = 1.0, requests: int = 1) -> Catalog:
     base = build_sample_catalog()
     item_id = base.items[0].item_id
