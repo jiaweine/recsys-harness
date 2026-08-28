@@ -1,0 +1,21 @@
+name: Real Data Quality
+on:
+  workflow_dispatch:
+
+jobs:
+  movielens:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Install implicit repository release and dataset dependency
+        run: pip install 'implicit==0.7.3' h5py
+      - name: Compare on MovieLens 100K
+        env:
+          OPENBLAS_NUM_THREADS: '1'
+        run: python scripts/repo_movielens_benchmark.py
