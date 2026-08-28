@@ -1,11 +1,6 @@
 name: Real Data Quality
 
 on:
-  push:
-    paths:
-      - '.github/workflows/real-data-quality.yml'
-      - 'scripts/repo_movielens_benchmark.py'
-      - 'scripts/repo_recommender_benchmark.py'
   workflow_dispatch:
 
 jobs:
