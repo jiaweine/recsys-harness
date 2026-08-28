@@ -13,6 +13,11 @@ from typing import Any
 
 from . import evolution_core as _core
 from .credit_routing import install_credit_router
+from .optimizer_backends import (
+    annotate_optimizer_backend,
+    current_optimizer_backend,
+    optimizer_backend as select_optimizer_backend,
+)
 from .production_evolution import (
     evolve_recommend as _evolve_recommend,
     evolve_search as _evolve_search,
@@ -131,7 +136,12 @@ def _recommend_relevance_gate(
     return gated
 
 
-def evolve_search(catalog: Any, current: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+def _run_search(
+    catalog: Any,
+    current: Any,
+    *args: Any,
+    **kwargs: Any,
+) -> dict[str, Any]:
     remembered = kwargs.get("remembered")
     result = _trust_evidence_gate(_evolve_search(catalog, current, *args, **kwargs))
     return attach_search_portfolio(
@@ -142,7 +152,12 @@ def evolve_search(catalog: Any, current: Any, *args: Any, **kwargs: Any) -> dict
     )
 
 
-def evolve_recommend(catalog: Any, current: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+def _run_recommend(
+    catalog: Any,
+    current: Any,
+    *args: Any,
+    **kwargs: Any,
+) -> dict[str, Any]:
     remembered = kwargs.get("remembered")
     result = _trust_evidence_gate(_evolve_recommend(catalog, current, *args, **kwargs))
     result = _recommend_relevance_gate(catalog, current, result)
@@ -152,6 +167,24 @@ def evolve_recommend(catalog: Any, current: Any, *args: Any, **kwargs: Any) -> d
         result,
         remembered=remembered if isinstance(remembered, list) else None,
     )
+
+
+def evolve_search(catalog: Any, current: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    backend_request = kwargs.pop("optimizer_backend", None)
+    if backend_request is None:
+        backend = current_optimizer_backend()
+        return annotate_optimizer_backend(_run_search(catalog, current, *args, **kwargs), backend)
+    with select_optimizer_backend(str(backend_request)) as backend:
+        return annotate_optimizer_backend(_run_search(catalog, current, *args, **kwargs), backend)
+
+
+def evolve_recommend(catalog: Any, current: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    backend_request = kwargs.pop("optimizer_backend", None)
+    if backend_request is None:
+        backend = current_optimizer_backend()
+        return annotate_optimizer_backend(_run_recommend(catalog, current, *args, **kwargs), backend)
+    with select_optimizer_backend(str(backend_request)) as backend:
+        return annotate_optimizer_backend(_run_recommend(catalog, current, *args, **kwargs), backend)
 
 
 __all__ = [
