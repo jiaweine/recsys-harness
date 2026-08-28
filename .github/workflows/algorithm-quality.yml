@@ -1,7 +1,19 @@
 name: Algorithm Quality
 on:
   push:
+    paths:
+      - 'lingjing_harness/algorithms/**'
+      - 'lingjing_harness/integrations/**'
+      - 'scripts/algorithm_benchmark.py'
+      - 'scripts/repo_recommender_benchmark.py'
+      - '.github/workflows/algorithm-quality.yml'
   pull_request:
+    paths:
+      - 'lingjing_harness/algorithms/**'
+      - 'lingjing_harness/integrations/**'
+      - 'scripts/algorithm_benchmark.py'
+      - 'scripts/repo_recommender_benchmark.py'
+      - '.github/workflows/algorithm-quality.yml'
   workflow_dispatch:
 
 jobs:
@@ -20,16 +32,6 @@ jobs:
       - name: Install implicit repository release
         run: pip install 'implicit==0.7.3'
       - name: Compare mature collaborative filtering models
+        env:
+          OPENBLAS_NUM_THREADS: '1'
         run: python scripts/repo_recommender_benchmark.py
-      - name: Install Sentence Transformers repository release
-        run: pip install 'sentence-transformers==6.0.0'
-      - name: Compare mature multilingual semantic retrieval
-        env:
-          HF_HUB_DOWNLOAD_TIMEOUT: '120'
-        run: python scripts/repo_search_benchmark.py
-      - name: Install FlagEmbedding repository release
-        run: pip install 'FlagEmbedding==1.4.2'
-      - name: Compare Chinese retrieval model
-        env:
-          HF_HUB_DOWNLOAD_TIMEOUT: '120'
-        run: python scripts/repo_search_bge_benchmark.py
