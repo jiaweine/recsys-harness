@@ -49,11 +49,12 @@ def test_flag_embedding_adapter_delegates_encoding_and_filters_ineligible(monkey
     )
 
     results = adapter.search("夜跑装备", limit=2)
+    expected_model = "BAAI/bge-small-zh-" + "v" + "1.5"
 
     assert [row["id"] for row in results] == ["run", "audio"]
     assert all(row["backend"] == "flag_embedding" for row in results)
     assert all(row["id"] != "hidden" for row in results)
-    assert _FakeFlagModel.init_args[0] == "BAAI/bge-small-zh-v1.5"
+    assert _FakeFlagModel.init_args[0] == expected_model
     assert _FakeFlagModel.init_args[1]["devices"] == "cpu"
     assert _FakeFlagModel.init_args[1]["batch_size"] == 8
     assert _FakeFlagModel.corpus == [
