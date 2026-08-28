@@ -110,6 +110,14 @@ const install = () => {
   );
   const inspectorIsOpen = () => inspectorIsDrawer() && inspector?.classList.contains('open');
 
+  function focusInspectorEntry() {
+    if (!inspectorIsOpen()) return;
+    const selected = tabs.find(tab => tab.getAttribute('aria-selected') === 'true') || tabs[0] || inspectorClose;
+    if (selected && !inspector?.contains(document.activeElement)) {
+      selected.focus({preventScroll: true});
+    }
+  }
+
   function syncInspectorBoundary() {
     if (!inspector) return;
     const drawer = inspectorIsDrawer();
@@ -127,8 +135,7 @@ const install = () => {
     }
 
     if (drawer && open && !drawerWasOpen) {
-      const selected = tabs.find(tab => tab.getAttribute('aria-selected') === 'true') || tabs[0] || inspectorClose;
-      selected?.focus({preventScroll: true});
+      requestAnimationFrame(focusInspectorEntry);
     } else if (drawer && !open && drawerWasOpen && inspectorReturnFocus?.isConnected) {
       inspectorReturnFocus.focus({preventScroll: true});
     }
@@ -137,7 +144,6 @@ const install = () => {
 
   inspectorToggle?.addEventListener('click', () => {
     inspectorReturnFocus = document.activeElement;
-    queueMicrotask(syncInspectorBoundary);
   });
   inspectorClose?.addEventListener('click', () => queueMicrotask(syncInspectorBoundary));
   if (inspector) {
