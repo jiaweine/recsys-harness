@@ -33,15 +33,10 @@ const install = () => {
     tab.addEventListener('click', () => queueMicrotask(() => syncTabs(tab)));
     tab.addEventListener('keydown', event => {
       let next = null;
-      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
-        next = tabs[(index + 1) % tabs.length];
-      } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
-        next = tabs[(index - 1 + tabs.length) % tabs.length];
-      } else if (event.key === 'Home') {
-        next = tabs[0];
-      } else if (event.key === 'End') {
-        next = tabs.at(-1);
-      }
+      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = tabs[(index + 1) % tabs.length];
+      else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = tabs[(index - 1 + tabs.length) % tabs.length];
+      else if (event.key === 'Home') next = tabs[0];
+      else if (event.key === 'End') next = tabs.at(-1);
       if (!next) return;
       event.preventDefault();
       next.click();
@@ -90,10 +85,7 @@ const install = () => {
   }
 
   if (authGate) {
-    new MutationObserver(syncAuthBoundary).observe(authGate, {
-      attributes: true,
-      attributeFilter: ['hidden'],
-    });
+    new MutationObserver(syncAuthBoundary).observe(authGate, {attributes: true, attributeFilter: ['hidden']});
     syncAuthBoundary();
   }
 
@@ -106,16 +98,17 @@ const install = () => {
   let drawerWasOpen = false;
 
   const inspectorIsDrawer = () => Boolean(
-    inspector && inspectorToggle && getComputedStyle(inspectorToggle).display !== 'none'
+    inspector && getComputedStyle(inspector).position === 'fixed'
   );
   const inspectorIsOpen = () => inspectorIsDrawer() && inspector?.classList.contains('open');
 
   function focusInspectorEntry() {
-    if (!inspectorIsOpen()) return;
-    const selected = tabs.find(tab => tab.getAttribute('aria-selected') === 'true') || tabs[0] || inspectorClose;
-    if (selected && !inspector?.contains(document.activeElement)) {
-      selected.focus({preventScroll: true});
-    }
+    if (!inspectorIsOpen() || inspector?.contains(document.activeElement)) return;
+    const target = visibleFocusables(inspector)[0]
+      || tabs.find(tab => tab.getAttribute('aria-selected') === 'true')
+      || tabs[0]
+      || inspectorClose;
+    target?.focus({preventScroll: true});
   }
 
   function syncInspectorBoundary() {
@@ -135,7 +128,9 @@ const install = () => {
     }
 
     if (drawer && open && !drawerWasOpen) {
+      focusInspectorEntry();
       requestAnimationFrame(focusInspectorEntry);
+      setTimeout(focusInspectorEntry, 60);
     } else if (drawer && !open && drawerWasOpen && inspectorReturnFocus?.isConnected) {
       inspectorReturnFocus.focus({preventScroll: true});
     }
@@ -147,10 +142,7 @@ const install = () => {
   });
   inspectorClose?.addEventListener('click', () => queueMicrotask(syncInspectorBoundary));
   if (inspector) {
-    new MutationObserver(syncInspectorBoundary).observe(inspector, {
-      attributes: true,
-      attributeFilter: ['class'],
-    });
+    new MutationObserver(syncInspectorBoundary).observe(inspector, {attributes: true, attributeFilter: ['class']});
   }
   window.addEventListener('resize', syncInspectorBoundary, {passive: true});
   syncInspectorBoundary();
@@ -170,11 +162,9 @@ const install = () => {
       const last = focusables.at(-1);
       const active = document.activeElement;
       if (event.shiftKey && (active === first || !authForm.contains(active))) {
-        event.preventDefault();
-        last.focus();
+        event.preventDefault(); last.focus();
       } else if (!event.shiftKey && (active === last || !authForm.contains(active))) {
-        event.preventDefault();
-        first.focus();
+        event.preventDefault(); first.focus();
       }
       return;
     }
@@ -186,11 +176,9 @@ const install = () => {
       const last = focusables.at(-1);
       const active = document.activeElement;
       if (event.shiftKey && (active === first || !inspector.contains(active))) {
-        event.preventDefault();
-        last.focus();
+        event.preventDefault(); last.focus();
       } else if (!event.shiftKey && (active === last || !inspector.contains(active))) {
-        event.preventDefault();
-        first.focus();
+        event.preventDefault(); first.focus();
       }
     }
   });
