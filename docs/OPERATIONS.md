@@ -22,7 +22,8 @@ Before reporting a revision mismatch, the worker calls the same workspace synchr
 - the durable store cannot be read;
 - the local workspace cannot safely converge to the durable revision;
 - the durable revision is missing or still differs from the local revision after synchronization;
-- a workspace update lease is active.
+- a workspace update lease is active;
+- the worker has entered graceful shutdown and is draining active runs.
 
 A workspace update making readiness temporarily false is expected. It should not make liveness false, because an update is a traffic-readiness condition rather than a process failure.
 
@@ -43,6 +44,20 @@ Malformed forwarding chains fail closed to the direct peer. If every address in 
 `LINGJING_TRUST_PROXY_IP=1` remains only as a compatibility mode for loopback proxies (`127.0.0.0/8` and `::1/128`). A proxy in another container, host or load-balancer network must use `LINGJING_TRUSTED_PROXY_CIDRS` explicitly.
 
 Do not configure broad private ranges unless the entire range is controlled proxy infrastructure. If application workers are directly reachable from untrusted networks, those direct connections will ignore XFF even when trusted proxy CIDRs are configured.
+
+## Graceful active-run handoff
+
+A process shutdown is different from a user cancellation. User cancellation is terminal; worker shutdown should preserve completed work and make the run recoverable.
+
+When the ASGI lifespan begins shutting down, Xushu marks readiness unavailable and signals every locally owned runner. The signal is observed only at safe action boundaries: a tool that is already executing is allowed to finish, the resulting action and checkpoint are persisted, and then the run stops before another tool is started.
+
+A clean handoff writes the run as `interrupted` and atomically clears its SQLite `owner_id` and `lease_until`. Another worker can therefore claim the checkpoint immediately instead of waiting for the normal run lease to expire. The handoff transaction is fenced by owner identity and active status, so an old worker cannot release a run that has already been claimed or completed elsewhere. A durable `cancel_requested` state is never rewritten as `interrupted`.
+
+`LINGJING_SHUTDOWN_GRACE_SECONDS` controls how long the lifespan waits for active runs to reach that safe boundary. The default is 25 seconds and accepted values are clamped to 1–120 seconds.
+
+If a run is still inside a tool when the grace window expires, Xushu does not invent a terminal state and does not force-cancel the executor thread. The original heartbeat stops as the lifespan exits; the existing lease/fencing contract then provides crash-style recovery. This fallback preserves the stronger invariant that a new worker must never overlap an unfenced old owner merely to make shutdown appear faster.
+
+Operationally, configure the platform's termination grace period longer than `LINGJING_SHUTDOWN_GRACE_SECONDS` so the application has time to complete a clean handoff. Tool-side network and vision calls already use bounded request/time budgets; local algorithm work remains protected by the same checkpoint and lease fencing semantics.
 
 ## Container runtime boundary
 
