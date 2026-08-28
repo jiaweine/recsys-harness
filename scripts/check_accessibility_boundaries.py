@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 from playwright.sync_api import sync_playwright
 
@@ -11,6 +12,15 @@ ACCESS_TOKEN = os.environ.get("LINGJING_ACCESS_TOKEN", "")
 
 def active_id(page) -> str:
     return page.evaluate("document.activeElement?.id || ''")
+
+
+def wait_until(check, *, timeout: float = 3.0, message: str) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if check():
+            return
+        time.sleep(0.05)
+    raise AssertionError(message)
 
 
 def main() -> None:
@@ -31,7 +41,7 @@ def main() -> None:
         assert form.get_attribute("aria-describedby") == "authDescription"
         assert page.locator(".shell").evaluate("element => element.inert") is True
         page.locator("#authKey").wait_for(state="visible")
-        page.wait_for_function("document.activeElement?.id === 'authKey'")
+        wait_until(lambda: active_id(page) == "authKey", message="auth key did not receive initial focus")
 
         page.locator("#authKey").focus()
         page.keyboard.press("Shift+Tab")
@@ -43,7 +53,10 @@ def main() -> None:
         page.locator("#authSubmit").click()
         page.wait_for_load_state("networkidle")
         page.locator("#authGate").wait_for(state="hidden")
-        page.wait_for_function("document.querySelector('.shell')?.inert === false")
+        wait_until(
+            lambda: page.locator(".shell").evaluate("element => element.inert") is False,
+            message="shell remained inert after authentication",
+        )
 
         first = page.locator("#tab-progress")
         second = page.locator("#tab-evidence")
@@ -80,17 +93,29 @@ def main() -> None:
         toggle.focus()
         toggle.click()
         inspector = page.locator("#inspector")
-        page.wait_for_function("document.getElementById('inspector')?.classList.contains('open')")
+        wait_until(
+            lambda: "open" in (inspector.get_attribute("class") or "").split(),
+            message="mobile inspector did not open",
+        )
         assert inspector.get_attribute("role") == "dialog"
         assert inspector.get_attribute("aria-modal") == "true"
         assert inspector.get_attribute("aria-hidden") == "false"
-        page.wait_for_function("document.getElementById('inspector')?.contains(document.activeElement)")
+        wait_until(
+            lambda: inspector.evaluate("element => element.contains(document.activeElement)"),
+            message="focus did not enter the mobile inspector",
+        )
         assert active_id(page) in {"tab-progress", "tab-evidence", "tab-data", "inspectorClose"}
 
         page.keyboard.press("Escape")
-        page.wait_for_function("!document.getElementById('inspector')?.classList.contains('open')")
+        wait_until(
+            lambda: "open" not in (inspector.get_attribute("class") or "").split(),
+            message="Escape did not close the mobile inspector",
+        )
         assert inspector.get_attribute("aria-hidden") == "true"
-        page.wait_for_function("document.activeElement?.id === 'inspectorToggle'")
+        wait_until(
+            lambda: active_id(page) == "inspectorToggle",
+            message="focus did not return to the inspector trigger",
+        )
 
         browser.close()
 
