@@ -311,6 +311,39 @@ _core._inflate_checkpoint = _inflate_checkpoint
 _core._PERSIST_META = _PERSIST_META
 
 
+_RUN_SNAPSHOT_RETRIES = 3
+
+
+def _snapshot_in_memory_run(run_id: str) -> dict[str, Any] | None:
+    """Copy one run without letting a transient nested-mutation race escape.
+
+    The top-level run map is protected by ``RUN_LOCK``, but callback payloads can
+    briefly retain runner-owned nested dictionaries while a checkpoint is being
+    handed across the thread boundary.  ``deepcopy`` raises ``RuntimeError`` if
+    such a dictionary changes size during iteration.  Retry the in-memory hot
+    path a bounded number of times, then fall back to the durable snapshot rather
+    than turning a polling request into a 500 response.
+    """
+
+    for attempt in range(_RUN_SNAPSHOT_RETRIES):
+        with _core.RUN_LOCK:
+            row = _core.RUNS.get(run_id)
+            if row is None:
+                return None
+            try:
+                return copy.deepcopy(row)
+            except RuntimeError as exc:
+                if "dictionary changed size during iteration" not in str(exc):
+                    raise
+        if attempt + 1 < _RUN_SNAPSHOT_RETRIES:
+            time.sleep(0)
+
+    try:
+        return _core.store.get_run(run_id)
+    except KeyError as exc:
+        raise HTTPException(404, "执行任务不存在") from exc
+
+
 def _coherent_get_run(run_id: str):
     """Never expose a terminal status with an older in-memory payload.
 
@@ -325,9 +358,7 @@ def _coherent_get_run(run_id: str):
     an older in-memory payload such as ``result=None``.
     """
 
-    with _core.RUN_LOCK:
-        row = _core.RUNS.get(run_id)
-        snapshot = copy.deepcopy(row) if row is not None else None
+    snapshot = _snapshot_in_memory_run(run_id)
 
     if snapshot is None:
         try:
