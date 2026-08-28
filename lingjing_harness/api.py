@@ -17,6 +17,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from . import api_core as _core
+from .proxy_trust import TRUSTED_PROXY_NETWORKS, client_key as _proxy_client_key
 from .workspace_identity import workspace_fingerprint
 
 
@@ -25,6 +26,12 @@ from .workspace_identity import workspace_fingerprint
 # must reload when the production evidence snapshot changes.
 _core.catalog_fingerprint = workspace_fingerprint
 _core.CATALOG_REVISION = workspace_fingerprint(_core.catalog)
+
+# Rate-limit identity is fail-closed behind proxies.  api_core resolves this
+# module global at request time, so replacing it here preserves the stable app
+# surface while refusing attacker-controlled X-Forwarded-For from untrusted peers.
+_core._client_key = _proxy_client_key
+_core.TRUSTED_PROXY_NETWORKS = TRUSTED_PROXY_NETWORKS
 
 
 # Full run snapshots grow with every action, observation and event.  Persisting

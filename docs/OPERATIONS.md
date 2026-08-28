@@ -26,6 +26,24 @@ Before reporting a revision mismatch, the worker calls the same workspace synchr
 
 A workspace update making readiness temporarily false is expected. It should not make liveness false, because an update is a traffic-readiness condition rather than a process failure.
 
+## Reverse-proxy client identity
+
+Login, attachment, import and task rate limits are keyed by the resolved client address. `X-Forwarded-For` is therefore a security boundary, not ordinary request metadata.
+
+By default, Xushu ignores `X-Forwarded-For` and uses the direct TCP peer address. To trust a reverse proxy, name the proxy network explicitly:
+
+```text
+LINGJING_TRUSTED_PROXY_CIDRS=172.18.0.0/16,10.20.30.40/32
+```
+
+The immediate peer must belong to one of those networks before the header is considered. Xushu then walks the forwarding chain from right to left, removes trusted proxy hops and uses the first untrusted address as the client identity. This protects append-style proxies from attacker-supplied leftmost XFF values.
+
+Malformed forwarding chains fail closed to the direct peer. If every address in the chain is trusted, Xushu also collapses to the direct peer rather than accepting a spoofable leftmost value.
+
+`LINGJING_TRUST_PROXY_IP=1` remains only as a compatibility mode for loopback proxies (`127.0.0.0/8` and `::1/128`). A proxy in another container, host or load-balancer network must use `LINGJING_TRUSTED_PROXY_CIDRS` explicitly.
+
+Do not configure broad private ranges unless the entire range is controlled proxy infrastructure. If application workers are directly reachable from untrusted networks, those direct connections will ignore XFF even when trusted proxy CIDRs are configured.
+
 ## Container runtime boundary
 
 The repository image is built in two stages. The builder produces the project wheel and its runtime dependency wheels from `pyproject.toml`; the final image installs those wheels with `--no-index`. Development-only dependencies such as `pytest` and `httpx` are not installed into the runtime image.
