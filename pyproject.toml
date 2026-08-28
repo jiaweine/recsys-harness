@@ -29,6 +29,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "httpx>=0.27"]
+optimizer = ["optuna==4.9.0"]
 
 [project.scripts]
 xushu-harness = "lingjing_harness.cli:main"
