@@ -8,7 +8,13 @@ from .adapters import (
     RecommendServingAdapter,
     SearchServingAdapter,
 )
+from .counterfactual import CounterfactualRecord, evaluate_off_policy
 from .domain import Catalog, Item, Interaction, QueryLabel
+from .experiments import (
+    ExperimentCriteria,
+    ExperimentSpec,
+    evaluate_counterfactual_experiment,
+)
 from .production import ExposureEvent, RewardSpec
 from .runtime.harness import AgentHarness
 
@@ -19,6 +25,11 @@ __all__ = [
     "QueryLabel",
     "ExposureEvent",
     "RewardSpec",
+    "CounterfactualRecord",
+    "evaluate_off_policy",
+    "ExperimentCriteria",
+    "ExperimentSpec",
+    "evaluate_counterfactual_experiment",
     "SearchServingAdapter",
     "RecommendServingAdapter",
     "AdapterSearchEngine",
