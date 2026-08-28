@@ -1,9 +1,6 @@
 name: External Semantic Quality
 
 on:
-  push:
-    paths:
-      - '.github/workflows/external-semantic-quality.yml'
   workflow_dispatch:
 
 jobs:
