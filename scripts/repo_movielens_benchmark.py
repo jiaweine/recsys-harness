@@ -8,6 +8,7 @@ from implicit.als import AlternatingLeastSquares
 from implicit.bpr import BayesianPersonalizedRanking
 from implicit.datasets.movielens import get_movielens
 from implicit.evaluation import leave_k_out_split
+from implicit.nearest_neighbours import BM25Recommender
 
 from lingjing_harness.algorithms import RecommendationEngine
 from lingjing_harness.domain import Catalog, Interaction, Item
@@ -161,6 +162,7 @@ def main() -> None:
             verify_negative_samples=True,
             random_state=42,
         ),
+        "implicit_bm25_item_item": BM25Recommender(K=40, K1=1.2, B=0.75),
     }
 
     results = {}
