@@ -34,7 +34,7 @@ jobs:
 
       - name: Verify runtime dependency boundary
         run: |
-          docker run --rm --entrypoint python recsys-harness:ci -c "import importlib.util, lingjing_harness; assert importlib.util.find_spec('pytest') is None; assert importlib.util.find_spec('httpx') is None"
+          docker run --rm --entrypoint python recsys-harness:ci -c "import importlib.util, lingjing_harness; forbidden = ('pytest', 'httpx', 'optuna', 'implicit', 'FlagEmbedding'); leaked = [name for name in forbidden if importlib.util.find_spec(name) is not None]; assert not leaked, f'optional/dev dependencies leaked into production image: {leaked}'"
 
       - name: Start protected container
         run: |
