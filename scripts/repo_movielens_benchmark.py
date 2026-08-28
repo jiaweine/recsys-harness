@@ -9,6 +9,7 @@ from implicit.bpr import BayesianPersonalizedRanking
 from implicit.datasets.movielens import get_movielens
 from implicit.evaluation import leave_k_out_split
 
+from lingjing_harness.algorithms import RecommendationEngine
 from lingjing_harness.domain import Catalog, Interaction, Item
 from repo_recommender_benchmark import (
     XushuImplicitEvaluationAdapter,
@@ -67,6 +68,83 @@ def _dataset() -> tuple[Catalog, object, list[str], list[str]]:
     return catalog, selected, user_ids, item_ids
 
 
+def _mean(values: list[float]) -> float:
+    return round(float(np.mean(values)), 6) if values else 0.0
+
+
+def _reference_diagnostics(
+    catalog: Catalog,
+    test,
+    user_ids: list[str],
+    item_ids: list[str],
+) -> dict:
+    """Measure the existing engine's owned signals without changing its algorithm."""
+
+    engine = RecommendationEngine(catalog)
+    target_graph: list[float] = []
+    target_profile: list[float] = []
+    graph_positive_share: list[float] = []
+    graph_saturated_share: list[float] = []
+    profile_positive_share: list[float] = []
+    top100_ranks: list[int] = []
+    target_candidates = 0
+
+    for user_index, user_id in enumerate(user_ids):
+        target_indices = test.getrow(user_index).indices
+        if len(target_indices) != 1:
+            continue
+        target_id = item_ids[int(target_indices[0])]
+        prepared = engine.prepare(user_id)
+        if not prepared:
+            continue
+
+        graph_values = [float(row["graph"]) for row in prepared]
+        profile_values = [float(row["profile_fit"]) for row in prepared]
+        graph_positive_share.append(
+            sum(value > 0.0 for value in graph_values) / len(graph_values)
+        )
+        graph_saturated_share.append(
+            sum(value >= 0.999999 for value in graph_values) / len(graph_values)
+        )
+        profile_positive_share.append(
+            sum(value > 0.0 for value in profile_values) / len(profile_values)
+        )
+
+        target = next(
+            (row for row in prepared if row["item"].item_id == target_id),
+            None,
+        )
+        if target is None:
+            continue
+        target_candidates += 1
+        target_graph.append(float(target["graph"]))
+        target_profile.append(float(target["profile_fit"]))
+
+        ranked = engine.rank_prepared(prepared, limit=100)
+        ranked_ids = [row["id"] for row in ranked]
+        if target_id in ranked_ids:
+            top100_ranks.append(ranked_ids.index(target_id) + 1)
+
+    return {
+        "target_candidate_coverage": round(target_candidates / max(1, len(user_ids)), 6),
+        "target_graph_nonzero_share": round(
+            sum(value > 0.0 for value in target_graph) / max(1, len(target_graph)),
+            6,
+        ),
+        "target_graph_saturated_share": round(
+            sum(value >= 0.999999 for value in target_graph) / max(1, len(target_graph)),
+            6,
+        ),
+        "target_graph_mean": _mean(target_graph),
+        "target_profile_mean": _mean(target_profile),
+        "candidate_graph_positive_share_mean": _mean(graph_positive_share),
+        "candidate_graph_saturated_share_mean": _mean(graph_saturated_share),
+        "candidate_profile_positive_share_mean": _mean(profile_positive_share),
+        "top100_hit_rate": round(len(top100_ranks) / max(1, len(user_ids)), 6),
+        "top100_mean_rank_when_hit": _mean([float(rank) for rank in top100_ranks]),
+    }
+
+
 def main() -> None:
     source, interactions, user_ids, item_ids = _dataset()
     train, test = leave_k_out_split(interactions, K=1, random_state=42)
@@ -114,6 +192,12 @@ def main() -> None:
                 "train_events": int(train.nnz),
                 "test_events": int(test.nnz),
                 "metrics_at_10": results,
+                "reference_signal_diagnostics": _reference_diagnostics(
+                    reference_catalog,
+                    test,
+                    user_ids,
+                    item_ids,
+                ),
             },
             ensure_ascii=False,
             indent=2,
