@@ -24,29 +24,52 @@ def test_readme_is_product_documentation_not_release_notes() -> None:
     assert not hits, f"README drifted back into release-progress language: {hits}"
 
 
-def test_readme_keeps_core_product_contract_visible() -> None:
+def test_readme_keeps_public_product_spine_visible() -> None:
     readme = _readme()
     required_sections = (
-        "# 产品价值",
-        "# 生产价值闭环",
-        "# Agent Harness",
-        "# 垂直自进化",
-        "# Existing system integration",
         "# 快速启动",
+        "# 真实产品",
+        "# 为什么是序枢",
+        "# 核心能力",
+        "# 工作原理",
+        "# Existing system integration",
         "# 生产数据契约",
         "# 系统架构",
-        "# 可靠性与安全边界",
-        "# 能力边界与扩展面",
+        "# 可靠性与安全",
+        "# 配置",
+        "# 开发与质量门槛",
     )
     missing = [section for section in required_sections if section not in readme]
-    assert not missing, f"README lost product-contract sections: {missing}"
+    assert not missing, f"README lost public product sections: {missing}"
 
 
-def test_readme_keeps_evidence_and_authority_boundaries_explicit() -> None:
+def test_readme_keeps_evidence_authority_and_recovery_semantics() -> None:
     readme = _readme()
 
-    assert "logged_replay" in readme
-    assert "它不是“完整无偏 OPE”" in readme
-    assert "Trusted 不等于 Active" in readme
-    assert "RewardSpec 是产品 contract，不是进化 gene" in readme
-    assert "不会猜远端参数后直接修改生产服务" in readme
+    evidence_anchors = (
+        "Business Reward",
+        "Domain Guardrails",
+        "Logged Replay + Temporal Holdout",
+        "future holdout",
+        "paired comparison",
+        "Trusted Strategy Memory",
+    )
+    missing_evidence = [anchor for anchor in evidence_anchors if anchor not in readme]
+    assert not missing_evidence, f"README lost evidence semantics: {missing_evidence}"
+
+    authority_anchors = (
+        "explicit user authority",
+        "Permissioned Activation",
+        "RewardSpec cannot be evolved by optimizer",
+        "证据、权限、恢复路径",
+    )
+    missing_authority = [anchor for anchor in authority_anchors if anchor not in readme]
+    assert not missing_authority, f"README lost authority/recovery semantics: {missing_authority}"
+
+    integration_anchors = (
+        "Serving adapter",
+        "同一套 business replay 和 evidence loop",
+        "不需要改变原有 serving architecture",
+    )
+    missing_integration = [anchor for anchor in integration_anchors if anchor not in readme]
+    assert not missing_integration, f"README lost serving integration semantics: {missing_integration}"
