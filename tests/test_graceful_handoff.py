@@ -134,3 +134,19 @@ def test_cancel_request_cannot_be_rewritten_as_interrupted(tmp_path):
         now=now + 0.2,
     )
     assert store.run_status("run-cancel-handoff") == "cancel_requested"
+
+
+def test_exported_shutdown_event_does_not_leak_across_lifespans():
+    from fastapi.testclient import TestClient
+    import lingjing_harness.api as api_module
+
+    with TestClient(api_module.app) as client:
+        assert client.get("/health/ready").status_code == 200
+        live_event = api_module.SHUTDOWN_EVENT
+        assert live_event.is_set() is False
+
+    # The runner closure may still hold the old set event if a tool outlived the
+    # grace window, but readiness outside a completed lifespan must see fresh state.
+    assert live_event.is_set() is True
+    assert api_module.SHUTDOWN_EVENT is not live_event
+    assert api_module.SHUTDOWN_EVENT.is_set() is False
