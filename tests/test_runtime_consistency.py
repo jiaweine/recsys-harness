@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import time
 
@@ -131,6 +132,160 @@ def test_active_run_poll_reads_full_snapshot_only_after_terminal_transition(monk
 
     with api_module.RUN_LOCK:
         api_module.RUNS.pop(run_id, None)
+    api_module.store.delete_run(run_id)
+
+
+def test_checkpoint_snapshot_deduplicates_events_and_restores_them_for_resume():
+    events = [
+        {"phase": "execute", "progress": 20},
+        {"phase": "reflect", "progress": 21},
+    ]
+    row = {
+        "run_id": "job-checkpoint-compact",
+        "conversation_id": "cv-checkpoint-compact",
+        "goal": "compact",
+        "status": "running",
+        "events": copy.deepcopy(events),
+        "result": None,
+        "checkpoint": {
+            "status": "running",
+            "run_id": "run-checkpoint-compact",
+            "cycle": 1,
+            "events": copy.deepcopy(events),
+            "actions": [{"tool": "data.inspect"}],
+        },
+    }
+
+    compact = api_module._compact_run_snapshot(row)
+    assert compact["events"] == events
+    assert "events" not in compact["checkpoint"]
+    assert row["checkpoint"]["events"] == events
+
+    restored = api_module._inflate_checkpoint(compact)
+    assert restored is not None
+    assert restored["events"] == events
+    assert restored["actions"] == [{"tool": "data.inspect"}]
+
+    terminal = api_module._compact_run_snapshot(
+        {**row, "status": "completed", "result": {"answer": "done"}}
+    )
+    assert "checkpoint" not in terminal
+
+
+def test_run_persistence_coalesces_decide_and_reflect_writes(monkeypatch):
+    run_id = "job-coalesced-write-test"
+    row = {
+        "run_id": run_id,
+        "conversation_id": "cv-coalesced-write-test",
+        "goal": "coalesce",
+        "status": "running",
+        "events": [],
+        "result": None,
+        "created_at": time.time(),
+        "updated_at": time.time(),
+    }
+    api_module._PERSIST_META.pop(run_id, None)
+    snapshots = []
+
+    def fake_save_run(_run_id, _cid, _goal, status, snapshot, **_kwargs):
+        snapshots.append(copy.deepcopy(snapshot))
+        return status
+
+    monkeypatch.setattr(api_module.store, "save_run", fake_save_run)
+
+    api_module._persist_run(row)
+    row["events"].append({"phase": "decide", "progress": 18})
+    api_module._persist_run(row)
+    row["events"].append({"phase": "execute", "progress": 20})
+    api_module._persist_run(row)
+    row["events"].append({"phase": "reflect", "progress": 21})
+    api_module._persist_run(row)
+    row["checkpoint"] = {
+        "status": "running",
+        "cycle": 1,
+        "events": copy.deepcopy(row["events"]),
+        "actions": [{"tool": "search.run"}],
+    }
+    api_module._persist_run(row)
+
+    assert len(snapshots) == 3
+    assert snapshots[0]["events"] == []
+    assert snapshots[1]["events"][-1]["phase"] == "execute"
+    assert snapshots[2]["events"][-1]["phase"] == "reflect"
+    assert "events" not in snapshots[2]["checkpoint"]
+
+    row["status"] = "completed"
+    row["result"] = {"answer": "done"}
+    api_module._persist_run(row)
+    assert len(snapshots) == 4
+    assert snapshots[-1]["status"] == "completed"
+    assert "checkpoint" not in snapshots[-1]
+    assert run_id not in api_module._PERSIST_META
+
+
+def test_completed_checkpoint_recovery_finalizes_without_replaying_harness(monkeypatch):
+    conversation = api_module.store.create_conversation("completed checkpoint recovery", "search")
+    run_id = "job-completed-checkpoint-recovery"
+    now = time.time()
+    events = [{"phase": "complete", "title": "done", "detail": "done", "progress": 100}]
+    final_result = {
+        "run_id": "run-internal-final",
+        "answer": "recovered final answer",
+        "events": copy.deepcopy(events),
+        "durability": {"checkpoint_resume": True},
+    }
+    snapshot = {
+        "run_id": run_id,
+        "conversation_id": conversation["id"],
+        "goal": "recover completed checkpoint",
+        "status": "running",
+        "events": copy.deepcopy(events),
+        "result": None,
+        "attachments": [],
+        "attachment_ids": [],
+        "allow_network": False,
+        "catalog_revision": api_module.CATALOG_REVISION,
+        "checkpoint": {
+            "status": "completed",
+            "run_id": "run-internal-final",
+            "cycle": 2,
+            "events": copy.deepcopy(events),
+            "result": copy.deepcopy(final_result),
+        },
+        "created_at": now,
+        "updated_at": now,
+    }
+    api_module.store.delete_run(run_id)
+    assert api_module.store.reserve_run(
+        run_id,
+        conversation["id"],
+        snapshot["goal"],
+        api_module._compact_run_snapshot(snapshot),
+        owner_id=api_module.WORKER_ID,
+        lease_seconds=30,
+    )
+
+    def fail_if_replayed():
+        raise AssertionError("completed checkpoint must not fork and replay the harness")
+
+    monkeypatch.setattr(api_module.harness, "fork", fail_if_replayed)
+    asyncio.run(api_module._recover_on_startup())
+
+    saved = api_module.store.get_run(run_id)
+    assert saved["status"] == "completed"
+    assert saved["result"]["answer"] == "recovered final answer"
+    assert saved["result"]["job_id"] == run_id
+    assert saved["result"]["catalog_revision"] == api_module.CATALOG_REVISION
+    assert "checkpoint" not in saved
+
+    messages = api_module.store.list_messages(conversation["id"])
+    assistants = [message for message in messages if message["role"] == "assistant"]
+    assert len(assistants) == 1
+    assert assistants[0]["payload"]["job_id"] == run_id
+
+    asyncio.run(api_module._recover_on_startup())
+    messages = api_module.store.list_messages(conversation["id"])
+    assert len([message for message in messages if message["role"] == "assistant"]) == 1
     api_module.store.delete_run(run_id)
 
 
