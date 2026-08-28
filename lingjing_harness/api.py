@@ -17,6 +17,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from . import api_core as _core
+from .api_shutdown import install_shutdown_boundary
 from .proxy_trust import TRUSTED_PROXY_NETWORKS, client_key as _proxy_client_key
 from .workspace_identity import workspace_fingerprint
 
@@ -403,6 +404,9 @@ def _health_live() -> dict[str, str]:
 def _health_ready() -> dict[str, str]:
     """Converge safe workspace state, then fail closed if serving is not ready."""
 
+    shutdown_event = getattr(_core, "SHUTDOWN_EVENT", None)
+    if shutdown_event is not None and shutdown_event.is_set():
+        raise HTTPException(503, "worker is shutting down")
     try:
         if not _core._sync_workspace():
             raise HTTPException(503, "workspace revision not ready")
@@ -444,6 +448,10 @@ _core.app.add_api_route("/health/ready", _health_ready, methods=["GET"], name="h
 _core.get_run = _coherent_get_run
 _core.health_live = _health_live
 _core.health_ready = _health_ready
+
+# Install shutdown handoff after persistence/recovery wrappers are in place so
+# interrupted snapshots use the same compaction and fencing semantics.
+install_shutdown_boundary(_core)
 
 # Preserve the exact module object expected by integrations that import and
 # monkeypatch internals from ``lingjing_harness.api``.
