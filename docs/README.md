@@ -1,6 +1,6 @@
 # Xushu Documentation
 
-This directory contains the technical contracts behind **Xushu · Recsys Harness**. The root `README.md` explains the product and quick start; the documents here go deeper into runtime behavior, data, evaluation, evolution, experimentation, and acceptance criteria.
+This directory contains the technical contracts behind **Xushu · Recsys Harness**. The root `README.md` explains the product and quick start; the documents here go deeper into runtime behavior, data, evaluation, evolution, experimentation, operations, and acceptance criteria.
 
 ## Start here
 
@@ -11,6 +11,7 @@ This directory contains the technical contracts behind **Xushu · Recsys Harness
 | [`DATA_FORMAT.md`](DATA_FORMAT.md) | Catalog, interaction, production event, RewardSpec and replay data contracts. |
 | [`COUNTERFACTUAL_EXPERIMENTS.md`](COUNTERFACTUAL_EXPERIMENTS.md) | Explicit IPS / SNIPS / DR off-policy evaluation, overlap diagnostics and controlled-experiment eligibility gates. |
 | [`VERTICAL_EVOLUTION.md`](VERTICAL_EVOLUTION.md) | Search / Recommendation strategy genome, evaluation, response surfaces, routing, holdout and trust flow. |
+| [`OPERATIONS.md`](OPERATIONS.md) | Production liveness/readiness semantics, workspace convergence and container probe behavior. |
 | [`ACCEPTANCE.md`](ACCEPTANCE.md) | Verifiable acceptance criteria for runtime, product, evaluation, recovery and integration behavior. |
 | [`DESIGN.md`](DESIGN.md) | Product and interaction design principles for the task-first workspace. |
 
@@ -29,6 +30,13 @@ This directory contains the technical contracts behind **Xushu · Recsys Harness
 1. Start with [`HARNESS_CONTRACT.md`](HARNESS_CONTRACT.md).
 2. Follow the runtime and trust planes in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 3. Inspect `lingjing_harness/runtime/` for the implementation surface.
+
+### I want to operate Xushu in production
+
+1. Read [`OPERATIONS.md`](OPERATIONS.md) for liveness, readiness and workspace-convergence semantics.
+2. Use `/health/live` for process liveness and `/health/ready` for traffic readiness.
+3. Keep `/api/status` behind the product authentication boundary rather than reusing it as an infrastructure probe.
+4. Use [`ARCHITECTURE.md`](ARCHITECTURE.md) when reasoning about multi-worker durable state and recovery.
 
 ### I want to evaluate a candidate policy with explicit counterfactual evidence
 
@@ -76,4 +84,4 @@ Permissioned Activation
 Revalidation / Retirement
 ```
 
-The runtime, evaluation, data, experimentation, and UI layers should preserve that evidence chain rather than creating separate sources of truth.
+The runtime, evaluation, data, experimentation, operations, and UI layers should preserve that evidence chain rather than creating separate sources of truth.

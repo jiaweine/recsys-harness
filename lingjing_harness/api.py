@@ -356,6 +356,35 @@ def _coherent_get_run(run_id: str):
     return snapshot
 
 
+def _health_live() -> dict[str, str]:
+    """Process liveness probe with no dependency on durable state."""
+
+    return {"status": "ok"}
+
+
+def _health_ready() -> dict[str, str]:
+    """Converge safe workspace state, then fail closed if serving is not ready."""
+
+    try:
+        if not _core._sync_workspace():
+            raise HTTPException(503, "workspace revision not ready")
+        durable_revision = _core.store.workspace_revision()
+        updating = _core.store.workspace_update_active()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(503, "durable store unavailable") from exc
+
+    with _core.WORKSPACE_LOCK:
+        local_revision = str(_core.CATALOG_REVISION or "")
+
+    if not durable_revision or durable_revision != local_revision:
+        raise HTTPException(503, "workspace revision not ready")
+    if updating:
+        raise HTTPException(503, "workspace update in progress")
+    return {"status": "ready"}
+
+
 # Replace only the original GET route.  All other route functions and module
 # globals stay owned by api_core so existing tests/integrations can still patch
 # AgentHarness, store, perception and recovery hooks through lingjing_harness.api.
@@ -372,7 +401,11 @@ _core.app.add_api_route(
     methods=["GET"],
     name="get_run",
 )
+_core.app.add_api_route("/health/live", _health_live, methods=["GET"], name="health_live")
+_core.app.add_api_route("/health/ready", _health_ready, methods=["GET"], name="health_ready")
 _core.get_run = _coherent_get_run
+_core.health_live = _health_live
+_core.health_ready = _health_ready
 
 # Preserve the exact module object expected by integrations that import and
 # monkeypatch internals from ``lingjing_harness.api``.
