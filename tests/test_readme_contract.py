@@ -49,10 +49,14 @@ def test_readme_keeps_evidence_authority_and_recovery_semantics() -> None:
     evidence_anchors = (
         "Business Reward",
         "Domain Guardrails",
-        "Logged Replay + Temporal Holdout",
+        "Logged Replay + Counterfactual OPE + Temporal Holdout",
+        "IPS / SNIPS / DR",
+        "raw importance-weight ESS",
+        "eligible_for_online_test",
         "future holdout",
         "paired comparison",
         "Trusted Strategy Memory",
+        "docs/COUNTERFACTUAL_EXPERIMENTS.md",
     )
     missing_evidence = [anchor for anchor in evidence_anchors if anchor not in readme]
     assert not missing_evidence, f"README lost evidence semantics: {missing_evidence}"
@@ -60,6 +64,7 @@ def test_readme_keeps_evidence_authority_and_recovery_semantics() -> None:
     authority_anchors = (
         "explicit user authority",
         "Permissioned Activation",
+        "不会自动授予 activation authority",
         "RewardSpec cannot be evolved by optimizer",
         "证据、权限、恢复路径",
     )
@@ -70,6 +75,7 @@ def test_readme_keeps_evidence_authority_and_recovery_semantics() -> None:
         "Serving adapter",
         "同一套 business replay 和 evidence loop",
         "不需要改变原有 serving architecture",
+        "CounterfactualRecord",
     )
     missing_integration = [anchor for anchor in integration_anchors if anchor not in readme]
     assert not missing_integration, f"README lost serving integration semantics: {missing_integration}"
