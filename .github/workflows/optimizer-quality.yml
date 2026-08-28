@@ -1,0 +1,40 @@
+name: Optimizer Quality
+
+on:
+  push:
+    paths:
+      - '.github/workflows/optimizer-quality.yml'
+      - 'pyproject.toml'
+      - 'lingjing_harness/algorithms/evolution.py'
+      - 'lingjing_harness/algorithms/optimizer_backends.py'
+      - 'lingjing_harness/runtime/optimizer_tools.py'
+      - 'lingjing_harness/runtime/__init__.py'
+      - 'scripts/optimizer_backend_smoke.py'
+      - 'tests/test_optimizer_backends.py'
+  pull_request:
+    paths:
+      - '.github/workflows/optimizer-quality.yml'
+      - 'pyproject.toml'
+      - 'lingjing_harness/algorithms/evolution.py'
+      - 'lingjing_harness/algorithms/optimizer_backends.py'
+      - 'lingjing_harness/runtime/optimizer_tools.py'
+      - 'lingjing_harness/runtime/__init__.py'
+      - 'scripts/optimizer_backend_smoke.py'
+      - 'tests/test_optimizer_backends.py'
+  workflow_dispatch:
+
+jobs:
+  optuna:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Install official Optuna release
+        run: pip install 'optuna==4.9.0'
+      - name: Exercise Optuna-backed evolution
+        run: python scripts/optimizer_backend_smoke.py
