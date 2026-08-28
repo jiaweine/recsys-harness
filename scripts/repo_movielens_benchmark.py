@@ -86,7 +86,6 @@ def _reference_diagnostics(
     graph_positive_share: list[float] = []
     graph_saturated_share: list[float] = []
     profile_positive_share: list[float] = []
-    top100_ranks: list[int] = []
     target_candidates = 0
 
     for user_index, user_id in enumerate(user_ids):
@@ -120,11 +119,6 @@ def _reference_diagnostics(
         target_graph.append(float(target["graph"]))
         target_profile.append(float(target["profile_fit"]))
 
-        ranked = engine.rank_prepared(prepared, limit=100)
-        ranked_ids = [row["id"] for row in ranked]
-        if target_id in ranked_ids:
-            top100_ranks.append(ranked_ids.index(target_id) + 1)
-
     return {
         "target_candidate_coverage": round(target_candidates / max(1, len(user_ids)), 6),
         "target_graph_nonzero_share": round(
@@ -140,8 +134,6 @@ def _reference_diagnostics(
         "candidate_graph_positive_share_mean": _mean(graph_positive_share),
         "candidate_graph_saturated_share_mean": _mean(graph_saturated_share),
         "candidate_profile_positive_share_mean": _mean(profile_positive_share),
-        "top100_hit_rate": round(len(top100_ranks) / max(1, len(user_ids)), 6),
-        "top100_mean_rank_when_hit": _mean([float(rank) for rank in top100_ranks]),
     }
 
 
