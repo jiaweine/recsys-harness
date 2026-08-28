@@ -21,3 +21,9 @@ jobs:
         run: pip install 'implicit==0.7.3'
       - name: Compare mature collaborative filtering models
         run: python scripts/repo_recommender_benchmark.py
+      - name: Install Sentence Transformers repository release
+        run: pip install 'sentence-transformers==6.0.0'
+      - name: Compare mature multilingual semantic retrieval
+        env:
+          HF_HUB_DOWNLOAD_TIMEOUT: '120'
+        run: python scripts/repo_search_benchmark.py
