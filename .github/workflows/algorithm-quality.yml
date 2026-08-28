@@ -27,3 +27,9 @@ jobs:
         env:
           HF_HUB_DOWNLOAD_TIMEOUT: '120'
         run: python scripts/repo_search_benchmark.py
+      - name: Install FlagEmbedding repository release
+        run: pip install 'FlagEmbedding==1.4.2'
+      - name: Compare Chinese retrieval model
+        env:
+          HF_HUB_DOWNLOAD_TIMEOUT: '120'
+        run: python scripts/repo_search_bge_benchmark.py
