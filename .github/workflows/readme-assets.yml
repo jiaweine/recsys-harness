@@ -50,9 +50,9 @@ jobs:
       LINGJING_DATA_DIR: /tmp/recsys-readme-capture
       RECSYS_CAPTURE_URL: http://127.0.0.1:8765
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
 
@@ -97,7 +97,7 @@ jobs:
         run: python scripts/check_runtime_response_cache.py
 
       - name: Upload visual QA bundle
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: visual-qa
           path: |
@@ -110,7 +110,7 @@ jobs:
           retention-days: 5
 
       - name: Download visual QA bundle for round-trip verification
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: visual-qa
           path: /tmp/visual-qa-roundtrip
@@ -130,7 +130,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
@@ -149,7 +149,7 @@ jobs:
 
       - name: Download verified visual QA bundle
         if: steps.freshness.outputs.publish == 'true'
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: visual-qa
           path: docs/readme-assets
