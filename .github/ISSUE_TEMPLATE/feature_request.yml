@@ -1,0 +1,52 @@
+name: Capability proposal
+description: Propose a product, algorithm, runtime, integration, or evaluation capability.
+title: "[Proposal]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Strong proposals start from the outcome to improve, then describe the evidence and contracts needed to verify it.
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome to improve
+      description: What user, product, Search / Recommendation, or runtime outcome should improve?
+      placeholder: Describe the result rather than only the implementation idea.
+    validations:
+      required: true
+  - type: textarea
+    id: scenario
+    attributes:
+      label: Scenario
+      description: Show the workflow or use case where this capability matters.
+      placeholder: Who uses it, when, and what happens today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed capability
+      description: Describe the capability, interface, or behavior you want to add.
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: How should it be verified?
+      description: What evidence, metrics, holdout, tests, or acceptance criteria would demonstrate value?
+    validations:
+      required: true
+  - type: textarea
+    id: contracts
+    attributes:
+      label: Contracts or invariants involved
+      description: Note relevant authority, recovery, data, RewardSpec, guardrail, temporal split, adapter, or lifecycle semantics.
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links, examples, diagrams, or comparable systems that help explain the proposal.
+    validations:
+      required: false
