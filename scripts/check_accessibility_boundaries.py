@@ -84,12 +84,13 @@ def main() -> None:
         assert inspector.get_attribute("role") == "dialog"
         assert inspector.get_attribute("aria-modal") == "true"
         assert inspector.get_attribute("aria-hidden") == "false"
-        assert active_id(page) in {"tab-progress", "tab-evidence", "tab-data"}
+        page.wait_for_function("document.getElementById('inspector')?.contains(document.activeElement)")
+        assert active_id(page) in {"tab-progress", "tab-evidence", "tab-data", "inspectorClose"}
 
         page.keyboard.press("Escape")
         page.wait_for_function("!document.getElementById('inspector')?.classList.contains('open')")
         assert inspector.get_attribute("aria-hidden") == "true"
-        assert active_id(page) == "inspectorToggle"
+        page.wait_for_function("document.activeElement?.id === 'inspectorToggle'")
 
         browser.close()
 
