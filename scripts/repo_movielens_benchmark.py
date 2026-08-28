@@ -12,7 +12,12 @@ from implicit.datasets.movielens import get_movielens
 from implicit.evaluation import train_test_split
 from implicit.nearest_neighbours import BM25Recommender
 
-from lingjing_harness.algorithms import RecommendationEngine
+from lingjing_harness.algorithms import (
+    RecommendConfig,
+    RecommendationEngine,
+    config_from_mapping,
+    evolve_recommend,
+)
 from lingjing_harness.domain import Catalog, Interaction, Item
 from repo_recommender_benchmark import (
     XushuImplicitEvaluationAdapter,
@@ -197,6 +202,28 @@ def _reference_diagnostics(
     }
 
 
+def _evolved_proxy_adapter(
+    catalog: Catalog,
+    user_ids: list[str],
+    item_ids: list[str],
+) -> tuple[XushuImplicitEvaluationAdapter, dict]:
+    reference = RecommendationEngine(catalog)
+    evolution = evolve_recommend(catalog, reference)
+    config = config_from_mapping(RecommendConfig, evolution["candidate_config"])
+    adapter = XushuImplicitEvaluationAdapter(catalog, user_ids, item_ids)
+    adapter.engine = RecommendationEngine(catalog, config)
+    summary = {
+        "trusted": bool(evolution.get("trusted")),
+        "safe_to_try": bool(evolution.get("safe_to_try")),
+        "evaluation_basis": evolution.get("evaluation_basis"),
+        "candidate_config": evolution.get("candidate_config", {}),
+        "proxy_delta": evolution.get("delta", {}),
+        "reference_proxy": evolution.get("reference", {}),
+        "candidate_proxy": evolution.get("candidate", {}),
+    }
+    return adapter, summary
+
+
 def main() -> None:
     source, interactions, user_ids, item_ids, identity = _dataset()
     train, test = train_test_split(
@@ -207,9 +234,15 @@ def main() -> None:
     train = _canonicalize_matrix(train)
     test = _canonicalize_matrix(test)
     reference_catalog = _training_catalog(source, train, user_ids, item_ids)
+    evolved_adapter, evolution_summary = _evolved_proxy_adapter(
+        reference_catalog,
+        user_ids,
+        item_ids,
+    )
 
     models = {
         "xushu_reference": XushuImplicitEvaluationAdapter(reference_catalog, user_ids, item_ids),
+        "xushu_proxy_evolved": evolved_adapter,
         "implicit_als": AlternatingLeastSquares(
             factors=32,
             regularization=0.05,
@@ -233,9 +266,13 @@ def main() -> None:
 
     results = {}
     for name, model in models.items():
-        if name != "xushu_reference":
+        if not name.startswith("xushu_"):
             model.fit(train, show_progress=False)
         results[name] = _metrics(model, train, test)
+
+    reference_ndcg = float(results["xushu_reference"]["ndcg"])
+    evolved_ndcg = float(results["xushu_proxy_evolved"]["ndcg"])
+    evolution_summary["fixed_test_ndcg_delta"] = round(evolved_ndcg - reference_ndcg, 6)
 
     print(
         json.dumps(
@@ -257,6 +294,7 @@ def main() -> None:
                 "train_events": int(train.nnz),
                 "test_events": int(test.nnz),
                 "metrics_at_10": results,
+                "proxy_objective_alignment": evolution_summary,
                 "reference_signal_diagnostics": _reference_diagnostics(
                     reference_catalog,
                     test,
