@@ -1,21 +1,44 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from math import log2
 from statistics import mean
 from typing import Iterable
 
 from lingjing_harness.domain import Catalog, Interaction
-from .recommend import RecommendationEngine
+from .recommend import RecommendConfig, RecommendationEngine
 
 
 DEFAULT_RELEVANCE_K = 10
 MAX_RELEVANCE_USERS = 32
+DEFAULT_MIN_TARGET_WEIGHT = 1.0
+
+
+def _latest_novel_target(
+    events: list[Interaction],
+    *,
+    minimum_target_weight: float,
+) -> Interaction | None:
+    ordered = sorted(events, key=lambda row: (row.timestamp, row.item_id))
+    earlier: set[str] = set()
+    candidates: list[Interaction] = []
+    for event in ordered:
+        if (
+            earlier
+            and event.item_id not in earlier
+            and float(event.weight) >= minimum_target_weight
+        ):
+            candidates.append(event)
+        earlier.add(event.item_id)
+    return candidates[-1] if candidates else None
 
 
 def _evaluation_users(
     catalog: Catalog,
     users: Iterable[str] | None,
+    *,
+    minimum_target_weight: float,
 ) -> list[str]:
     allowed = set(users) if users is not None else None
     by_user: dict[str, list[Interaction]] = defaultdict(list)
@@ -24,31 +47,17 @@ def _evaluation_users(
             continue
         by_user[event.user_id].append(event)
 
-    eligible: list[str] = []
-    for user_id, events in by_user.items():
-        if len(events) < 2:
-            continue
-        ordered = sorted(events, key=lambda row: (row.timestamp, row.item_id))
-        seen: set[str] = set()
-        has_temporal_target = False
-        for event in ordered:
-            if event.item_id not in seen and seen:
-                has_temporal_target = True
-            seen.add(event.item_id)
-        if has_temporal_target:
-            eligible.append(user_id)
+    eligible = [
+        user_id
+        for user_id, events in by_user.items()
+        if len(events) >= 2
+        and _latest_novel_target(
+            events,
+            minimum_target_weight=minimum_target_weight,
+        )
+        is not None
+    ]
     return sorted(eligible)[:MAX_RELEVANCE_USERS]
-
-
-def _latest_novel_target(events: list[Interaction]) -> Interaction | None:
-    ordered = sorted(events, key=lambda row: (row.timestamp, row.item_id))
-    earlier: set[str] = set()
-    candidates: list[Interaction] = []
-    for event in ordered:
-        if earlier and event.item_id not in earlier:
-            candidates.append(event)
-        earlier.add(event.item_id)
-    return candidates[-1] if candidates else None
 
 
 def _single_target_metrics(ranked: list[str], target: str, k: int) -> dict[str, float]:
@@ -81,37 +90,130 @@ def _popularity_rank(catalog: Catalog, seen: set[str], *, k: int) -> list[str]:
     return [item.item_id for item in candidates[:k]]
 
 
-def audit_recommend_relevance(
+def _aggregate(rows: list[dict[str, float]]) -> dict[str, float]:
+    if not rows:
+        return {"hit_rate": 0.0, "recall": 0.0, "mrr": 0.0, "ndcg": 0.0}
+    return {
+        key: round(mean(row[key] for row in rows), 4)
+        for key in ("hit_rate", "recall", "mrr", "ndcg")
+    }
+
+
+@dataclass(slots=True)
+class _PreparedSlice:
+    user_id: str
+    target: str
+    target_timestamp: float
+    history: int
+    engine: RecommendationEngine
+    popularity_ranked: list[str]
+
+
+@dataclass(slots=True)
+class PreparedRecommendRelevance:
+    """Reusable interaction-temporal relevance slices for candidate evaluation.
+
+    Expensive temporal Catalog/RecommendationEngine construction happens once per
+    user. Candidate strategies then reuse those immutable features via
+    ``RecommendationEngine.with_config`` so an evolution run can regression-check
+    many configs without rebuilding the same historical graph for every candidate.
+
+    Only interaction history is point-in-time. Item-side popularity, freshness and
+    quality are still the Catalog snapshot supplied by the caller, so reports make
+    that evidence boundary explicit instead of presenting this as full historical
+    feature reconstruction.
+    """
+
+    slices: list[_PreparedSlice]
+    k: int
+    minimum_target_weight: float
+
+    def evaluate(self, config: RecommendConfig) -> dict:
+        model_rows: list[dict[str, float]] = []
+        popularity_rows: list[dict[str, float]] = []
+        details: list[dict] = []
+
+        for row in self.slices:
+            candidate_engine = row.engine.with_config(config)
+            model_ranked = [
+                item["id"]
+                for item in candidate_engine.recommend(row.user_id, limit=self.k)
+            ]
+            model_metric = _single_target_metrics(model_ranked, row.target, self.k)
+            popularity_metric = _single_target_metrics(
+                row.popularity_ranked,
+                row.target,
+                self.k,
+            )
+            model_rows.append(model_metric)
+            popularity_rows.append(popularity_metric)
+            details.append(
+                {
+                    "user_id": row.user_id,
+                    "target": row.target,
+                    "target_timestamp": row.target_timestamp,
+                    "history": row.history,
+                    "model_rank": (
+                        model_ranked.index(row.target) + 1
+                        if row.target in model_ranked
+                        else None
+                    ),
+                    "popularity_rank": (
+                        row.popularity_ranked.index(row.target) + 1
+                        if row.target in row.popularity_ranked
+                        else None
+                    ),
+                }
+            )
+
+        model = _aggregate(model_rows)
+        popularity = _aggregate(popularity_rows)
+        return {
+            "available": bool(model_rows),
+            "users": len(model_rows),
+            "k": self.k,
+            "protocol": "strict_temporal_leave_one_out",
+            "temporal_scope": "interactions_only",
+            "point_in_time_item_features": False,
+            "minimum_target_weight": self.minimum_target_weight,
+            "prepared_slices": len(self.slices),
+            "model": model,
+            "popularity_baseline": popularity,
+            "delta_vs_popularity": {
+                key: round(model[key] - popularity[key], 4)
+                for key in ("hit_rate", "recall", "mrr", "ndcg")
+            },
+            "details": details,
+        }
+
+
+def prepare_recommend_relevance(
     catalog: Catalog,
     engine: RecommendationEngine,
     *,
     users_override: Iterable[str] | None = None,
     k: int = DEFAULT_RELEVANCE_K,
-) -> dict:
-    """Temporal leave-one-out relevance benchmark for warm recommendation.
-
-    For every eligible user we hold out the latest item that was novel at the
-    moment it occurred, rebuild the recommender from interactions strictly before
-    that timestamp, and ask whether the held-out item is recovered. This prevents
-    the target interaction from entering the user profile or collaborative graph.
-
-    A popularity baseline is evaluated on the exact same temporal split so the
-    report can answer a more useful question than "does the recommender return a
-    diverse slate?": does personalization beat a non-personalized ranking?
-    """
+    minimum_target_weight: float = DEFAULT_MIN_TARGET_WEIGHT,
+) -> PreparedRecommendRelevance:
+    """Build reusable interaction-temporal slices for recommendation evaluation."""
 
     k = max(1, int(k))
-    users = _evaluation_users(catalog, users_override)
+    minimum_target_weight = max(0.0, float(minimum_target_weight))
+    users = _evaluation_users(
+        catalog,
+        users_override,
+        minimum_target_weight=minimum_target_weight,
+    )
     by_user: dict[str, list[Interaction]] = defaultdict(list)
     for event in catalog.interactions:
         by_user[event.user_id].append(event)
 
-    model_rows: list[dict[str, float]] = []
-    popularity_rows: list[dict[str, float]] = []
-    details: list[dict] = []
-
+    slices: list[_PreparedSlice] = []
     for user_id in users:
-        target = _latest_novel_target(by_user[user_id])
+        target = _latest_novel_target(
+            by_user[user_id],
+            minimum_target_weight=minimum_target_weight,
+        )
         if target is None:
             continue
 
@@ -139,59 +241,47 @@ def audit_recommend_relevance(
             reward_spec=None,
             name=f"{catalog.name}:temporal-relevance:{user_id}",
         )
-        candidate_engine = RecommendationEngine(training_catalog, config=engine.config)
-        model_ranked = [
-            row["id"]
-            for row in candidate_engine.recommend(user_id, limit=k)
-        ]
-        popularity_ranked = _popularity_rank(training_catalog, seen, k=k)
-
-        model_metric = _single_target_metrics(model_ranked, target.item_id, k)
-        popularity_metric = _single_target_metrics(popularity_ranked, target.item_id, k)
-        model_rows.append(model_metric)
-        popularity_rows.append(popularity_metric)
-        details.append(
-            {
-                "user_id": user_id,
-                "target": target.item_id,
-                "target_timestamp": target.timestamp,
-                "history": len(user_history),
-                "model_rank": (
-                    model_ranked.index(target.item_id) + 1
-                    if target.item_id in model_ranked
-                    else None
-                ),
-                "popularity_rank": (
-                    popularity_ranked.index(target.item_id) + 1
-                    if target.item_id in popularity_ranked
-                    else None
-                ),
-            }
+        base_engine = RecommendationEngine(training_catalog, config=engine.config)
+        slices.append(
+            _PreparedSlice(
+                user_id=user_id,
+                target=target.item_id,
+                target_timestamp=target.timestamp,
+                history=len(user_history),
+                engine=base_engine,
+                popularity_ranked=_popularity_rank(training_catalog, seen, k=k),
+            )
         )
 
-    def aggregate(rows: list[dict[str, float]]) -> dict[str, float]:
-        if not rows:
-            return {"hit_rate": 0.0, "recall": 0.0, "mrr": 0.0, "ndcg": 0.0}
-        return {
-            key: round(mean(row[key] for row in rows), 4)
-            for key in ("hit_rate", "recall", "mrr", "ndcg")
-        }
-
-    model = aggregate(model_rows)
-    popularity = aggregate(popularity_rows)
-    return {
-        "available": bool(model_rows),
-        "users": len(model_rows),
-        "k": k,
-        "protocol": "strict_temporal_leave_one_out",
-        "model": model,
-        "popularity_baseline": popularity,
-        "delta_vs_popularity": {
-            key: round(model[key] - popularity[key], 4)
-            for key in ("hit_rate", "recall", "mrr", "ndcg")
-        },
-        "details": details,
-    }
+    return PreparedRecommendRelevance(
+        slices=slices,
+        k=k,
+        minimum_target_weight=minimum_target_weight,
+    )
 
 
-__all__ = ["audit_recommend_relevance"]
+def audit_recommend_relevance(
+    catalog: Catalog,
+    engine: RecommendationEngine,
+    *,
+    users_override: Iterable[str] | None = None,
+    k: int = DEFAULT_RELEVANCE_K,
+    minimum_target_weight: float = DEFAULT_MIN_TARGET_WEIGHT,
+) -> dict:
+    """Interaction-temporal leave-one-out relevance benchmark for warm recommendation."""
+
+    prepared = prepare_recommend_relevance(
+        catalog,
+        engine,
+        users_override=users_override,
+        k=k,
+        minimum_target_weight=minimum_target_weight,
+    )
+    return prepared.evaluate(engine.config)
+
+
+__all__ = [
+    "PreparedRecommendRelevance",
+    "audit_recommend_relevance",
+    "prepare_recommend_relevance",
+]
