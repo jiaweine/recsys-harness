@@ -1,11 +1,6 @@
 name: Collaborative Model Benchmark
 
 on:
-  push:
-    branches: ['benchmark/collaborative-model-selection']
-    paths:
-      - 'scripts/collaborative_model_benchmark.py'
-      - '.github/workflows/collaborative-model-benchmark.yml'
   workflow_dispatch:
 
 permissions:
