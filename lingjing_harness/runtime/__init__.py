@@ -6,8 +6,10 @@ from .capabilities import (
     RUNTIME_CAPABILITIES,
 )
 from .collaborative_tools import RecommendationBackendToolRegistry
+from .contracts import RunBudget
 from .deliberation import DeliberationEngine, TrajectoryCritic
 from .harness import AgentHarness as _BaseAgentHarness, RunCancelled
+from .invocation_maintenance import discard_completed_run_invocations
 from .memory import AgentMemory, catalog_fingerprint
 from .mission_compiler import MissionCompiler
 from .network import NetworkResearch
@@ -59,6 +61,27 @@ class AgentHarness(_BaseAgentHarness):
             budget=budget,
             tools=tools,
         )
+
+    def fork(self) -> "AgentHarness":
+        """Fork the public runtime while preserving prepared backend state."""
+
+        return AgentHarness(
+            self.catalog,
+            memory=self.memory,
+            budget=RunBudget(
+                max_tools=self.budget.max_tools,
+                max_cost=self.budget.max_cost,
+                max_seconds=self.budget.max_seconds,
+            ),
+            tools=self.tools.fork(),
+        )
+
+    def run(self, *args, **kwargs):
+        """Run normally, then release replay-only invocation rows on success."""
+
+        result = super().run(*args, **kwargs)
+        discard_completed_run_invocations(self.memory, str(result.get("run_id") or ""))
+        return result
 
 
 __all__ = [
