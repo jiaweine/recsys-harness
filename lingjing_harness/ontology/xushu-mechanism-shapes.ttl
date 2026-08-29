@@ -1,0 +1,86 @@
+@prefix xushu: <https://xushu.ai/ontology/mechanism#> .
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+xushu:ExperimentShape a sh:NodeShape ;
+  sh:targetClass xushu:Experiment ;
+  sh:property [
+    sh:path xushu:underContext ;
+    sh:class xushu:Context ;
+    sh:minCount 1 ;
+    sh:maxCount 1
+  ] ;
+  sh:property [
+    sh:path xushu:testsMechanism ;
+    sh:class xushu:Mechanism ;
+    sh:minCount 1 ;
+    sh:maxCount 1
+  ] ;
+  sh:property [
+    sh:path xushu:supportedBy ;
+    sh:class xushu:Evidence ;
+    sh:minCount 1 ;
+    sh:maxCount 1
+  ] ;
+  sh:property [
+    sh:path xushu:hasOutcome ;
+    sh:class xushu:Outcome ;
+    sh:minCount 1 ;
+    sh:maxCount 1
+  ] ;
+  sh:property [
+    sh:path xushu:runId ;
+    sh:datatype xsd:string ;
+    sh:minCount 1
+  ] ;
+  sh:property [
+    sh:path xushu:domain ;
+    sh:in ("search" "recommend") ;
+    sh:minCount 1
+  ] ;
+  sh:property [
+    sh:path xushu:scope ;
+    sh:in ("global" "segment") ;
+    sh:minCount 1
+  ] .
+
+xushu:EvidenceShape a sh:NodeShape ;
+  sh:targetClass xushu:Evidence ;
+  sh:property [
+    sh:path xushu:evidenceSamples ;
+    sh:datatype xsd:integer ;
+    sh:minInclusive 0 ;
+    sh:minCount 1
+  ] ;
+  sh:property [
+    sh:path xushu:rewardDelta ;
+    sh:datatype xsd:double ;
+    sh:minCount 1
+  ] .
+
+xushu:OutcomeShape a sh:NodeShape ;
+  sh:targetClass xushu:Outcome ;
+  sh:property [
+    sh:path xushu:outcomeStatus ;
+    sh:in ("accepted" "rejected" "inconclusive") ;
+    sh:minCount 1 ;
+    sh:maxCount 1
+  ] .
+
+xushu:ContextShape a sh:NodeShape ;
+  sh:targetClass xushu:Context ;
+  sh:property [
+    sh:path xushu:contextKey ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1
+  ] .
+
+xushu:MechanismShape a sh:NodeShape ;
+  sh:targetClass xushu:Mechanism ;
+  sh:property [
+    sh:path xushu:mechanismKey ;
+    sh:datatype xsd:string ;
+    sh:minCount 1 ;
+    sh:maxCount 1
+  ] .
