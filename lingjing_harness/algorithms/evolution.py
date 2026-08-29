@@ -23,6 +23,10 @@ from .production_evolution import (
     evolve_search as _evolve_search,
 )
 from .recommend import RecommendConfig
+from .recommend_objective_routing import (
+    install_recommend_objective_router,
+    recommend_relevance_objective,
+)
 from .recommend_validation import prepare_recommend_relevance
 from .segment_credit import attach_recommend_portfolio, attach_search_portfolio
 
@@ -32,6 +36,7 @@ from .segment_credit import attach_recommend_portfolio, attach_search_portfolio
 # every public evolution path credit-aware without duplicating the core search
 # machinery or introducing per-run global mutable context.
 install_credit_router()
+install_recommend_objective_router()
 
 EvolutionDimension = _core.EvolutionDimension
 _evolution_schema = _core._evolution_schema
@@ -159,7 +164,11 @@ def _run_recommend(
     **kwargs: Any,
 ) -> dict[str, Any]:
     remembered = kwargs.get("remembered")
-    result = _trust_evidence_gate(_evolve_recommend(catalog, current, *args, **kwargs))
+    with recommend_relevance_objective(catalog, current) as objective_scope:
+        result = _trust_evidence_gate(
+            _evolve_recommend(catalog, objective_scope.engine, *args, **kwargs)
+        )
+    result = objective_scope.annotate(result)
     result = _recommend_relevance_gate(catalog, current, result)
     return attach_recommend_portfolio(
         catalog,

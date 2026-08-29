@@ -1,5 +1,8 @@
 from dataclasses import asdict, dataclass, fields
 
+import pytest
+
+from lingjing_harness.algorithms import evolution_core as core
 from lingjing_harness.algorithms.capabilities import CAPABILITIES, capability_field
 from lingjing_harness.algorithms.evolution import (
     _evolution_schema,
@@ -9,7 +12,11 @@ from lingjing_harness.algorithms.evolution import (
     evolve_search,
 )
 from lingjing_harness.algorithms.recommend import RecommendConfig, RecommendationEngine
+from lingjing_harness.algorithms.recommend_objective_routing import (
+    MIN_RELEVANCE_OBJECTIVE_EVIDENCE,
+)
 from lingjing_harness.algorithms.search import SearchConfig, SearchEngine
+from lingjing_harness.domain import Catalog, Interaction
 from lingjing_harness.sample_data import build_sample_catalog
 
 
@@ -19,6 +26,26 @@ def _continuous_fields(config):
 
 def _capability_fields(config):
     return [row for row in fields(config) if row.metadata.get("capability_group")]
+
+
+def _expanded_temporal_catalog() -> Catalog:
+    base = build_sample_catalog()
+    duplicated = [
+        Interaction(
+            user_id=f"copy-{event.user_id}",
+            item_id=event.item_id,
+            event=event.event,
+            weight=event.weight,
+            timestamp=event.timestamp,
+        )
+        for event in base.interactions
+    ]
+    return Catalog(
+        items=list(base.items),
+        interactions=[*base.interactions, *duplicated],
+        query_labels=list(base.query_labels),
+        name="expanded temporal evolution fixture",
+    )
 
 
 def test_search_evolution_schema_is_declared_by_config_fields():
@@ -129,6 +156,37 @@ def test_search_evolution_measures_continuous_and_structural_response_surface():
     }
 
 
+def test_recommend_objective_router_is_exact_noop_outside_evolution_scope():
+    report = {
+        "quality": 0.72,
+        "freshness": 0.63,
+        "diversity": 0.54,
+        "cold_start_quality": 0.48,
+    }
+    robust = {"worse_share": 0.2, "worst_delta": -0.1}
+    expected = (
+        0.72
+        + 0.05 * 0.63
+        + 0.03 * 0.54
+        + 0.04 * 0.48
+        - 0.03 * 0.2
+        + 0.01 * -0.1
+    )
+    assert core._recommend_objective(report, robust) == pytest.approx(expected)
+
+
+def test_sparse_discovery_relevance_does_not_drive_optimizer():
+    catalog = build_sample_catalog()
+    result = evolve_recommend(catalog, RecommendationEngine(catalog))
+    relevance = result["evolution"]["relevance_objective"]
+
+    assert relevance["available"] is False
+    assert relevance["reason"] == "insufficient_discovery_evidence"
+    assert relevance["samples"] == 4
+    assert relevance["minimum_samples"] == MIN_RELEVANCE_OBJECTIVE_EVIDENCE == 6
+    assert result["trusted"] is True
+
+
 def test_recommend_evolution_includes_cold_start_slice_and_structural_genes():
     catalog = build_sample_catalog()
     result = evolve_recommend(catalog, RecommendationEngine(catalog))
@@ -144,3 +202,20 @@ def test_recommend_evolution_includes_cold_start_slice_and_structural_genes():
         for row in meta["response_surface"]
     )
     assert meta["archive_size"] >= 1
+
+
+def test_recommend_relevance_objective_activates_with_stronger_temporal_evidence():
+    catalog = _expanded_temporal_catalog()
+    result = evolve_recommend(catalog, RecommendationEngine(catalog))
+    meta = result["evolution"]
+    relevance = meta["relevance_objective"]
+
+    assert relevance["available"] is True
+    assert relevance["scope"] == "discovery_users_only"
+    assert relevance["protocol"] == "strict_temporal_leave_one_out"
+    assert relevance["samples"] >= MIN_RELEVANCE_OBJECTIVE_EVIDENCE
+    assert relevance["minimum_samples"] == MIN_RELEVANCE_OBJECTIVE_EVIDENCE
+    assert relevance["aggregation"] == "mean_delta_ndcg_mrr"
+
+    surface = {row["arm"]: row for row in meta["response_surface"]}
+    assert surface["rerank_strategy=semantic_mmr"]["objective_delta"] > surface["exploration:up"]["objective_delta"]
