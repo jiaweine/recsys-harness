@@ -7,10 +7,23 @@ from .capabilities import (
 )
 from .collaborative_tools import RecommendationBackendToolRegistry
 from .contracts import RunBudget
+from .credit_assignment import apply_semantic_trajectory_credit
 from .deliberation import DeliberationEngine, TrajectoryCritic
 from .harness import AgentHarness as _BaseAgentHarness, RunCancelled
 from .invocation_maintenance import discard_completed_run_invocations
 from .memory import AgentMemory, catalog_fingerprint
+from .mechanism_graph import (
+    mechanism_graph_snapshot,
+    mechanism_stats,
+    record_mechanism_evidence,
+    validate_mechanism_graph,
+    validate_mechanism_graph_with_shacl,
+)
+from .mechanism_transfer import (
+    install_mechanism_transfer,
+    mechanism_pair_priors,
+    record_runtime_mechanism_evidence,
+)
 from .mission_compiler import MissionCompiler
 from .network import NetworkResearch
 from .optimizer_tools import OptimizerToolRegistry
@@ -21,6 +34,12 @@ from .skill_retention import prune_retired_strategy_history
 from .tools import ToolRegistry
 from .verifier import ResultVerifier
 from .backend_config import RuntimeBackendConfig, build_runtime_tools
+
+
+# Public runtimes enrich evolution memory with second-order mechanism interaction
+# priors. The original single-arm credit path remains authoritative for first-order
+# routing; the bridge appends only co-occurrence pair evidence.
+install_mechanism_transfer()
 
 
 class AgentHarness(_BaseAgentHarness):
@@ -78,9 +97,32 @@ class AgentHarness(_BaseAgentHarness):
         )
 
     def run(self, *args, **kwargs):
-        """Run normally, then release replay-only state and bound retired history."""
+        """Run, apply process credit, persist mechanism evidence, then prune state."""
 
         result = super().run(*args, **kwargs)
+
+        credit = apply_semantic_trajectory_credit(self.memory, result)
+        autonomy = result.setdefault("autonomy", {})
+        autonomy["policy_credit_assignment"] = {
+            "method": credit.get("method"),
+            "applied": bool(credit.get("applied")),
+            "horizon": int(credit.get("horizon", 0) or 0),
+            "terminal_weight": credit.get("terminal_weight"),
+            "process_weight": credit.get("process_weight"),
+            "adjusted_policy_rows": int(credit.get("adjusted_policy_rows", 0) or 0),
+        }
+        result["policy_credit"] = credit
+
+        mechanisms = record_runtime_mechanism_evidence(self.memory, self.catalog_key, result)
+        autonomy["mechanism_evidence_graph"] = {
+            "method": mechanisms.get("method"),
+            "recorded": int(mechanisms.get("recorded", 0) or 0),
+            "deduplicated": int(mechanisms.get("deduplicated", 0) or 0),
+            "mechanisms": int(mechanisms.get("mechanisms", 0) or 0),
+            "contexts": int(mechanisms.get("contexts", 0) or 0),
+        }
+        result["mechanism_evidence"] = mechanisms
+
         discard_completed_run_invocations(self.memory, str(result.get("run_id") or ""))
         prune_retired_strategy_history(self.memory)
         return result
@@ -102,4 +144,7 @@ __all__ = [
     "OwnedPolicy",
     "ToolRegistry",
     "ResultVerifier",
+    "record_mechanism_evidence", "record_runtime_mechanism_evidence",
+    "mechanism_stats", "mechanism_graph_snapshot", "mechanism_pair_priors",
+    "validate_mechanism_graph", "validate_mechanism_graph_with_shacl",
 ]

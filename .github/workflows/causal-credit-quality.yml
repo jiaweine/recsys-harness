@@ -1,0 +1,71 @@
+name: Causal and Credit Quality
+
+on:
+  push:
+    paths:
+      - '.github/workflows/causal-credit-quality.yml'
+      - 'lingjing_harness/counterfactual.py'
+      - 'lingjing_harness/counterfactual_robust.py'
+      - 'lingjing_harness/experiments.py'
+      - 'lingjing_harness/algorithms/basin_routing.py'
+      - 'lingjing_harness/runtime/credit_assignment.py'
+      - 'lingjing_harness/runtime/mechanism_graph.py'
+      - 'lingjing_harness/runtime/mechanism_transfer.py'
+      - 'lingjing_harness/runtime/__init__.py'
+      - 'lingjing_harness/ontology/xushu-mechanism.ttl'
+      - 'lingjing_harness/ontology/xushu-mechanism-shapes.ttl'
+      - 'tests/test_counterfactual_experiments.py'
+      - 'tests/test_counterfactual_robust.py'
+      - 'tests/test_credit_assignment.py'
+      - 'tests/test_mechanism_graph.py'
+      - 'tests/test_basin_routing.py'
+  pull_request:
+    paths:
+      - '.github/workflows/causal-credit-quality.yml'
+      - 'lingjing_harness/counterfactual.py'
+      - 'lingjing_harness/counterfactual_robust.py'
+      - 'lingjing_harness/experiments.py'
+      - 'lingjing_harness/algorithms/basin_routing.py'
+      - 'lingjing_harness/runtime/credit_assignment.py'
+      - 'lingjing_harness/runtime/mechanism_graph.py'
+      - 'lingjing_harness/runtime/mechanism_transfer.py'
+      - 'lingjing_harness/runtime/__init__.py'
+      - 'lingjing_harness/ontology/xushu-mechanism.ttl'
+      - 'lingjing_harness/ontology/xushu-mechanism-shapes.ttl'
+      - 'tests/test_counterfactual_experiments.py'
+      - 'tests/test_counterfactual_robust.py'
+      - 'tests/test_credit_assignment.py'
+      - 'tests/test_mechanism_graph.py'
+      - 'tests/test_basin_routing.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  causal-credit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e '.[ontology]'
+      - name: Compile causal, credit, and mechanism tests
+        run: >-
+          python -m compileall -q lingjing_harness
+          tests/test_counterfactual_experiments.py
+          tests/test_counterfactual_robust.py
+          tests/test_credit_assignment.py
+          tests/test_mechanism_graph.py
+          tests/test_basin_routing.py
+      - name: Run causal, credit, and mechanism quality gates
+        run: >-
+          pytest -q
+          tests/test_counterfactual_experiments.py
+          tests/test_counterfactual_robust.py
+          tests/test_credit_assignment.py
+          tests/test_mechanism_graph.py
+          tests/test_basin_routing.py
