@@ -12,6 +12,7 @@ discovered strategy basin. Sparse segments keep the global strategy as fallback.
 from typing import Any
 
 from . import evolution_core as _core
+from .business_replay_budget import install_business_replay_budget
 from .credit_routing import install_credit_router
 from .optimizer_backends import (
     annotate_optimizer_backend,
@@ -31,11 +32,12 @@ from .recommend_validation import RecommendRelevanceSliceCache, prepare_recommen
 from .segment_credit import attach_recommend_portfolio, attach_search_portfolio
 
 
-# Install once at the stable public boundary. ``evolution_core._response_surface``
-# resolves this module-global function at call time, so replacing it here makes
-# every public evolution path credit-aware without duplicating the core search
-# machinery or introducing per-run global mutable context.
+# Install once at the stable public boundary. The core/production modules resolve
+# these globals at call time, so every public evolution path receives durable arm
+# credit, bounded discovery replay cost and temporal recommendation relevance
+# without per-run global mutable context.
 install_credit_router()
+install_business_replay_budget()
 install_recommend_objective_router()
 
 EvolutionDimension = _core.EvolutionDimension

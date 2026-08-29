@@ -8,7 +8,11 @@ on:
       - 'lingjing_harness/integrations/**'
       - 'lingjing_harness/runtime/collaborative_tools.py'
       - 'lingjing_harness/runtime/__init__.py'
+      - 'lingjing_harness/algorithms/business_replay_budget.py'
+      - 'lingjing_harness/algorithms/evolution.py'
+      - 'lingjing_harness/algorithms/production_evolution.py'
       - 'lingjing_harness/algorithms/recommend_validation.py'
+      - 'tests/test_business_replay_budget.py'
       - 'tests/test_collaborative_runtime.py'
       - 'tests/test_implicit_hybrid_runtime.py'
       - 'tests/test_implicit_recommendation.py'
@@ -20,7 +24,11 @@ on:
       - 'lingjing_harness/integrations/**'
       - 'lingjing_harness/runtime/collaborative_tools.py'
       - 'lingjing_harness/runtime/__init__.py'
+      - 'lingjing_harness/algorithms/business_replay_budget.py'
+      - 'lingjing_harness/algorithms/evolution.py'
+      - 'lingjing_harness/algorithms/production_evolution.py'
       - 'lingjing_harness/algorithms/recommend_validation.py'
+      - 'tests/test_business_replay_budget.py'
       - 'tests/test_collaborative_runtime.py'
       - 'tests/test_implicit_hybrid_runtime.py'
       - 'tests/test_implicit_recommendation.py'
@@ -49,6 +57,7 @@ jobs:
           OMP_NUM_THREADS: '1'
         run: >-
           pytest -q
+          tests/test_business_replay_budget.py
           tests/test_collaborative_runtime.py
           tests/test_implicit_hybrid_runtime.py
           tests/test_implicit_recommendation.py
