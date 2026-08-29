@@ -108,17 +108,26 @@ def test_official_als_hybrid_runs_shared_domain_and_temporal_relevance_audits():
     assert relevance["protocol"] == "strict_temporal_leave_one_out"
 
 
-def test_official_als_hybrid_participates_in_evolution_without_retraining_per_config():
+def test_official_als_hybrid_participates_in_evolution_without_retraining_per_config(monkeypatch):
     catalog = _catalog()
     engine = _hybrid(catalog)
     adapter = engine.adapter
+    original_for_catalog = engine.for_catalog
+    temporal_builds = 0
 
+    def counted_for_catalog(training_catalog):
+        nonlocal temporal_builds
+        temporal_builds += 1
+        return original_for_catalog(training_catalog)
+
+    monkeypatch.setattr(engine, "for_catalog", counted_for_catalog)
     result = evolve_recommend(catalog, engine)
 
     assert result["evaluation_ready"] is True
     assert result["candidate_count"] > 0
     assert engine.adapter is adapter
     assert result["candidate_config"]
+    assert temporal_builds == result["relevance_validation"]["prepared_slices"]
 
 
 def test_explicit_runtime_registry_uses_official_als_for_active_strategy_serving():

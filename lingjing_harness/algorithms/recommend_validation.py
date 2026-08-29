@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import log2
 from statistics import mean
-from typing import Iterable
+from typing import Any, Iterable
 
 from lingjing_harness.domain import Catalog, Interaction
 from .recommend import RecommendConfig, RecommendationEngine
@@ -110,6 +110,28 @@ class _PreparedSlice:
 
 
 @dataclass(slots=True)
+class RecommendRelevanceSliceCache:
+    """Per-evolution cache for expensive point-in-time recommendation slices.
+
+    The cache is deliberately bound to one Catalog object and one runtime engine
+    object. Objective discovery and promotion guardrails may select different user
+    sets, but overlapping users can safely reuse an identical temporal slice. The
+    cache must never cross a catalog/runtime boundary where trained backend state
+    could represent different evidence.
+    """
+
+    catalog: Catalog
+    engine: Any
+    slices: dict[tuple[str, int, float], _PreparedSlice] = field(default_factory=dict)
+
+    def validate(self, catalog: Catalog, engine: Any) -> None:
+        if self.catalog is not catalog or self.engine is not engine:
+            raise ValueError(
+                "recommend relevance slice cache must stay scoped to the same catalog and engine"
+            )
+
+
+@dataclass(slots=True)
 class PreparedRecommendRelevance:
     """Reusable interaction-temporal relevance slices for candidate evaluation.
 
@@ -194,11 +216,14 @@ def prepare_recommend_relevance(
     users_override: Iterable[str] | None = None,
     k: int = DEFAULT_RELEVANCE_K,
     minimum_target_weight: float = DEFAULT_MIN_TARGET_WEIGHT,
+    slice_cache: RecommendRelevanceSliceCache | None = None,
 ) -> PreparedRecommendRelevance:
     """Build reusable interaction-temporal slices for recommendation evaluation."""
 
     k = max(1, int(k))
     minimum_target_weight = max(0.0, float(minimum_target_weight))
+    if slice_cache is not None:
+        slice_cache.validate(catalog, engine)
     users = _evaluation_users(
         catalog,
         users_override,
@@ -210,6 +235,11 @@ def prepare_recommend_relevance(
 
     slices: list[_PreparedSlice] = []
     for user_id in users:
+        cache_key = (user_id, k, minimum_target_weight)
+        if slice_cache is not None and cache_key in slice_cache.slices:
+            slices.append(slice_cache.slices[cache_key])
+            continue
+
         target = _latest_novel_target(
             by_user[user_id],
             minimum_target_weight=minimum_target_weight,
@@ -247,16 +277,17 @@ def prepare_recommend_relevance(
             if callable(runtime_factory)
             else RecommendationEngine(training_catalog, config=engine.config)
         )
-        slices.append(
-            _PreparedSlice(
-                user_id=user_id,
-                target=target.item_id,
-                target_timestamp=target.timestamp,
-                history=len(user_history),
-                engine=base_engine,
-                popularity_ranked=_popularity_rank(training_catalog, seen, k=k),
-            )
+        prepared_slice = _PreparedSlice(
+            user_id=user_id,
+            target=target.item_id,
+            target_timestamp=target.timestamp,
+            history=len(user_history),
+            engine=base_engine,
+            popularity_ranked=_popularity_rank(training_catalog, seen, k=k),
         )
+        if slice_cache is not None:
+            slice_cache.slices[cache_key] = prepared_slice
+        slices.append(prepared_slice)
 
     return PreparedRecommendRelevance(
         slices=slices,
@@ -287,6 +318,7 @@ def audit_recommend_relevance(
 
 __all__ = [
     "PreparedRecommendRelevance",
+    "RecommendRelevanceSliceCache",
     "audit_recommend_relevance",
     "prepare_recommend_relevance",
 ]

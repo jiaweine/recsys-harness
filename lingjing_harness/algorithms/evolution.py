@@ -27,7 +27,7 @@ from .recommend_objective_routing import (
     install_recommend_objective_router,
     recommend_relevance_objective,
 )
-from .recommend_validation import prepare_recommend_relevance
+from .recommend_validation import RecommendRelevanceSliceCache, prepare_recommend_relevance
 from .segment_credit import attach_recommend_portfolio, attach_search_portfolio
 
 
@@ -77,6 +77,8 @@ def _recommend_relevance_gate(
     catalog: Any,
     current: Any,
     result: dict[str, Any],
+    *,
+    slice_cache: RecommendRelevanceSliceCache | None = None,
 ) -> dict[str, Any]:
     """Attach cached interaction-temporal relevance evidence to promotion.
 
@@ -97,6 +99,7 @@ def _recommend_relevance_gate(
         current,
         users_override=current.known_users(),
         k=10,
+        slice_cache=slice_cache,
     )
     reference = prepared.evaluate(current.config)
     candidate = prepared.evaluate(RecommendConfig(**candidate_raw))
@@ -169,7 +172,12 @@ def _run_recommend(
             _evolve_recommend(catalog, objective_scope.engine, *args, **kwargs)
         )
     result = objective_scope.annotate(result)
-    result = _recommend_relevance_gate(catalog, current, result)
+    result = _recommend_relevance_gate(
+        catalog,
+        current,
+        result,
+        slice_cache=objective_scope.slice_cache,
+    )
     return attach_recommend_portfolio(
         catalog,
         current,
