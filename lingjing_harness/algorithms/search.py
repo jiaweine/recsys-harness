@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from math import log
 
 from lingjing_harness.domain import Catalog, Item
+from lingjing_harness.serving import normalize_serving_limit
 from .capabilities import CAPABILITIES, capability_field
 from .text import cosine, hashed_vector, tokenize
 
@@ -177,6 +178,9 @@ class SearchEngine:
         config: SearchConfig | None = None,
         limit: int = 10,
     ) -> list[dict]:
+        limit = normalize_serving_limit(limit)
+        if limit == 0:
+            return []
         cfg = config or self.config
         rows: list[dict] = []
         for raw in prepared:
@@ -238,6 +242,9 @@ class SearchEngine:
         ]
 
     def search(self, query: str, *, limit: int = 10) -> list[dict]:
+        limit = normalize_serving_limit(limit)
+        if limit == 0:
+            return []
         return self.rank_prepared(self.prepare(query), limit=limit)
 
 

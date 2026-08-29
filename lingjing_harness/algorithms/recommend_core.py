@@ -6,6 +6,7 @@ from hashlib import blake2b
 from math import exp, sqrt
 
 from lingjing_harness.domain import Catalog, Item
+from lingjing_harness.serving import normalize_serving_limit
 from .capabilities import CAPABILITIES, capability_field, normalize_strategy_config
 from .text import cosine, hashed_vector
 
@@ -207,6 +208,9 @@ class RecommendationEngine:
         config: RecommendConfig | None = None,
         limit: int = 10,
     ) -> list[dict]:
+        limit = normalize_serving_limit(limit)
+        if limit == 0:
+            return []
         cfg = normalize_strategy_config(config or self.config)
         rows = []
         for raw in prepared:
@@ -279,6 +283,9 @@ class RecommendationEngine:
         ]
 
     def recommend(self, user_id: str, *, limit: int = 10) -> list[dict]:
+        limit = normalize_serving_limit(limit)
+        if limit == 0:
+            return []
         return self.rank_prepared(self.prepare(user_id), limit=limit)
 
 
