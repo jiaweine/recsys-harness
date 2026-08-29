@@ -1,18 +1,14 @@
 """Durable Context -> Mechanism -> Experiment -> Evidence -> Outcome graph.
 
-Strategy-arm credit is intentionally compact because it sits on the hot routing
-path. This module adds a second, explanatory memory plane that preserves *why*
-an arm was accepted, rejected, or left inconclusive under a particular evidence
-context. It is written after a completed AgentHarness run and never changes the
-optimizer's trust, holdout, activation, or rollback authority.
+Strategy-arm credit stays deliberately compact because it sits on the hot routing
+path. This module is the explanatory memory plane: it preserves *why* a typed
+mechanism was accepted, rejected, or inconclusive under a concrete evidence
+context. Writes happen only after completed evolution actions and never modify
+trust thresholds, active strategies, rollback state, or activation authority.
 
-The graph stores global and segment-local evolution evidence. Global mechanisms
-come from the evolver's selected mutation signature. Segment mechanisms are
-computed relative to the global candidate basin when the memory implementation
-exposes the existing typed config-signature helper.
-
-The default graph/validator is dependency free. Optional RDF/SHACL validation is
-available through the repository's ``ontology`` extra.
+The dependency-light path stores SQLite evidence and exports JSON-LD. Projects that
+install the ``ontology`` extra can additionally validate the exported graph against
+the packaged OWL/RDFS vocabulary and SHACL shapes.
 """
 
 from __future__ import annotations
@@ -21,10 +17,11 @@ from hashlib import blake2b
 from importlib import resources
 import json
 import time
-from typing import Any, Iterable
+from typing import Any
 
 
 MECHANISM_NS = "https://xushu.ai/ontology/mechanism#"
+MECHANISM_METHOD = "context_mechanism_experiment_evidence_outcome"
 
 
 def _stable_key(payload: Any, *, size: int = 16) -> str:
@@ -40,13 +37,18 @@ def _stable_key(payload: Any, *, size: int = 16) -> str:
 
 
 def _memory_primitives(memory: Any) -> tuple[Any, Any, Any]:
-    return getattr(memory, "_lock"), getattr(memory, "_connect"), getattr(memory, "_close")
+    return (
+        getattr(memory, "_lock"),
+        getattr(memory, "_connect"),
+        getattr(memory, "_close"),
+    )
 
 
 def _surface(tool: str) -> str:
-    if str(tool).startswith("search."):
+    text = str(tool or "")
+    if text.startswith("search."):
         return "search"
-    if str(tool).startswith("recommend."):
+    if text.startswith("recommend."):
         return "recommend"
     return ""
 
@@ -59,25 +61,23 @@ def _selected_signature(result: dict[str, Any]) -> list[str]:
     ]
 
 
-def _evidence_summary(result: dict[str, Any], *, scope: str) -> dict[str, Any]:
-    if scope == "global":
-        business = result.get("business_validation") or {}
-        holdout = (result.get("validation") or {}).get("holdout") or {}
-        confidence = business.get("confidence") or {}
-        return {
-            "evaluation_basis": result.get("evaluation_basis"),
-            "business_available": bool(business.get("available")),
-            "business_holdout_delta": business.get("holdout_reward_delta"),
-            "business_full_delta": business.get("full_reward_delta"),
-            "confidence_samples": int(confidence.get("samples", 0) or 0),
-            "probability_positive": confidence.get("probability_positive"),
-            "holdout_independent": bool(holdout.get("independent")),
-            "holdout_samples": int(holdout.get("samples", 0) or 0),
-            "objective_delta": result.get("objective_delta"),
-            "robustness": result.get("robustness"),
-            "trust_blocked_by": list(result.get("trust_blocked_by") or []),
-        }
-    return {}
+def _global_evidence(result: dict[str, Any]) -> dict[str, Any]:
+    business = result.get("business_validation") or {}
+    holdout = (result.get("validation") or {}).get("holdout") or {}
+    confidence = business.get("confidence") or {}
+    return {
+        "evaluation_basis": result.get("evaluation_basis"),
+        "business_available": bool(business.get("available")),
+        "business_holdout_delta": business.get("holdout_reward_delta"),
+        "business_full_delta": business.get("full_reward_delta"),
+        "confidence_samples": int(confidence.get("samples", 0) or 0),
+        "probability_positive": confidence.get("probability_positive"),
+        "holdout_independent": bool(holdout.get("independent")),
+        "holdout_samples": int(holdout.get("samples", 0) or 0),
+        "objective_delta": result.get("objective_delta"),
+        "robustness": result.get("robustness"),
+        "trust_blocked_by": list(result.get("trust_blocked_by") or []),
+    }
 
 
 def _global_outcome(result: dict[str, Any]) -> tuple[str, float, int, list[str]]:
@@ -110,7 +110,10 @@ def _segment_outcome(entry: dict[str, Any]) -> tuple[str, float, int, list[str]]
     blockers = [str(value) for value in entry.get("trust_blocked_by") or []]
     if entry.get("trusted"):
         outcome = "accepted"
-    elif not entry.get("safe_to_try") or float(entry.get("holdout_reward_delta", 0.0) or 0.0) < 0.0:
+    elif (
+        not entry.get("safe_to_try")
+        or float(entry.get("holdout_reward_delta", 0.0) or 0.0) < 0.0
+    ):
         outcome = "rejected"
     else:
         outcome = "inconclusive"
@@ -129,7 +132,6 @@ def _context_payload(
     segment: str = "",
 ) -> dict[str, Any]:
     evolution = result.get("evolution") or {}
-    data = result.get("_run_data_summary") or {}
     return {
         "surface": surface,
         "scope": scope,
@@ -137,7 +139,7 @@ def _context_payload(
         "evaluation_basis": result.get("evaluation_basis"),
         "optimizer_backend": evolution.get("optimizer_backend") or "native",
         "optimizer_method": evolution.get("method"),
-        "data": data,
+        "data": result.get("_run_data_summary") or {},
     }
 
 
@@ -160,6 +162,18 @@ def _segment_signature(
         ]
     except (TypeError, ValueError, KeyError):
         return []
+
+
+def _segment_evidence(entry: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "discovery_requests": int(entry.get("discovery_requests", 0) or 0),
+        "holdout_requests": int(entry.get("holdout_requests", 0) or 0),
+        "holdout_reward_delta": entry.get("holdout_reward_delta"),
+        "full_reward_delta": entry.get("full_reward_delta"),
+        "confidence": entry.get("confidence") or {},
+        "guardrail": entry.get("guardrail") or {},
+        "trust_blocked_by": list(entry.get("trust_blocked_by") or []),
+    }
 
 
 def _ensure_schema(conn: Any) -> None:
@@ -258,9 +272,10 @@ def _insert_event(
     )
     if cursor.rowcount == 0:
         return False
-    accepted = 1 if outcome == "accepted" else 0
-    rejected = 1 if outcome == "rejected" else 0
-    inconclusive = 1 if outcome == "inconclusive" else 0
+
+    accepted = int(outcome == "accepted")
+    rejected = int(outcome == "rejected")
+    inconclusive = int(outcome == "inconclusive")
     conn.execute(
         """
         insert into agent_mechanism_stats(
@@ -300,21 +315,77 @@ def _insert_event(
     return True
 
 
+def _record_mechanisms(
+    conn: Any,
+    *,
+    catalog_key: str,
+    run_id: str,
+    invocation_id: str,
+    domain: str,
+    scope: str,
+    segment: str,
+    context: dict[str, Any],
+    mechanisms: list[str],
+    outcome: str,
+    reward_delta: float,
+    evidence: int,
+    failure_modes: list[str],
+    evidence_payload: dict[str, Any],
+) -> tuple[int, int]:
+    context_key = _stable_key(context, size=12)
+    inserted = 0
+    duplicate = 0
+    for mechanism in mechanisms:
+        event_key = _stable_key(
+            {
+                "run_id": run_id,
+                "invocation_id": invocation_id,
+                "scope": scope,
+                "segment": segment,
+                "context_key": context_key,
+                "mechanism": mechanism,
+            }
+        )
+        created = _insert_event(
+            conn,
+            event_key=event_key,
+            catalog_key=catalog_key,
+            run_id=run_id,
+            invocation_id=invocation_id,
+            domain=domain,
+            scope=scope,
+            segment=segment,
+            context_key=context_key,
+            mechanism=mechanism,
+            outcome=outcome,
+            reward_delta=reward_delta,
+            evidence=evidence,
+            failure_modes=failure_modes,
+            context=context,
+            evidence_payload=evidence_payload,
+        )
+        inserted += int(created)
+        duplicate += int(not created)
+    return inserted, duplicate
+
+
 def record_mechanism_evidence(
     memory: Any,
     catalog_key: str,
     result: dict[str, Any],
 ) -> dict[str, Any]:
-    """Persist mechanism-level evidence from completed evolution actions.
-
-    This write is idempotent by run/action/scope/context/mechanism identity. It is
-    observational: no policy score, trust threshold, active strategy, or rollback
-    state is modified here.
-    """
+    """Persist global and segment-local mechanism evidence idempotently."""
 
     run_id = str(result.get("run_id") or "")
     if not run_id:
-        return {"recorded": 0, "deduplicated": 0, "mechanisms": 0, "reason": "missing_run_id"}
+        return {
+            "recorded": 0,
+            "deduplicated": 0,
+            "mechanisms": 0,
+            "contexts": 0,
+            "method": MECHANISM_METHOD,
+            "reason": "missing_run_id",
+        }
 
     actions = [
         row
@@ -325,13 +396,20 @@ def record_mechanism_evidence(
         and isinstance(row.get("result"), dict)
     ]
     if not actions:
-        return {"recorded": 0, "deduplicated": 0, "mechanisms": 0, "reason": "no_evolution_actions"}
+        return {
+            "recorded": 0,
+            "deduplicated": 0,
+            "mechanisms": 0,
+            "contexts": 0,
+            "method": MECHANISM_METHOD,
+            "reason": "no_evolution_actions",
+        }
 
     lock, connect, close = _memory_primitives(memory)
     recorded = 0
     deduplicated = 0
     mechanism_names: set[str] = set()
-    contexts: set[str] = set()
+    context_keys: set[str] = set()
 
     with lock:
         conn = connect()
@@ -344,51 +422,36 @@ def record_mechanism_evidence(
                     continue
                 invocation_id = str(action.get("invocation_id") or tool)
                 evolution_result = dict(action.get("result") or {})
-                # The final run data summary is stable context shared by all action
-                # results but is not duplicated by the evolve tool itself.
                 evolution_result["_run_data_summary"] = result.get("data") or {}
 
-                signature = _selected_signature(evolution_result)
-                outcome, delta, evidence, failures = _global_outcome(evolution_result)
-                context = _context_payload(
-                    evolution_result,
-                    surface=domain,
-                    scope="global",
-                )
-                context_key = _stable_key(context, size=12)
-                contexts.add(context_key)
-                evidence_payload = _evidence_summary(evolution_result, scope="global")
-                for mechanism in signature:
-                    mechanism_names.add(mechanism)
-                    event_key = _stable_key(
-                        {
-                            "run_id": run_id,
-                            "invocation_id": invocation_id,
-                            "scope": "global",
-                            "context_key": context_key,
-                            "mechanism": mechanism,
-                        }
+                global_signature = _selected_signature(evolution_result)
+                if global_signature:
+                    outcome, delta, evidence, failures = _global_outcome(evolution_result)
+                    context = _context_payload(
+                        evolution_result,
+                        surface=domain,
+                        scope="global",
                     )
-                    inserted = _insert_event(
+                    context_keys.add(_stable_key(context, size=12))
+                    mechanism_names.update(global_signature)
+                    created, duplicate = _record_mechanisms(
                         conn,
-                        event_key=event_key,
                         catalog_key=str(catalog_key),
                         run_id=run_id,
                         invocation_id=invocation_id,
                         domain=domain,
                         scope="global",
                         segment="",
-                        context_key=context_key,
-                        mechanism=mechanism,
+                        context=context,
+                        mechanisms=global_signature,
                         outcome=outcome,
                         reward_delta=delta,
                         evidence=evidence,
                         failure_modes=failures,
-                        context=context,
-                        evidence_payload=evidence_payload,
+                        evidence_payload=_global_evidence(evolution_result),
                     )
-                    recorded += int(inserted)
-                    deduplicated += int(not inserted)
+                    recorded += created
+                    deduplicated += duplicate
 
                 global_config = evolution_result.get("candidate_config")
                 portfolio = evolution_result.get("segment_portfolio") or {}
@@ -398,64 +461,43 @@ def record_mechanism_evidence(
                     segment = str(entry.get("segment") or "")
                     if not segment:
                         continue
-                    segment_signature = _segment_signature(
+                    signature = _segment_signature(
                         memory,
                         domain,
                         global_config if isinstance(global_config, dict) else None,
-                        entry.get("candidate_config") if isinstance(entry.get("candidate_config"), dict) else None,
+                        entry.get("candidate_config")
+                        if isinstance(entry.get("candidate_config"), dict)
+                        else None,
                     )
-                    if not segment_signature:
+                    if not signature:
                         continue
-                    segment_outcome, segment_delta, segment_evidence, segment_failures = _segment_outcome(entry)
-                    segment_context = _context_payload(
+                    outcome, delta, evidence, failures = _segment_outcome(entry)
+                    context = _context_payload(
                         evolution_result,
                         surface=domain,
                         scope="segment",
                         segment=segment,
                     )
-                    segment_context_key = _stable_key(segment_context, size=12)
-                    contexts.add(segment_context_key)
-                    segment_evidence_payload = {
-                        "discovery_requests": int(entry.get("discovery_requests", 0) or 0),
-                        "holdout_requests": int(entry.get("holdout_requests", 0) or 0),
-                        "holdout_reward_delta": entry.get("holdout_reward_delta"),
-                        "full_reward_delta": entry.get("full_reward_delta"),
-                        "confidence": entry.get("confidence") or {},
-                        "guardrail": entry.get("guardrail") or {},
-                        "trust_blocked_by": list(entry.get("trust_blocked_by") or []),
-                    }
-                    for mechanism in segment_signature:
-                        mechanism_names.add(mechanism)
-                        event_key = _stable_key(
-                            {
-                                "run_id": run_id,
-                                "invocation_id": invocation_id,
-                                "scope": "segment",
-                                "segment": segment,
-                                "context_key": segment_context_key,
-                                "mechanism": mechanism,
-                            }
-                        )
-                        inserted = _insert_event(
-                            conn,
-                            event_key=event_key,
-                            catalog_key=str(catalog_key),
-                            run_id=run_id,
-                            invocation_id=invocation_id,
-                            domain=domain,
-                            scope="segment",
-                            segment=segment,
-                            context_key=segment_context_key,
-                            mechanism=mechanism,
-                            outcome=segment_outcome,
-                            reward_delta=segment_delta,
-                            evidence=segment_evidence,
-                            failure_modes=segment_failures,
-                            context=segment_context,
-                            evidence_payload=segment_evidence_payload,
-                        )
-                        recorded += int(inserted)
-                        deduplicated += int(not inserted)
+                    context_keys.add(_stable_key(context, size=12))
+                    mechanism_names.update(signature)
+                    created, duplicate = _record_mechanisms(
+                        conn,
+                        catalog_key=str(catalog_key),
+                        run_id=run_id,
+                        invocation_id=invocation_id,
+                        domain=domain,
+                        scope="segment",
+                        segment=segment,
+                        context=context,
+                        mechanisms=signature,
+                        outcome=outcome,
+                        reward_delta=delta,
+                        evidence=evidence,
+                        failure_modes=failures,
+                        evidence_payload=_segment_evidence(entry),
+                    )
+                    recorded += created
+                    deduplicated += duplicate
             conn.commit()
         finally:
             close(conn)
@@ -464,8 +506,8 @@ def record_mechanism_evidence(
         "recorded": recorded,
         "deduplicated": deduplicated,
         "mechanisms": len(mechanism_names),
-        "contexts": len(contexts),
-        "method": "context_mechanism_experiment_evidence_outcome_v1",
+        "contexts": len(context_keys),
+        "method": MECHANISM_METHOD,
     }
 
 
@@ -477,6 +519,7 @@ def mechanism_stats(
     limit: int = 128,
 ) -> list[dict[str, Any]]:
     lock, connect, close = _memory_primitives(memory)
+    bounded = max(1, min(512, int(limit)))
     with lock:
         conn = connect()
         try:
@@ -488,7 +531,7 @@ def mechanism_stats(
                     where catalog_key=? and domain=?
                     order by trials desc, updated_at desc limit ?
                     """,
-                    (str(catalog_key), str(domain), max(1, min(512, int(limit)))),
+                    (str(catalog_key), str(domain), bounded),
                 ).fetchall()
             else:
                 rows = conn.execute(
@@ -497,7 +540,43 @@ def mechanism_stats(
                     where catalog_key=?
                     order by trials desc, updated_at desc limit ?
                     """,
-                    (str(catalog_key), max(1, min(512, int(limit)))),
+                    (str(catalog_key), bounded),
+                ).fetchall()
+        finally:
+            close(conn)
+    return [dict(row) for row in rows]
+
+
+def _mechanism_rows(
+    memory: Any,
+    catalog_key: str,
+    *,
+    domain: str | None,
+    limit: int,
+) -> list[dict[str, Any]]:
+    lock, connect, close = _memory_primitives(memory)
+    bounded = max(1, min(512, int(limit)))
+    with lock:
+        conn = connect()
+        try:
+            _ensure_schema(conn)
+            if domain:
+                rows = conn.execute(
+                    """
+                    select * from agent_mechanism_evidence
+                    where catalog_key=? and domain=?
+                    order by created_at desc limit ?
+                    """,
+                    (str(catalog_key), str(domain), bounded),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    select * from agent_mechanism_evidence
+                    where catalog_key=?
+                    order by created_at desc limit ?
+                    """,
+                    (str(catalog_key), bounded),
                 ).fetchall()
         finally:
             close(conn)
@@ -511,37 +590,11 @@ def mechanism_graph_snapshot(
     domain: str | None = None,
     limit: int = 96,
 ) -> dict[str, Any]:
-    """Export recent durable mechanism evidence as JSON-LD."""
+    """Export recent durable mechanism evidence as a closed-world JSON-LD graph."""
 
-    lock, connect, close = _memory_primitives(memory)
-    with lock:
-        conn = connect()
-        try:
-            _ensure_schema(conn)
-            if domain:
-                rows = conn.execute(
-                    """
-                    select * from agent_mechanism_evidence
-                    where catalog_key=? and domain=?
-                    order by created_at desc limit ?
-                    """,
-                    (str(catalog_key), str(domain), max(1, min(512, int(limit)))),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """
-                    select * from agent_mechanism_evidence
-                    where catalog_key=?
-                    order by created_at desc limit ?
-                    """,
-                    (str(catalog_key), max(1, min(512, int(limit)))),
-                ).fetchall()
-        finally:
-            close(conn)
-
+    rows = _mechanism_rows(memory, catalog_key, domain=domain, limit=limit)
     graph: dict[str, dict[str, Any]] = {}
-    for raw in rows:
-        row = dict(raw)
+    for row in rows:
         event_key = str(row["event_key"])
         context_key = str(row["context_key"])
         mechanism_key = str(row["mechanism_key"])
@@ -550,7 +603,6 @@ def mechanism_graph_snapshot(
         experiment_id = f"experiment:{event_key}"
         evidence_id = f"evidence:{event_key}"
         outcome_id = f"outcome:{event_key}"
-
         context_payload = json.loads(row["context_payload"] or "{}")
         evidence_payload = json.loads(row["evidence_payload"] or "{}")
         failures = json.loads(row["failure_modes"] or "[]")
@@ -590,13 +642,13 @@ def mechanism_graph_snapshot(
             "@type": "xushu:Evidence",
             "xushu:evidenceSamples": int(row["evidence"]),
             "xushu:rewardDelta": float(row["reward_delta"]),
-            "xushu:evidencePayload": json.dumps(evidence_payload, ensure_ascii=False, sort_keys=True),
+            "xushu:evidencePayload": json.dumps(
+                evidence_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
         }
-        outcome_node = {
-            "@id": f"{MECHANISM_NS}{outcome_id}",
-            "@type": "xushu:Outcome",
-            "xushu:outcomeStatus": row["outcome"],
-        }
+
         failure_refs: list[dict[str, str]] = []
         for failure in failures:
             failure_id = f"failure:{_stable_key(str(failure), size=10)}"
@@ -609,34 +661,50 @@ def mechanism_graph_snapshot(
                 },
             )
             failure_refs.append({"@id": f"{MECHANISM_NS}{failure_id}"})
+        outcome_node: dict[str, Any] = {
+            "@id": f"{MECHANISM_NS}{outcome_id}",
+            "@type": "xushu:Outcome",
+            "xushu:outcomeStatus": row["outcome"],
+        }
         if failure_refs:
             outcome_node["xushu:hasFailureMode"] = failure_refs
         graph[outcome_id] = outcome_node
 
-    snapshot = {
+    jsonld = {
         "@context": {"xushu": MECHANISM_NS, "id": "@id", "type": "@type"},
         "@graph": [graph[key] for key in sorted(graph)],
     }
-    violations = validate_mechanism_graph(snapshot)
+    violations = validate_mechanism_graph(jsonld)
     return {
         "valid": not violations,
         "violations": violations,
         "events": len(rows),
-        "jsonld": snapshot,
-        "fingerprint": _stable_key(snapshot),
+        "jsonld": jsonld,
+        "fingerprint": _stable_key(jsonld),
     }
 
 
 def validate_mechanism_graph(snapshot: dict[str, Any]) -> list[dict[str, str]]:
-    """Fast closed-world validation for the durable mechanism graph."""
+    """Fast closed-world validation for experiment relation targets."""
 
     jsonld = snapshot.get("jsonld") if "jsonld" in snapshot else snapshot
     rows = jsonld.get("@graph") if isinstance(jsonld, dict) else None
     if not isinstance(rows, list):
-        return [{"shape": "MechanismGraphShape", "focus": "graph", "message": "@graph must be a list"}]
+        return [
+            {
+                "shape": "MechanismGraphShape",
+                "focus": "graph",
+                "message": "@graph must be a list",
+            }
+        ]
     ids = {str(row.get("@id")) for row in rows if isinstance(row, dict)}
     violations: list[dict[str, str]] = []
-    required = ("xushu:underContext", "xushu:testsMechanism", "xushu:supportedBy", "xushu:hasOutcome")
+    required = (
+        "xushu:underContext",
+        "xushu:testsMechanism",
+        "xushu:supportedBy",
+        "xushu:hasOutcome",
+    )
     for row in rows:
         if not isinstance(row, dict) or row.get("@type") != "xushu:Experiment":
             continue
@@ -644,10 +712,22 @@ def validate_mechanism_graph(snapshot: dict[str, Any]) -> list[dict[str, str]]:
         for relation in required:
             target = row.get(relation)
             if not isinstance(target, dict) or not target.get("@id"):
-                violations.append({"shape": "ExperimentEvidenceShape", "focus": focus, "message": f"missing {relation}"})
+                violations.append(
+                    {
+                        "shape": "ExperimentEvidenceShape",
+                        "focus": focus,
+                        "message": f"missing {relation}",
+                    }
+                )
                 continue
             if str(target["@id"]) not in ids:
-                violations.append({"shape": "ClosedWorldReferenceShape", "focus": focus, "message": f"unknown target for {relation}"})
+                violations.append(
+                    {
+                        "shape": "ClosedWorldReferenceShape",
+                        "focus": focus,
+                        "message": f"unknown target for {relation}",
+                    }
+                )
     return violations
 
 
@@ -659,7 +739,8 @@ def validate_mechanism_graph_with_shacl(snapshot: dict[str, Any]) -> dict[str, A
         from pyshacl import validate
     except ImportError as exc:  # pragma: no cover - exercised by ontology extra CI
         raise RuntimeError(
-            "mechanism SHACL validation requires the ontology extra; install with `pip install -e '.[ontology]'`"
+            "mechanism SHACL validation requires the ontology extra; "
+            "install with `pip install -e '.[ontology]'`"
         ) from exc
 
     jsonld = snapshot.get("jsonld") if "jsonld" in snapshot else snapshot
@@ -668,10 +749,15 @@ def validate_mechanism_graph_with_shacl(snapshot: dict[str, Any]) -> dict[str, A
 
     ontology_root = resources.files("lingjing_harness.ontology")
     ontology_graph = rdflib.Graph()
-    ontology_graph.parse(str(ontology_root.joinpath("xushu-mechanism.ttl")), format="turtle")
+    ontology_graph.parse(
+        str(ontology_root.joinpath("xushu-mechanism.ttl")),
+        format="turtle",
+    )
     shapes_graph = rdflib.Graph()
-    shapes_graph.parse(str(ontology_root.joinpath("xushu-mechanism-shapes.ttl")), format="turtle")
-
+    shapes_graph.parse(
+        str(ontology_root.joinpath("xushu-mechanism-shapes.ttl")),
+        format="turtle",
+    )
     conforms, results_graph, results_text = validate(
         data_graph,
         shacl_graph=shapes_graph,
@@ -690,6 +776,7 @@ def validate_mechanism_graph_with_shacl(snapshot: dict[str, Any]) -> dict[str, A
 
 __all__ = [
     "MECHANISM_NS",
+    "MECHANISM_METHOD",
     "record_mechanism_evidence",
     "mechanism_stats",
     "mechanism_graph_snapshot",
