@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+
 from lingjing_harness.algorithms import RecommendationEngine, evolve_recommend
 from lingjing_harness.algorithms.business_replay_budget import (
     MAX_BUSINESS_OPTIMIZER_REQUESTS,
     bounded_temporal_request_split,
 )
+from lingjing_harness.algorithms.segment_credit import attach_recommend_portfolio
 from lingjing_harness.domain import Catalog
 from lingjing_harness.production import (
     ExposureEvent,
@@ -15,13 +18,13 @@ from lingjing_harness.production import (
 from lingjing_harness.sample_data import build_sample_catalog
 
 
-def _recommend_production_catalog(requests: int) -> Catalog:
+def _recommend_production_catalog(requests: int, *, single_user: bool = False) -> Catalog:
     base = build_sample_catalog()
     engine = RecommendationEngine(base)
     users = engine.known_users()
     events: list[ExposureEvent] = []
     for index in range(requests):
-        user_id = users[index % len(users)]
+        user_id = users[0] if single_user else users[index % len(users)]
         item_id = engine.recommend(user_id, limit=3)[0]["id"]
         events.append(
             ExposureEvent(
@@ -98,3 +101,24 @@ def test_public_recommend_evolution_caps_only_discovery_replay() -> None:
     # the complete production log; only repeated optimizer discovery is bounded.
     assert result["candidate"]["business_requests"] == 88
     assert result["reference"]["business_requests"] == 88
+
+
+def test_segment_portfolio_has_an_independent_discovery_budget() -> None:
+    catalog = _recommend_production_catalog(120, single_user=True)
+    engine = RecommendationEngine(catalog)
+    enriched = attach_recommend_portfolio(
+        catalog,
+        engine,
+        {
+            "business_validation": {"available": True},
+            "candidate_config": asdict(engine.config),
+        },
+    )
+    entries = enriched["segment_portfolio"]["entries"]
+
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry["discovery_requests"] == MAX_BUSINESS_OPTIMIZER_REQUESTS == 64
+    assert entry["holdout_requests"] == 30
+    assert entry["full_requests"] == 120
+    assert entry["confidence"]["samples"] == 30

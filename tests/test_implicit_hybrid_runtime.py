@@ -15,6 +15,7 @@ from lingjing_harness.algorithms import (
     evolve_recommend,
 )
 from lingjing_harness.algorithms.business_replay_budget import MAX_BUSINESS_OPTIMIZER_REQUESTS
+from lingjing_harness.algorithms.segment_credit import attach_recommend_portfolio
 from lingjing_harness.domain import Catalog, Interaction
 from lingjing_harness.integrations import (
     ImplicitHybridRecommendationEngine,
@@ -47,13 +48,13 @@ def _catalog():
     return catalog
 
 
-def _production_catalog(requests: int = 88) -> Catalog:
+def _production_catalog(requests: int = 88, *, single_user: bool = False) -> Catalog:
     base = _catalog()
     reference = RecommendationEngine(base)
     users = reference.known_users()
     events: list[ExposureEvent] = []
     for index in range(requests):
-        user_id = users[index % len(users)]
+        user_id = users[0] if single_user else users[index % len(users)]
         item_id = reference.recommend(user_id, limit=3)[0]["id"]
         events.append(
             ExposureEvent(
@@ -178,6 +179,29 @@ def test_official_als_business_evolution_bounds_only_optimizer_discovery():
     assert business["confidence"]["samples"] == 22
     assert result["candidate"]["business_requests"] == 88
     assert result["reference"]["business_requests"] == 88
+    assert engine.adapter is adapter
+
+
+def test_official_als_segment_portfolio_bounds_only_segment_discovery():
+    catalog = _production_catalog(120, single_user=True)
+    engine = _hybrid(catalog)
+    adapter = engine.adapter
+    enriched = attach_recommend_portfolio(
+        catalog,
+        engine,
+        {
+            "business_validation": {"available": True},
+            "candidate_config": asdict(engine.config),
+        },
+    )
+    entries = enriched["segment_portfolio"]["entries"]
+
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry["discovery_requests"] == MAX_BUSINESS_OPTIMIZER_REQUESTS == 64
+    assert entry["holdout_requests"] == 30
+    assert entry["full_requests"] == 120
+    assert entry["confidence"]["samples"] == 30
     assert engine.adapter is adapter
 
 

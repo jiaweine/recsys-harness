@@ -14,6 +14,8 @@ on:
       - 'lingjing_harness/algorithms/evolution.py'
       - 'lingjing_harness/algorithms/production_evolution.py'
       - 'lingjing_harness/algorithms/recommend_validation.py'
+      - 'lingjing_harness/algorithms/segment_credit.py'
+      - 'lingjing_harness/algorithms/segment_evolution.py'
       - 'scripts/collaborative_backend_smoke.py'
       - 'tests/test_runtime_backend_config.py'
       - 'tests/test_business_replay_budget.py'
@@ -21,6 +23,7 @@ on:
       - 'tests/test_implicit_hybrid_runtime.py'
       - 'tests/test_implicit_recommendation.py'
       - 'tests/test_optional_integrations.py'
+      - 'tests/test_segment_portfolio.py'
   pull_request:
     paths:
       - '.github/workflows/collaborative-quality.yml'
@@ -34,6 +37,8 @@ on:
       - 'lingjing_harness/algorithms/evolution.py'
       - 'lingjing_harness/algorithms/production_evolution.py'
       - 'lingjing_harness/algorithms/recommend_validation.py'
+      - 'lingjing_harness/algorithms/segment_credit.py'
+      - 'lingjing_harness/algorithms/segment_evolution.py'
       - 'scripts/collaborative_backend_smoke.py'
       - 'tests/test_runtime_backend_config.py'
       - 'tests/test_business_replay_budget.py'
@@ -41,6 +46,7 @@ on:
       - 'tests/test_implicit_hybrid_runtime.py'
       - 'tests/test_implicit_recommendation.py'
       - 'tests/test_optional_integrations.py'
+      - 'tests/test_segment_portfolio.py'
   workflow_dispatch:
 
 permissions:
@@ -71,6 +77,7 @@ jobs:
           tests/test_implicit_hybrid_runtime.py
           tests/test_implicit_recommendation.py
           tests/test_optional_integrations.py
+          tests/test_segment_portfolio.py
       - name: Exercise public AgentHarness with official implicit ALS
         env:
           OPENBLAS_NUM_THREADS: '1'
