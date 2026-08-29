@@ -7,6 +7,7 @@ from .capabilities import (
 )
 from .collaborative_tools import RecommendationBackendToolRegistry
 from .contracts import RunBudget
+from .credit_assignment import apply_semantic_trajectory_credit
 from .deliberation import DeliberationEngine, TrajectoryCritic
 from .harness import AgentHarness as _BaseAgentHarness, RunCancelled
 from .invocation_maintenance import discard_completed_run_invocations
@@ -78,9 +79,20 @@ class AgentHarness(_BaseAgentHarness):
         )
 
     def run(self, *args, **kwargs):
-        """Run normally, then release replay-only state and bound retired history."""
+        """Run, apply process-aware policy credit, then bound durable state."""
 
         result = super().run(*args, **kwargs)
+        credit = apply_semantic_trajectory_credit(self.memory, result)
+        autonomy = result.setdefault("autonomy", {})
+        autonomy["policy_credit_assignment"] = {
+            "method": credit.get("method"),
+            "applied": bool(credit.get("applied")),
+            "horizon": int(credit.get("horizon", 0) or 0),
+            "terminal_weight": credit.get("terminal_weight"),
+            "process_weight": credit.get("process_weight"),
+            "adjusted_policy_rows": int(credit.get("adjusted_policy_rows", 0) or 0),
+        }
+        result["policy_credit"] = credit
         discard_completed_run_invocations(self.memory, str(result.get("run_id") or ""))
         prune_retired_strategy_history(self.memory)
         return result
