@@ -8,6 +8,7 @@ from lingjing_harness.algorithms import (
     audit_recommend,
     evolve_recommend,
 )
+from lingjing_harness.algorithms.production_evolution import _business_confidence_supports_trust
 from lingjing_harness.domain import Catalog
 from lingjing_harness.production import (
     ExposureEvent,
@@ -146,10 +147,57 @@ def test_bootstrap_is_paired_by_request_identity():
     reference = {f"r{i}": 0.2 for i in range(8)}
     candidate = {f"r{i}": 0.4 for i in range(8)}
     result = paired_bootstrap_delta(reference, candidate)
+    assert result["available"] is True
     assert result["samples"] == 8
     assert result["delta"] > 0
     assert result["ci95"][0] > 0
     assert result["probability_positive"] == 1.0
+    assert _business_confidence_supports_trust(result) is True
+
+
+def test_singleton_paired_delta_keeps_point_estimate_without_uncertainty():
+    result = paired_bootstrap_delta({"r1": 0.2}, {"r1": 0.4})
+    assert result["available"] is False
+    assert result["samples"] == 1
+    assert result["delta"] == 0.2
+    assert result["ci95"] is None
+    assert result["probability_positive"] is None
+    assert "at least two paired requests" in result["reason"]
+    assert _business_confidence_supports_trust(result) is False
+
+
+def test_no_common_requests_do_not_create_paired_confidence():
+    result = paired_bootstrap_delta({"reference-only": 0.2}, {"candidate-only": 0.4})
+    assert result["available"] is False
+    assert result["samples"] == 0
+    assert result["delta"] == 0.0
+    assert result["ci95"] is None
+    assert result["probability_positive"] is None
+    assert _business_confidence_supports_trust(result) is False
+
+
+def test_trust_gate_requires_available_multi_request_confidence():
+    assert _business_confidence_supports_trust(
+        {"available": True, "samples": 2, "probability_positive": 0.65}
+    ) is True
+    assert _business_confidence_supports_trust(
+        {"available": True, "samples": 1, "probability_positive": 1.0}
+    ) is False
+    assert _business_confidence_supports_trust(
+        {"available": False, "samples": 20, "probability_positive": 1.0}
+    ) is False
+
+
+def test_minimum_business_split_can_have_one_holdout_request_but_not_trust_evidence():
+    catalog = _production_catalog("recommend", requests=4)
+    _, holdout = temporal_request_split(catalog.events, surface="recommend")
+    holdout_ids = set(request_groups(holdout, surface="recommend"))
+    assert len(holdout_ids) == 1
+
+    confidence = paired_bootstrap_delta({next(iter(holdout_ids)): 0.1}, {next(iter(holdout_ids)): 0.5})
+    assert confidence["delta"] > 0
+    assert confidence["available"] is False
+    assert _business_confidence_supports_trust(confidence) is False
 
 
 def test_public_recommend_audit_separates_proxy_quality_from_business_reward():
@@ -170,6 +218,7 @@ def test_recommend_evolution_routes_by_business_reward_with_temporal_holdout():
     assert result["business_validation"]["available"] is True
     assert result["business_validation"]["temporal"] is True
     assert result["business_validation"]["holdout_requests"] >= 2
+    assert result["business_validation"]["confidence"]["available"] is True
     assert result["business_validation"]["confidence"]["samples"] >= 2
     assert result["evolution"]["business_reward_routed"] is True
     assert "business_reward" in result["delta"]

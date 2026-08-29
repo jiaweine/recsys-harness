@@ -11,6 +11,7 @@ from lingjing_harness.production import (
     temporal_request_split,
 )
 from .capabilities import normalize_strategy_config
+from .production_evolution import _business_confidence_supports_trust
 from .recommend import RecommendConfig, RecommendationEngine
 from .search import SearchConfig, SearchEngine
 from .segments import SegmentRouter
@@ -145,6 +146,7 @@ def _search_entry(
         reference_holdout.get("request_scores", {}),
         candidate_holdout.get("request_scores", {}),
     )
+    confidence_supports_trust = _business_confidence_supports_trust(confidence)
     discovery_delta = float(best_discovery.get("reward", 0.0)) - float(reference_discovery.get("reward", 0.0))
     holdout_delta = float(candidate_holdout.get("reward", 0.0)) - float(reference_holdout.get("reward", 0.0))
     full_delta = float(candidate_full.get("reward", 0.0)) - float(reference_full.get("reward", 0.0))
@@ -182,7 +184,7 @@ def _search_entry(
         and safe
         and discovery_delta > 0.001
         and holdout_delta >= -0.003
-        and float(confidence.get("probability_positive", 0.0)) >= 0.65
+        and confidence_supports_trust
     )
     return {
         "segment": segment,
@@ -211,7 +213,7 @@ def _search_entry(
             *([] if safe or not guardrail_ready else ["segment_guardrail_regression"]),
             *([] if discovery_delta > 0.001 else ["segment_discovery_reward_not_improved"]),
             *([] if holdout_delta >= -0.003 else ["segment_holdout_reward_regressed"]),
-            *([] if float(confidence.get("probability_positive", 0.0)) >= 0.65 else ["segment_confidence_insufficient"]),
+            *([] if confidence_supports_trust else ["segment_confidence_insufficient"]),
         ],
     }
 
@@ -286,6 +288,7 @@ def _recommend_entry(
         reference_holdout.get("request_scores", {}),
         candidate_holdout.get("request_scores", {}),
     )
+    confidence_supports_trust = _business_confidence_supports_trust(confidence)
     discovery_delta = float(best_discovery.get("reward", 0.0)) - float(reference_discovery.get("reward", 0.0))
     holdout_delta = float(candidate_holdout.get("reward", 0.0)) - float(reference_holdout.get("reward", 0.0))
     full_delta = float(candidate_full.get("reward", 0.0)) - float(reference_full.get("reward", 0.0))
@@ -328,7 +331,7 @@ def _recommend_entry(
         and safe
         and discovery_delta > 0.001
         and holdout_delta >= -0.003
-        and float(confidence.get("probability_positive", 0.0)) >= 0.65
+        and confidence_supports_trust
     )
     return {
         "segment": segment,
@@ -360,7 +363,7 @@ def _recommend_entry(
             *([] if safe or not guardrail_ready else ["segment_guardrail_regression"]),
             *([] if discovery_delta > 0.001 else ["segment_discovery_reward_not_improved"]),
             *([] if holdout_delta >= -0.003 else ["segment_holdout_reward_regressed"]),
-            *([] if float(confidence.get("probability_positive", 0.0)) >= 0.65 else ["segment_confidence_insufficient"]),
+            *([] if confidence_supports_trust else ["segment_confidence_insufficient"]),
         ],
     }
 
