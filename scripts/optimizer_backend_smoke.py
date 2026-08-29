@@ -14,13 +14,17 @@ from lingjing_harness.sample_data import build_sample_catalog
 
 def _summary(result: dict) -> dict:
     evolution = result.get("evolution") or {}
+    candidate_count = int(result.get("candidate_count", 0))
+    surface_count = len(evolution.get("response_surface") or [])
     return {
         "evaluation_ready": bool(result.get("evaluation_ready")),
         "safe_to_try": bool(result.get("safe_to_try")),
         "trusted": bool(result.get("trusted")),
         "objective_delta": float(result.get("objective_delta", 0.0)),
-        "candidate_count": int(result.get("candidate_count", 0)),
-        "optimizer_backend": evolution.get("optimizer_backend"),
+        "candidate_count": candidate_count,
+        "response_surface_candidates": surface_count,
+        "loop_distinct_candidates": max(0, candidate_count - surface_count),
+        "optimizer_backend": evolution.get("optimizer_backend") or "native",
         "optimizer_library": evolution.get("optimizer_library"),
         "optimizer_version": evolution.get("optimizer_version"),
         "method": evolution.get("method"),
@@ -29,6 +33,9 @@ def _summary(result: dict) -> dict:
 
 def main() -> None:
     catalog = build_sample_catalog()
+
+    native_search = evolve_search(catalog, SearchEngine(catalog))
+    native_recommend = evolve_recommend(catalog, RecommendationEngine(catalog))
 
     search_first = evolve_search(
         catalog,
@@ -67,8 +74,10 @@ def main() -> None:
     print(
         json.dumps(
             {
-                "search": _summary(search_first),
-                "recommend": _summary(recommend),
+                "native_search": _summary(native_search),
+                "native_recommend": _summary(native_recommend),
+                "optuna_search": _summary(search_first),
+                "optuna_recommend": _summary(recommend),
                 "registry_search": _summary(registry_result),
             },
             ensure_ascii=False,
