@@ -157,7 +157,7 @@ def test_semantic_mass_rewards_high_priority_upstream_evidence() -> None:
 def test_trajectory_credit_is_nonuniform_and_horizon_aware() -> None:
     credit = trajectory_policy_credits(_synthetic_result())
 
-    assert credit["method"] == "semantic_influence_transition_credit_v2"
+    assert credit["method"] == "semantic_influence_transition_credit"
     assert 0.0 < credit["terminal_weight"] < 1.0
     assert credit["process_weight"] > 0.0
     assert credit["tool_credits"]["root.tool"] > credit["tool_credits"]["leaf.tool"]
@@ -217,7 +217,7 @@ def test_public_harness_exposes_process_credit_provenance() -> None:
 
     credit = result["policy_credit"]
     autonomy = result["autonomy"]["policy_credit_assignment"]
-    assert credit["method"] == "semantic_influence_transition_credit_v2"
-    assert autonomy["method"] == "semantic_influence_transition_credit_v2"
+    assert credit["method"] == "semantic_influence_transition_credit"
+    assert autonomy["method"] == "semantic_influence_transition_credit"
     assert autonomy["horizon"] >= 1
     assert autonomy["applied"] is True
