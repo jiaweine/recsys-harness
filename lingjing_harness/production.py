@@ -3,9 +3,44 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from hashlib import blake2b
 from math import isfinite, log2
+from operator import index
 from random import Random
 from statistics import mean
 from typing import Any, Iterable, Mapping, Protocol
+
+
+def _finite_float(value: Any, *, numeric_error: str, finite_error: str) -> float:
+    """Parse a production numeric field without treating booleans as numbers."""
+
+    if isinstance(value, bool):
+        raise ValueError(numeric_error)
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(numeric_error) from exc
+    if not isfinite(number):
+        raise ValueError(finite_error)
+    return number
+
+
+def _positive_integer(value: Any, *, integer_error: str, range_error: str) -> int:
+    """Parse one positive integer while preserving integer-string ingestion."""
+
+    if isinstance(value, bool):
+        raise ValueError(integer_error)
+    if isinstance(value, str):
+        try:
+            number = int(value.strip(), 10)
+        except ValueError as exc:
+            raise ValueError(integer_error) from exc
+    else:
+        try:
+            number = index(value)
+        except TypeError as exc:
+            raise ValueError(integer_error) from exc
+    if number < 1:
+        raise ValueError(range_error)
+    return number
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,28 +67,30 @@ class RewardSpec:
             event = str(name).strip().lower()
             if not event:
                 continue
-            try:
-                weight = float(value)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f"reward weight 必须是数值: {event}") from exc
-            if not isfinite(weight):
-                raise ValueError(f"reward weight 必须是有限数值: {event}")
+            weight = _finite_float(
+                value,
+                numeric_error=f"reward weight 必须是数值: {event}",
+                finite_error=f"reward weight 必须是有限数值: {event}",
+            )
             weights[event] = weight
         if not weights:
             raise ValueError("reward_spec.weights 至少需要一个有效事件权重")
-        try:
-            cap = float(raw.get("inverse_propensity_cap", 20.0))
-        except (TypeError, ValueError) as exc:
-            raise ValueError("inverse_propensity_cap 必须是数值") from exc
-        if not isfinite(cap) or cap < 1.0 or cap > 100.0:
+        cap = _finite_float(
+            raw.get("inverse_propensity_cap", 20.0),
+            numeric_error="inverse_propensity_cap 必须是数值",
+            finite_error="inverse_propensity_cap 必须在 [1, 100]",
+        )
+        if cap < 1.0 or cap > 100.0:
             raise ValueError("inverse_propensity_cap 必须在 [1, 100]")
         return cls(weights=weights, inverse_propensity_cap=cap)
 
     def reward(self, event: str, value: float = 1.0) -> float:
         weight = self.weights.get(str(event).strip().lower(), 0.0)
-        number = float(value)
-        if not isfinite(number):
-            raise ValueError("reward event value 必须是有限数值")
+        number = _finite_float(
+            value,
+            numeric_error="reward event value 必须是有限数值",
+            finite_error="reward event value 必须是有限数值",
+        )
         return weight * number
 
     def to_dict(self) -> dict[str, Any]:
@@ -100,31 +137,34 @@ class ExposureEvent:
             raise ValueError("event.surface 必须是 search 或 recommend")
         if not item_id:
             raise ValueError("event.item_id 不能为空")
-        try:
-            timestamp = float(row.get("timestamp", 0.0))
-            value = float(row.get("value", 1.0))
-        except (TypeError, ValueError) as exc:
-            raise ValueError("event.timestamp/value 必须是数值") from exc
-        if not isfinite(timestamp) or not isfinite(value):
-            raise ValueError("event.timestamp/value 必须是有限数值")
+        timestamp = _finite_float(
+            row.get("timestamp", 0.0),
+            numeric_error="event.timestamp/value 必须是数值",
+            finite_error="event.timestamp/value 必须是有限数值",
+        )
+        value = _finite_float(
+            row.get("value", 1.0),
+            numeric_error="event.timestamp/value 必须是数值",
+            finite_error="event.timestamp/value 必须是有限数值",
+        )
         propensity_raw = row.get("propensity")
         propensity: float | None = None
         if propensity_raw not in (None, ""):
-            try:
-                propensity = float(propensity_raw)
-            except (TypeError, ValueError) as exc:
-                raise ValueError("event.propensity 必须是数值") from exc
-            if not isfinite(propensity) or propensity <= 0.0 or propensity > 1.0:
+            propensity = _finite_float(
+                propensity_raw,
+                numeric_error="event.propensity 必须是数值",
+                finite_error="event.propensity 必须在 (0, 1]",
+            )
+            if propensity <= 0.0 or propensity > 1.0:
                 raise ValueError("event.propensity 必须在 (0, 1]")
         position_raw = row.get("position")
         position: int | None = None
         if position_raw not in (None, ""):
-            try:
-                position = int(position_raw)
-            except (TypeError, ValueError) as exc:
-                raise ValueError("event.position 必须是整数") from exc
-            if position < 1:
-                raise ValueError("event.position 必须 >= 1")
+            position = _positive_integer(
+                position_raw,
+                integer_error="event.position 必须是整数",
+                range_error="event.position 必须 >= 1",
+            )
         metadata = row.get("metadata") or {}
         if not isinstance(metadata, Mapping):
             raise ValueError("event.metadata 必须是对象")
