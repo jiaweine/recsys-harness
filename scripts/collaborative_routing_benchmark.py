@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from statistics import mean, pstdev
 
 import numpy as np
 from implicit.datasets.movielens import get_movielens
@@ -15,7 +16,8 @@ from lingjing_harness.integrations import ImplicitRecommendationAdapter
 TOP_K = 10
 MIN_POSITIVE_RATING = 4.0
 MIN_USER_POSITIVES = 3
-THRESHOLDS = (1, 3, 5, 8, 12, 20, 32, 64)
+SPLIT_SEEDS = (17, 42, 91)
+THRESHOLDS = (1, 2, 3, 4, 5, 6, 8, 12, 20, 32, 64)
 
 
 def _positive_user_items():
@@ -112,19 +114,20 @@ def _metrics(model, train, test) -> dict[str, float]:
         show_progress=False,
         num_threads=1,
     )
-    return {key: round(float(value), 6) for key, value in values.items()}
+    return {key: float(value) for key, value in values.items()}
 
 
 def _masked_test(test, history_counts: np.ndarray, lower: int, upper: int | None):
     mask = history_counts >= lower
     if upper is not None:
         mask &= history_counts <= upper
-    return test.multiply(mask.astype(np.float32)[:, None]).tocsr()
+    masked = test.multiply(mask.astype(np.float32)[:, None]).tocsr()
+    masked.eliminate_zeros()
+    return masked
 
 
-def main() -> None:
-    titles, positives = _positive_user_items()
-    train, test = leave_k_out_split(positives, K=1, random_state=42)
+def _run_split(titles: list[str], positives, seed: int) -> dict:
+    train, test = leave_k_out_split(positives, K=1, random_state=seed)
     train = train.tocsr()
     test = test.tocsr()
 
@@ -159,9 +162,8 @@ def main() -> None:
         collaborative_scores[user_index] = cf_scores
 
     max_history = int(history_counts[evaluation_users].max())
-    thresholds = sorted(set(THRESHOLDS + (max_history + 1,)))
     sweep = []
-    for threshold in thresholds:
+    for threshold in THRESHOLDS:
         model = CachedRoutingModel(
             collaborative_ids,
             collaborative_scores,
@@ -174,7 +176,7 @@ def main() -> None:
         sweep.append(
             {
                 "threshold": threshold,
-                "collaborative_user_share": round(route_share, 6),
+                "collaborative_user_share": route_share,
                 **_metrics(model, train, test),
             }
         )
@@ -215,14 +217,8 @@ def main() -> None:
             }
         )
 
-    best = max(sweep, key=lambda row: (row["ndcg"], row["map"], row["auc"]))
-    payload = {
-        "dataset": "implicit.datasets.movielens.get_movielens('100k')",
-        "protocol": "implicit.evaluation.leave_k_out_split(K=1, random_state=42)",
-        "metrics": "implicit.evaluation.ranking_metrics_at_k(K=10)",
-        "positive_rating_threshold": MIN_POSITIVE_RATING,
-        "users": int(train.shape[0]),
-        "items": int(train.shape[1]),
+    return {
+        "seed": seed,
         "train_interactions": int(train.nnz),
         "evaluation_users": int(evaluation_users.size),
         "history": {
@@ -232,7 +228,86 @@ def main() -> None:
         },
         "sweep": sweep,
         "history_buckets": buckets,
-        "best_by_ndcg_then_map_auc": best,
+    }
+
+
+def _aggregate_metric(values: list[float]) -> dict[str, float]:
+    return {
+        "mean": round(mean(values), 6),
+        "std": round(pstdev(values), 6),
+    }
+
+
+def _aggregate_sweeps(runs: list[dict]) -> list[dict]:
+    rows = []
+    for threshold in THRESHOLDS:
+        matches = [next(row for row in run["sweep"] if row["threshold"] == threshold) for run in runs]
+        rows.append(
+            {
+                "threshold": threshold,
+                "collaborative_user_share": _aggregate_metric(
+                    [row["collaborative_user_share"] for row in matches]
+                ),
+                "precision": _aggregate_metric([row["precision"] for row in matches]),
+                "map": _aggregate_metric([row["map"] for row in matches]),
+                "ndcg": _aggregate_metric([row["ndcg"] for row in matches]),
+                "auc": _aggregate_metric([row["auc"] for row in matches]),
+            }
+        )
+    return rows
+
+
+def _aggregate_buckets(runs: list[dict]) -> list[dict]:
+    labels = ("2-4", "5-9", "10-19", "20+")
+    rows = []
+    for label in labels:
+        matches = [
+            next((row for row in run["history_buckets"] if row["history"] == label), None)
+            for run in runs
+        ]
+        matches = [row for row in matches if row is not None]
+        if not matches:
+            continue
+        rows.append(
+            {
+                "history": label,
+                "users": _aggregate_metric([float(row["users"]) for row in matches]),
+                "bpr": {
+                    metric: _aggregate_metric([row["bpr"][metric] for row in matches])
+                    for metric in ("precision", "map", "ndcg", "auc")
+                },
+                "reference": {
+                    metric: _aggregate_metric([row["reference"][metric] for row in matches])
+                    for metric in ("precision", "map", "ndcg", "auc")
+                },
+            }
+        )
+    return rows
+
+
+def main() -> None:
+    titles, positives = _positive_user_items()
+    runs = [_run_split(titles, positives, seed) for seed in SPLIT_SEEDS]
+    sweep = _aggregate_sweeps(runs)
+    buckets = _aggregate_buckets(runs)
+    best = max(
+        sweep,
+        key=lambda row: (row["ndcg"]["mean"], row["map"]["mean"], row["auc"]["mean"]),
+    )
+
+    payload = {
+        "dataset": "implicit.datasets.movielens.get_movielens('100k')",
+        "protocol": "implicit.evaluation.leave_k_out_split(K=1) over fixed split seeds",
+        "split_seeds": list(SPLIT_SEEDS),
+        "metrics": "implicit.evaluation.ranking_metrics_at_k(K=10)",
+        "positive_rating_threshold": MIN_POSITIVE_RATING,
+        "users": int(positives.shape[0]),
+        "items": int(positives.shape[1]),
+        "positive_interactions": int(positives.nnz),
+        "runs": runs,
+        "aggregate_sweep": sweep,
+        "aggregate_history_buckets": buckets,
+        "best_by_mean_ndcg_then_map_auc": best,
     }
     print(json.dumps(payload, indent=2, sort_keys=True))
 
