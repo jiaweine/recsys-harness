@@ -162,7 +162,7 @@ def trajectory_policy_credits(result: dict[str, Any]) -> dict[str, Any]:
         for row in (result.get("actions") or [])
         if isinstance(row, dict) and row.get("status") == "completed"
     ]
-    method = "semantic_influence_transition_credit_v2"
+    method = "semantic_influence_transition_credit"
     if not actions:
         return {
             "method": method,
