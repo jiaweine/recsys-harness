@@ -21,6 +21,34 @@ def main() -> None:
         page.on("pageerror", lambda exc: browser_errors.append(f"pageerror: {exc}"))
         page.on("console", lambda msg: browser_errors.append(f"console: {msg.text}") if msg.type == "error" else None)
 
+        # The real sample task can finish before Playwright observes the transient
+        # live row. Keep the first run-poll response in the QA browser briefly so
+        # the product's genuine running state is observable without faking a run
+        # response or slowing the server itself. The request still reaches the real
+        # backend and the unmodified response is delivered after the hold.
+        page.add_init_script(
+            """
+            (() => {
+              const nativeFetch = window.fetch.bind(window);
+              let holdNextRunPoll = false;
+              window.__armRunPollHoldForQa = () => { holdNextRunPoll = true; };
+              window.fetch = async (...args) => {
+                const response = await nativeFetch(...args);
+                const request = args[0];
+                const url = typeof request === 'string' ? request : (request?.url || '');
+                const method = String(args[1]?.method || request?.method || 'GET').toUpperCase();
+                let pathname = '';
+                try { pathname = new URL(url, window.location.origin).pathname; } catch {}
+                if (holdNextRunPoll && method === 'GET' && /^\\/api\\/runs\\/[^/]+$/.test(pathname)) {
+                  holdNextRunPoll = false;
+                  await new Promise(resolve => setTimeout(resolve, 1500));
+                }
+                return response;
+              };
+            })();
+            """
+        )
+
         page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30_000)
         page.wait_for_function("document.body.classList.contains('ready')", timeout=15_000)
         page.wait_for_selector("#historyList .history-item .history-scene", timeout=8_000)
@@ -43,6 +71,7 @@ def main() -> None:
         if current_rows(page).count() != 0:
             raise RuntimeError("Draft mode left a persisted history row marked current")
         page.locator("#input").fill(PROMPT)
+        page.evaluate("window.__armRunPollHoldForQa()")
         page.locator("#sendBtn").click()
         page.wait_for_selector("#historyList .history-item.current.running .history-state.live", timeout=8_000)
         live = page.locator("#historyList .history-item.current.running").first
