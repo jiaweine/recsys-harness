@@ -1,0 +1,31 @@
+name: Collaborative Routing Calibration
+
+on:
+  push:
+    branches: ['benchmark/collaborative-routing-calibration']
+    paths:
+      - 'scripts/collaborative_routing_benchmark.py'
+      - '.github/workflows/collaborative-routing-calibration.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  movielens:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Install official implicit evaluation stack
+        run: pip install 'implicit==0.7.3' h5py
+      - name: Sweep collaborative history thresholds on MovieLens 100K
+        env:
+          OPENBLAS_NUM_THREADS: '1'
+          OMP_NUM_THREADS: '1'
+        run: python scripts/collaborative_routing_benchmark.py
