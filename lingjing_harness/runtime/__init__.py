@@ -17,6 +17,7 @@ from .optimizer_tools import OptimizerToolRegistry
 from .perception import PerceptionEngine
 from .policy import OwnedPolicy
 from .semantic_tools import SearchBackendToolRegistry
+from .skill_retention import prune_retired_strategy_history
 from .tools import ToolRegistry
 from .verifier import ResultVerifier
 from .backend_config import RuntimeBackendConfig, build_runtime_tools
@@ -77,10 +78,11 @@ class AgentHarness(_BaseAgentHarness):
         )
 
     def run(self, *args, **kwargs):
-        """Run normally, then release replay-only invocation rows on success."""
+        """Run normally, then release replay-only state and bound retired history."""
 
         result = super().run(*args, **kwargs)
         discard_completed_run_invocations(self.memory, str(result.get("run_id") or ""))
+        prune_retired_strategy_history(self.memory)
         return result
 
 
