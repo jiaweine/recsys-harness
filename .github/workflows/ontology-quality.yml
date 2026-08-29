@@ -8,10 +8,12 @@ on:
       - 'lingjing_harness/runtime/contracts.py'
       - 'lingjing_harness/runtime/mission_compiler.py'
       - 'lingjing_harness/runtime/semantic_governance.py'
+      - 'lingjing_harness/runtime/mechanism_graph.py'
       - 'lingjing_harness/runtime/capabilities.py'
       - 'lingjing_harness/ontology/**'
       - 'tests/test_semantic_governance.py'
       - 'tests/test_ontology_integration.py'
+      - 'tests/test_mechanism_graph.py'
   pull_request:
     paths:
       - '.github/workflows/ontology-quality.yml'
@@ -19,10 +21,12 @@ on:
       - 'lingjing_harness/runtime/contracts.py'
       - 'lingjing_harness/runtime/mission_compiler.py'
       - 'lingjing_harness/runtime/semantic_governance.py'
+      - 'lingjing_harness/runtime/mechanism_graph.py'
       - 'lingjing_harness/runtime/capabilities.py'
       - 'lingjing_harness/ontology/**'
       - 'tests/test_semantic_governance.py'
       - 'tests/test_ontology_integration.py'
+      - 'tests/test_mechanism_graph.py'
   workflow_dispatch:
 
 permissions:
@@ -39,7 +43,7 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: pip install -e '.[ontology]'
-      - name: Compile semantic governance tests
-        run: python -m compileall -q lingjing_harness tests/test_semantic_governance.py tests/test_ontology_integration.py
+      - name: Compile semantic and mechanism ontology tests
+        run: python -m compileall -q lingjing_harness tests/test_semantic_governance.py tests/test_ontology_integration.py tests/test_mechanism_graph.py
       - name: Validate runtime ontology and SHACL shapes
-        run: pytest -q tests/test_semantic_governance.py tests/test_ontology_integration.py
+        run: pytest -q tests/test_semantic_governance.py tests/test_ontology_integration.py tests/test_mechanism_graph.py
