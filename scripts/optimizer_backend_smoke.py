@@ -27,6 +27,8 @@ def _summary(result: dict) -> dict:
         "optimizer_backend": evolution.get("optimizer_backend") or "native",
         "optimizer_library": evolution.get("optimizer_library"),
         "optimizer_version": evolution.get("optimizer_version"),
+        "optimizer_budget_contract": evolution.get("optimizer_budget_contract"),
+        "optimizer_new_evaluations": evolution.get("optimizer_new_evaluations"),
         "method": evolution.get("method"),
     }
 
@@ -60,11 +62,24 @@ def main() -> None:
         assert evolution.get("optimizer_backend") == "optuna"
         assert evolution.get("optimizer_library") == "optuna"
         assert evolution.get("method") == "optuna_tpe_with_evidence_response_surface"
+        assert evolution.get("optimizer_budget_contract") == "native_distinct_evaluator_calls"
 
     # Seeded TPE + serial trial execution should preserve reproducibility for the
     # same catalog/evaluator contract.
     assert search_first["candidate_config"] == search_second["candidate_config"]
     assert search_first["objective_delta"] == search_second["objective_delta"]
+
+    native_search_summary = _summary(native_search)
+    native_recommend_summary = _summary(native_recommend)
+    optuna_search_summary = _summary(search_first)
+    optuna_recommend_summary = _summary(recommend)
+
+    # Fairness is defined by expensive, new distinct evaluator calls. Reused
+    # response-surface evidence and cheap sampler trials do not spend this budget.
+    assert optuna_search_summary["loop_distinct_candidates"] <= native_search_summary["loop_distinct_candidates"]
+    assert optuna_recommend_summary["loop_distinct_candidates"] <= native_recommend_summary["loop_distinct_candidates"]
+    assert optuna_search_summary["optimizer_new_evaluations"] == optuna_search_summary["loop_distinct_candidates"]
+    assert optuna_recommend_summary["optimizer_new_evaluations"] == optuna_recommend_summary["loop_distinct_candidates"]
 
     registry = OptimizerToolRegistry(catalog, optimizer_backend="optuna")
     registry_result = registry.search_evolve(activate=False)
@@ -74,10 +89,10 @@ def main() -> None:
     print(
         json.dumps(
             {
-                "native_search": _summary(native_search),
-                "native_recommend": _summary(native_recommend),
-                "optuna_search": _summary(search_first),
-                "optuna_recommend": _summary(recommend),
+                "native_search": native_search_summary,
+                "native_recommend": native_recommend_summary,
+                "optuna_search": optuna_search_summary,
+                "optuna_recommend": optuna_recommend_summary,
                 "registry_search": _summary(registry_result),
             },
             ensure_ascii=False,
