@@ -7,6 +7,7 @@ from lingjing_harness.domain import Catalog
 
 
 SUPPORTED_IMPLICIT_MODELS = ("bpr", "als", "bm25")
+DEFAULT_MIN_HISTORY = 3
 
 
 def _load_implicit_dependencies():
@@ -39,7 +40,7 @@ class ImplicitRecommendationAdapter:
         catalog: Catalog,
         *,
         model: str = "bpr",
-        min_history: int = 5,
+        min_history: int = DEFAULT_MIN_HISTORY,
         model_kwargs: dict[str, Any] | None = None,
         fallback: RecommendationEngine | None = None,
     ) -> None:
@@ -229,4 +230,4 @@ class ImplicitRecommendationAdapter:
         return selected
 
 
-__all__ = ["SUPPORTED_IMPLICIT_MODELS", "ImplicitRecommendationAdapter"]
+__all__ = ["SUPPORTED_IMPLICIT_MODELS", "DEFAULT_MIN_HISTORY", "ImplicitRecommendationAdapter"]
