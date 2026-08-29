@@ -9,7 +9,7 @@ from implicit.bpr import BayesianPersonalizedRanking
 from implicit.evaluation import leave_k_out_split, ranking_metrics_at_k
 from implicit.nearest_neighbours import BM25Recommender
 
-from scripts.collaborative_routing_benchmark import (
+from collaborative_routing_benchmark import (
     MIN_POSITIVE_RATING,
     SPLIT_SEEDS,
     TOP_K,
