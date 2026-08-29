@@ -13,6 +13,7 @@ from .network import NetworkResearch
 from .optimizer_tools import OptimizerToolRegistry
 from .perception import PerceptionEngine
 from .policy import OwnedPolicy
+from .semantic_tools import SearchBackendToolRegistry
 from .tools import ToolRegistry
 from .verifier import ResultVerifier
 
@@ -25,6 +26,7 @@ __all__ = [
     "DeliberationEngine", "TrajectoryCritic",
     "NetworkResearch",
     "OptimizerToolRegistry",
+    "SearchBackendToolRegistry",
     "PerceptionEngine",
     "OwnedPolicy",
     "ToolRegistry",

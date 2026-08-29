@@ -3,33 +3,52 @@ from __future__ import annotations
 import json
 
 from lingjing_harness.adapters import AdapterSearchEngine
-from lingjing_harness.algorithms import audit_search
-from lingjing_harness.integrations import FlagEmbeddingSearchAdapter
+from lingjing_harness.algorithms import SearchEngine, audit_search
+from lingjing_harness.runtime import SearchBackendToolRegistry
 from lingjing_harness.sample_data import build_sample_catalog
 
 
 def main() -> None:
     catalog = build_sample_catalog()
-    adapter = FlagEmbeddingSearchAdapter(
+    reference = audit_search(catalog, SearchEngine(catalog))
+    registry = SearchBackendToolRegistry(
         catalog,
-        model_kwargs={"devices": "cpu"},
+        search_backend="flag_embedding",
+        search_backend_kwargs={"model_kwargs": {"devices": "cpu"}},
     )
-    engine = AdapterSearchEngine(adapter)
-    audit = audit_search(catalog, engine)
+    adapter = registry.search.adapter
+    dense = audit_search(catalog, AdapterSearchEngine(adapter))
+    hybrid = audit_search(catalog, registry.search)
 
     payload = {
-        "backend": adapter.capability_manifest(),
-        "quality": audit.get("quality"),
-        "recall": audit.get("recall"),
-        "mrr": audit.get("mrr"),
-        "details": audit.get("details"),
+        "backend": registry.inspect_data()["search_backend"],
+        "reference": {
+            "quality": reference.get("quality"),
+            "recall": reference.get("recall"),
+            "mrr": reference.get("mrr"),
+        },
+        "dense": {
+            "quality": dense.get("quality"),
+            "recall": dense.get("recall"),
+            "mrr": dense.get("mrr"),
+        },
+        "hybrid_runtime": {
+            "quality": hybrid.get("quality"),
+            "recall": hybrid.get("recall"),
+            "mrr": hybrid.get("mrr"),
+            "details": hybrid.get("details"),
+        },
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
-    if float(audit.get("recall") or 0.0) < 0.95:
-        raise SystemExit("FlagEmbedding sample recall fell below 0.95")
-    if float(audit.get("quality") or 0.0) < 0.90:
-        raise SystemExit("FlagEmbedding sample NDCG fell below 0.90")
+    if float(dense.get("recall") or 0.0) < 0.95:
+        raise SystemExit("FlagEmbedding dense sample recall fell below 0.95")
+    if float(dense.get("quality") or 0.0) < 0.90:
+        raise SystemExit("FlagEmbedding dense sample NDCG fell below 0.90")
+    if float(hybrid.get("recall") or 0.0) < 0.95:
+        raise SystemExit("FlagEmbedding hybrid runtime sample recall fell below 0.95")
+    if float(hybrid.get("quality") or 0.0) + 1e-9 < float(reference.get("quality") or 0.0):
+        raise SystemExit("FlagEmbedding hybrid runtime regressed below the reference sample NDCG")
 
 
 if __name__ == "__main__":
