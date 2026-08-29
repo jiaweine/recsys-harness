@@ -12,6 +12,7 @@ discovered strategy basin. Sparse segments keep the global strategy as fallback.
 from typing import Any
 
 from . import evolution_core as _core
+from .basin_routing import install_basin_router
 from .business_replay_budget import install_business_replay_budget
 from .credit_routing import install_credit_router
 from .optimizer_backends import (
@@ -34,11 +35,12 @@ from .segment_credit import attach_recommend_portfolio, attach_search_portfolio
 
 # Install once at the stable public boundary. The core/production modules resolve
 # these globals at call time, so every public evolution path receives durable arm
-# credit, bounded discovery replay cost and temporal recommendation relevance
-# without per-run global mutable context.
+# credit, bounded discovery replay cost, stagnation-aware structural basin jumps,
+# and temporal recommendation relevance without per-run global mutable context.
 install_credit_router()
 install_business_replay_budget()
 install_recommend_objective_router()
+install_basin_router()
 
 EvolutionDimension = _core.EvolutionDimension
 _evolution_schema = _core._evolution_schema
