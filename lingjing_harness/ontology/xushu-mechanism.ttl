@@ -1,0 +1,94 @@
+@prefix xushu: <https://xushu.ai/ontology/mechanism#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+xushu:MechanismOntology a owl:Ontology ;
+  rdfs:label "Xushu self-evolution mechanism evidence ontology" .
+
+xushu:Context a owl:Class ;
+  rdfs:label "Evolution context" .
+
+xushu:Mechanism a owl:Class ;
+  rdfs:label "Typed mutation or strategy mechanism" .
+
+xushu:Experiment a owl:Class ;
+  rdfs:label "One evaluated mechanism application" .
+
+xushu:Evidence a owl:Class ;
+  rdfs:label "Independent evaluation evidence" .
+
+xushu:Outcome a owl:Class ;
+  rdfs:label "Accepted, rejected, or inconclusive outcome" .
+
+xushu:FailureMode a owl:Class ;
+  rdfs:label "Named trust, holdout, or guardrail failure mode" .
+
+xushu:underContext a owl:ObjectProperty ;
+  rdfs:domain xushu:Experiment ;
+  rdfs:range xushu:Context .
+
+xushu:testsMechanism a owl:ObjectProperty ;
+  rdfs:domain xushu:Experiment ;
+  rdfs:range xushu:Mechanism .
+
+xushu:supportedBy a owl:ObjectProperty ;
+  rdfs:domain xushu:Experiment ;
+  rdfs:range xushu:Evidence .
+
+xushu:hasOutcome a owl:ObjectProperty ;
+  rdfs:domain xushu:Experiment ;
+  rdfs:range xushu:Outcome .
+
+xushu:hasFailureMode a owl:ObjectProperty ;
+  rdfs:domain xushu:Outcome ;
+  rdfs:range xushu:FailureMode .
+
+xushu:contextKey a owl:DatatypeProperty ;
+  rdfs:domain xushu:Context ;
+  rdfs:range xsd:string .
+
+xushu:mechanismKey a owl:DatatypeProperty ;
+  rdfs:domain xushu:Mechanism ;
+  rdfs:range xsd:string .
+
+xushu:runId a owl:DatatypeProperty ;
+  rdfs:domain xushu:Experiment ;
+  rdfs:range xsd:string .
+
+xushu:invocationId a owl:DatatypeProperty ;
+  rdfs:domain xushu:Experiment ;
+  rdfs:range xsd:string .
+
+xushu:domain a owl:DatatypeProperty ;
+  rdfs:domain xushu:Experiment ;
+  rdfs:range xsd:string .
+
+xushu:scope a owl:DatatypeProperty ;
+  rdfs:domain xushu:Experiment ;
+  rdfs:range xsd:string .
+
+xushu:segment a owl:DatatypeProperty ;
+  rdfs:domain xushu:Experiment ;
+  rdfs:range xsd:string .
+
+xushu:evidenceSamples a owl:DatatypeProperty ;
+  rdfs:domain xushu:Evidence ;
+  rdfs:range xsd:integer .
+
+xushu:rewardDelta a owl:DatatypeProperty ;
+  rdfs:domain xushu:Evidence ;
+  rdfs:range xsd:double .
+
+xushu:evidencePayload a owl:DatatypeProperty ;
+  rdfs:domain xushu:Evidence ;
+  rdfs:range xsd:string .
+
+xushu:outcomeStatus a owl:DatatypeProperty ;
+  rdfs:domain xushu:Outcome ;
+  rdfs:range xsd:string .
+
+xushu:failureKey a owl:DatatypeProperty ;
+  rdfs:domain xushu:FailureMode ;
+  rdfs:range xsd:string .
