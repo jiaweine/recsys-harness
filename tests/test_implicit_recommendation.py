@@ -1,17 +1,28 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from math import isfinite
+import time
 
 import pytest
 
 pytest.importorskip("implicit")
 
+from lingjing_harness.algorithms import (
+    RecommendConfig,
+    RecommendationEngine,
+    audit_recommend_relevance,
+)
+from lingjing_harness.algorithms.capabilities import CAPABILITIES
+from lingjing_harness.algorithms.evolution import _evolution_schema
 from lingjing_harness.domain import Interaction
 from lingjing_harness.integrations import ImplicitRecommendationAdapter
 from lingjing_harness.integrations.implicit_recommendation import (
     DEFAULT_IMPLICIT_MODEL,
     DEFAULT_MIN_HISTORY,
 )
+from lingjing_harness.runtime.memory import AgentMemory, catalog_fingerprint
+from lingjing_harness.runtime.tools import ToolRegistry
 from lingjing_harness.sample_data import build_sample_catalog
 
 
@@ -81,6 +92,81 @@ def test_default_collaborative_contract_uses_als_from_three_positive_interaction
     assert adapter.capability_manifest()["min_history"] == 3
     assert adapter.history_count("u-chen") == 4
     assert adapter.recommend("u-chen", limit=4)[0]["backend"] == "implicit_als"
+
+
+def test_implicit_als_is_an_evolvable_recommend_serving_capability():
+    dimensions, _ = _evolution_schema(RecommendConfig())
+    serving = next(dimension for dimension in dimensions if dimension.name == "serving_strategy")
+
+    assert serving.kind == "capability"
+    assert serving.group == "recommend.serving"
+    assert "reference" in serving.choices
+    assert "implicit_als" in serving.choices
+    assert "implicit_als" in CAPABILITIES.names("recommend.serving")
+
+
+def test_routed_implicit_als_serves_warm_users_and_reuses_trained_model_cache():
+    catalog = build_sample_catalog()
+    _add_collaborative_overlap(catalog)
+    root = RecommendationEngine(catalog)
+    config = RecommendConfig(serving_strategy="implicit_als")
+
+    first = root.with_config(config)
+    first_rows = first.recommend("u-lin", limit=6)
+
+    assert first.config.serving_strategy == "implicit_als"
+    assert first_rows
+    assert any(row.get("backend") == "implicit_als" for row in first_rows)
+    assert all("novelty" in row.get("signals", {}) for row in first_rows)
+    assert len(root._serving_backend_cache) == 1
+
+    second = root.with_config(config)
+    second_rows = second.recommend("u-chen", limit=4)
+
+    assert second._serving_backend_cache is root._serving_backend_cache
+    assert len(root._serving_backend_cache) == 1
+    assert second_rows
+    assert any(row.get("backend") == "implicit_als" for row in second_rows)
+
+
+def test_routed_implicit_als_enters_temporal_relevance_guardrail():
+    catalog = build_sample_catalog()
+    _add_collaborative_overlap(catalog)
+    engine = RecommendationEngine(
+        catalog,
+        RecommendConfig(serving_strategy="implicit_als"),
+    )
+
+    report = audit_recommend_relevance(catalog, engine, k=6)
+
+    assert report["available"] is True
+    assert report["users"] >= 3
+    assert report["protocol"] == "strict_temporal_leave_one_out"
+    assert report["model"]["ndcg"] >= 0.0
+
+
+def test_durable_active_implicit_strategy_is_the_runtime_serving_path():
+    catalog = build_sample_catalog()
+    _add_collaborative_overlap(catalog)
+    memory = AgentMemory()
+    key = catalog_fingerprint(catalog)
+    config = RecommendConfig(serving_strategy="implicit_als")
+    memory.remember_strategy(
+        key,
+        "recommend",
+        asdict(config),
+        score=1.0,
+        evidence=12,
+        status="active",
+        payload={"validated_at": time.time()},
+    )
+
+    tools = ToolRegistry(catalog, memory)
+    result = tools.run_recommend("u-lin")
+
+    assert tools.recommend.config.serving_strategy == "implicit_als"
+    assert result["results"]
+    assert any(row.get("backend") == "implicit_als" for row in result["results"])
 
 
 def test_sparse_and_unknown_users_use_reference_fallback():
