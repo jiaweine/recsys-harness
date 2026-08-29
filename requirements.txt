@@ -1,3 +1,5 @@
 # Compatibility entry point for local development and CI.
-# Canonical runtime and development dependencies live in pyproject.toml.
+# Canonical dependency ranges live in pyproject.toml; production-tested runtime
+# versions are constrained separately so CI exercises the deployed dependency set.
+-c requirements-runtime.txt
 .[dev]
