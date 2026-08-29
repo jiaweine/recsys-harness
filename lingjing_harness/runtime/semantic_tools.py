@@ -24,6 +24,7 @@ class SearchBackendToolRegistry(_ToolRegistry):
         *args: Any,
         search_backend: str = "reference",
         search_backend_kwargs: dict[str, Any] | None = None,
+        search_backend_adapter: FlagEmbeddingSearchAdapter | None = None,
         **kwargs: Any,
     ) -> None:
         backend = str(search_backend).strip().lower()
@@ -35,6 +36,8 @@ class SearchBackendToolRegistry(_ToolRegistry):
         backend_kwargs = dict(search_backend_kwargs or {})
         if backend == "reference" and backend_kwargs:
             raise ValueError("search_backend_kwargs require a non-reference search backend")
+        if search_backend_adapter is not None and backend != "flag_embedding":
+            raise ValueError("search_backend_adapter requires search_backend='flag_embedding'")
 
         self.search_backend = backend
         self.search_backend_kwargs = backend_kwargs
@@ -47,7 +50,7 @@ class SearchBackendToolRegistry(_ToolRegistry):
         self._search_backend_initializing = False
 
         if backend != "reference":
-            self._install_search_backend()
+            self._install_search_backend(adapter=search_backend_adapter)
             self._validate_active_strategies()
             self._refresh_portfolio()
             self._validate_active_portfolio()
@@ -84,6 +87,8 @@ class SearchBackendToolRegistry(_ToolRegistry):
             return
         dense_limit, adapter_kwargs = self._semantic_options()
         semantic_adapter = adapter or FlagEmbeddingSearchAdapter(self.catalog, **adapter_kwargs)
+        if semantic_adapter.catalog is not self.catalog:
+            raise ValueError("semantic adapter must be rebound to the current catalog")
         self.search = FlagEmbeddingHybridSearchEngine(
             self.search,
             semantic_adapter,
@@ -98,6 +103,11 @@ class SearchBackendToolRegistry(_ToolRegistry):
         return clone
 
     def replace_catalog(self, catalog: Any) -> None:
+        adapter = (
+            self.search.adapter.for_catalog(catalog)
+            if isinstance(self.search, FlagEmbeddingHybridSearchEngine)
+            else None
+        )
         self.__init__(
             catalog,
             self.memory,
@@ -105,6 +115,7 @@ class SearchBackendToolRegistry(_ToolRegistry):
             optimizer_backend=self.optimizer_backend,
             search_backend=self.search_backend,
             search_backend_kwargs=self.search_backend_kwargs,
+            search_backend_adapter=adapter,
         )
 
     def inspect_data(self) -> dict[str, Any]:
