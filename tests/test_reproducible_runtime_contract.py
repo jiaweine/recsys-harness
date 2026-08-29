@@ -83,3 +83,20 @@ def test_dependabot_maintains_actions_python_and_container_dependencies() -> Non
     dependabot = (ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
     for ecosystem in ("github-actions", "pip", "docker"):
         assert f'package-ecosystem: "{ecosystem}"' in dependabot
+
+
+def test_dependabot_version_updates_follow_runtime_ownership_boundaries() -> None:
+    dependabot = (ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
+
+    for dependency in ("fastapi", "uvicorn", "pydantic", "python-multipart"):
+        assert f'dependency-name: "{dependency}"' in dependabot
+
+    # Transitive lock entries are regenerated as part of a coherent direct-dependency
+    # change; they must not get standalone version-update PRs.
+    assert 'dependency-name: "pydantic-core"' not in dependabot
+
+    # The deployment contract is Python 3.11. A 3.12+ migration needs an explicit
+    # compatibility change rather than an unattended Docker version bump.
+    assert 'dependency-name: "python"' in dependabot
+    assert '"version-update:semver-minor"' in dependabot
+    assert '"version-update:semver-major"' in dependabot
