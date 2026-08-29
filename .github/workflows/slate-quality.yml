@@ -1,0 +1,47 @@
+name: Slate Evaluation Quality
+
+on:
+  push:
+    paths:
+      - '.github/workflows/slate-quality.yml'
+      - 'lingjing_harness/__init__.py'
+      - 'lingjing_harness/slate_counterfactual.py'
+      - 'lingjing_harness/slate_experiments.py'
+      - 'tests/test_slate_counterfactual.py'
+      - 'tests/test_slate_experiments.py'
+  pull_request:
+    paths:
+      - '.github/workflows/slate-quality.yml'
+      - 'lingjing_harness/__init__.py'
+      - 'lingjing_harness/slate_counterfactual.py'
+      - 'lingjing_harness/slate_experiments.py'
+      - 'tests/test_slate_counterfactual.py'
+      - 'tests/test_slate_experiments.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  slate-evaluation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Compile slate evaluation contracts
+        run: >-
+          python -m compileall -q
+          lingjing_harness/slate_counterfactual.py
+          lingjing_harness/slate_experiments.py
+          tests/test_slate_counterfactual.py
+          tests/test_slate_experiments.py
+      - name: Run slate estimator and governance quality gates
+        run: >-
+          pytest -q
+          tests/test_slate_counterfactual.py
+          tests/test_slate_experiments.py

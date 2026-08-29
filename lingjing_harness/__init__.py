@@ -17,6 +17,12 @@ from .experiments import (
 )
 from .production import ExposureEvent, RewardSpec
 from .runtime.harness import AgentHarness
+from .slate_counterfactual import SlatePositionRecord, evaluate_slate_off_policy
+from .slate_experiments import (
+    SlateExperimentCriteria,
+    SlateExperimentSpec,
+    evaluate_slate_experiment,
+)
 
 __all__ = [
     "Catalog",
@@ -30,6 +36,11 @@ __all__ = [
     "ExperimentCriteria",
     "ExperimentSpec",
     "evaluate_counterfactual_experiment",
+    "SlatePositionRecord",
+    "evaluate_slate_off_policy",
+    "SlateExperimentCriteria",
+    "SlateExperimentSpec",
+    "evaluate_slate_experiment",
     "SearchServingAdapter",
     "RecommendServingAdapter",
     "AdapterSearchEngine",
