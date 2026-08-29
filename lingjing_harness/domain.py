@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from math import isfinite, log1p
 from typing import Any
 
+from .counterfactual import CounterfactualRecord
+from .experiments import ExperimentSpec
 from .production import ExposureEvent, RewardSpec
 
 
@@ -150,6 +152,8 @@ class Catalog:
     events: list[ExposureEvent] = field(default_factory=list)
     reward_spec: RewardSpec | None = None
     name: str = "演示数据"
+    counterfactual_records: list[CounterfactualRecord] = field(default_factory=list)
+    experiments: list[ExperimentSpec] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.items = [item for item in self.items if item.item_id and item.title]
@@ -187,6 +191,35 @@ class Catalog:
             )
         )
 
+        if any(not isinstance(row, CounterfactualRecord) for row in self.counterfactual_records):
+            raise ValueError("counterfactual_records must contain CounterfactualRecord rows")
+        self.counterfactual_records = sorted(
+            list(self.counterfactual_records),
+            key=lambda row: (
+                row.surface,
+                row.target_policy_id,
+                row.logging_policy_id,
+                row.decision_id,
+            ),
+        )
+        if any(not isinstance(spec, ExperimentSpec) for spec in self.experiments):
+            raise ValueError("experiments must contain ExperimentSpec rows")
+        experiment_ids: set[str] = set()
+        candidate_contracts: set[tuple[str, str]] = set()
+        normalized_experiments: list[ExperimentSpec] = []
+        for spec in self.experiments:
+            if spec.experiment_id in experiment_ids:
+                raise ValueError("experiment_id must be unique within one catalog")
+            contract = (spec.surface, spec.candidate_policy_id)
+            if contract in candidate_contracts:
+                raise ValueError(
+                    "each candidate policy may have only one experiment contract per surface"
+                )
+            experiment_ids.add(spec.experiment_id)
+            candidate_contracts.add(contract)
+            normalized_experiments.append(spec)
+        self.experiments = sorted(normalized_experiments, key=lambda spec: spec.experiment_id)
+
         # Query text is the evaluation unit. Duplicate rows for the same query
         # must never be allowed to land on opposite sides of discovery/holdout.
         eligible_ids = {item.item_id for item in self.items if item.eligible}
@@ -214,6 +247,8 @@ class Catalog:
         interaction_rows = _rows(payload, "interactions")
         query_rows = _rows(payload, "query_labels")
         event_rows = _rows(payload, "events")
+        counterfactual_rows = _rows(payload, "counterfactual_records")
+        experiment_rows = _rows(payload, "experiments")
         if not event_rows and payload.get("exposures") is not None:
             event_rows = _rows(payload, "exposures")
         if not item_rows:
@@ -233,13 +268,17 @@ class Catalog:
             events=[ExposureEvent.from_dict(row) for row in event_rows],
             reward_spec=reward_spec,
             name=str(name or "导入数据").strip() or "导入数据",
+            counterfactual_records=[
+                CounterfactualRecord.from_dict(row) for row in counterfactual_rows
+            ],
+            experiments=[ExperimentSpec.from_dict(row) for row in experiment_rows],
         )
         if not catalog.items:
             raise ValueError("数据中至少需要一条包含 id 与 title 的有效内容")
         return catalog
 
     def to_payload(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "items": [
                 {
                     "id": item.item_id,
@@ -271,6 +310,13 @@ class Catalog:
             "events": [event.to_dict() for event in self.events],
             "reward_spec": self.reward_spec.to_dict() if self.reward_spec else None,
         }
+        if self.counterfactual_records:
+            payload["counterfactual_records"] = [
+                row.to_dict() for row in self.counterfactual_records
+            ]
+        if self.experiments:
+            payload["experiments"] = [spec.to_dict() for spec in self.experiments]
+        return payload
 
     def summary(self) -> dict[str, Any]:
         users = {event.user_id for event in self.interactions}
@@ -289,6 +335,8 @@ class Catalog:
             "production_requests": len(request_ids),
             "search_replay_requests": len(search_requests),
             "recommend_replay_requests": len(recommend_requests),
+            "counterfactual_records": len(self.counterfactual_records),
+            "experiment_specs": len(self.experiments),
             "business_reward_ready": bool(self.reward_spec and request_ids),
         }
 

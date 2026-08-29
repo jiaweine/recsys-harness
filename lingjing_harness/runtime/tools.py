@@ -10,7 +10,7 @@ from lingjing_harness.algorithms import RecommendConfig, RecommendationEngine, S
 from lingjing_harness.algorithms.capabilities import config_from_mapping
 from lingjing_harness.algorithms.segments import SegmentRouter, strategy_domain
 from lingjing_harness.production import evaluate_logged_policy, request_groups
-from .tools_production import ToolRegistry as _ProductionToolRegistry
+from .experiment_tools import ToolRegistry as _ProductionToolRegistry
 
 
 class ToolRegistry(_ProductionToolRegistry):
@@ -312,7 +312,11 @@ class ToolRegistry(_ProductionToolRegistry):
             **kwargs,
         )
         global_activated = bool(result.get("activated"))
-        portfolio_activate = effective_activate and not global_activated
+        portfolio_activate = (
+            effective_activate
+            and bool(result.get("activation_eligible", True))
+            and not global_activated
+        )
         portfolio_skills = self._remember_segment_portfolio(
             result,
             surface="search",
@@ -347,7 +351,11 @@ class ToolRegistry(_ProductionToolRegistry):
             **kwargs,
         )
         global_activated = bool(result.get("activated"))
-        portfolio_activate = effective_activate and not global_activated
+        portfolio_activate = (
+            effective_activate
+            and bool(result.get("activation_eligible", True))
+            and not global_activated
+        )
         portfolio_skills = self._remember_segment_portfolio(
             result,
             surface="recommend",
