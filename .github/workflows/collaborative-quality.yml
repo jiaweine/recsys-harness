@@ -23,6 +23,7 @@ on:
       - 'tests/test_invocation_maintenance.py'
       - 'tests/test_skill_retention.py'
       - 'tests/test_runtime_backend_config.py'
+      - 'tests/test_runtime_model_reuse.py'
       - 'tests/test_business_replay_budget.py'
       - 'tests/test_collaborative_runtime.py'
       - 'tests/test_implicit_hybrid_runtime.py'
@@ -51,6 +52,7 @@ on:
       - 'tests/test_invocation_maintenance.py'
       - 'tests/test_skill_retention.py'
       - 'tests/test_runtime_backend_config.py'
+      - 'tests/test_runtime_model_reuse.py'
       - 'tests/test_business_replay_budget.py'
       - 'tests/test_collaborative_runtime.py'
       - 'tests/test_implicit_hybrid_runtime.py'
@@ -85,6 +87,7 @@ jobs:
           tests/test_invocation_maintenance.py
           tests/test_skill_retention.py
           tests/test_runtime_backend_config.py
+          tests/test_runtime_model_reuse.py
           tests/test_business_replay_budget.py
           tests/test_collaborative_runtime.py
           tests/test_implicit_hybrid_runtime.py
