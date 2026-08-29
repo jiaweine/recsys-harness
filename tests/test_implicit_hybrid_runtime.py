@@ -14,11 +14,13 @@ from lingjing_harness.algorithms import (
     audit_recommend_relevance,
     evolve_recommend,
 )
-from lingjing_harness.domain import Interaction
+from lingjing_harness.algorithms.business_replay_budget import MAX_BUSINESS_OPTIMIZER_REQUESTS
+from lingjing_harness.domain import Catalog, Interaction
 from lingjing_harness.integrations import (
     ImplicitHybridRecommendationEngine,
     ImplicitRecommendationAdapter,
 )
+from lingjing_harness.production import ExposureEvent, RewardSpec
 from lingjing_harness.runtime import RecommendationBackendToolRegistry
 from lingjing_harness.runtime.memory import AgentMemory, catalog_fingerprint
 from lingjing_harness.sample_data import build_sample_catalog
@@ -43,6 +45,38 @@ def _catalog():
                 )
             )
     return catalog
+
+
+def _production_catalog(requests: int = 88) -> Catalog:
+    base = _catalog()
+    reference = RecommendationEngine(base)
+    users = reference.known_users()
+    events: list[ExposureEvent] = []
+    for index in range(requests):
+        user_id = users[index % len(users)]
+        item_id = reference.recommend(user_id, limit=3)[0]["id"]
+        events.append(
+            ExposureEvent(
+                request_id=f"als-business-{index:04d}",
+                timestamp=1000.0 + index,
+                surface="recommend",
+                user_id=user_id,
+                item_id=item_id,
+                event="click",
+                value=1.0,
+                propensity=0.5,
+                position=1,
+                policy_id="owned-default",
+            )
+        )
+    return Catalog(
+        items=list(base.items),
+        interactions=list(base.interactions),
+        query_labels=list(base.query_labels),
+        events=events,
+        reward_spec=RewardSpec(weights={"click": 1.0}),
+        name="official-als-business-replay",
+    )
 
 
 def _hybrid(catalog):
@@ -128,6 +162,23 @@ def test_official_als_hybrid_participates_in_evolution_without_retraining_per_co
     assert engine.adapter is adapter
     assert result["candidate_config"]
     assert temporal_builds == result["relevance_validation"]["prepared_slices"]
+
+
+def test_official_als_business_evolution_bounds_only_optimizer_discovery():
+    catalog = _production_catalog()
+    engine = _hybrid(catalog)
+    adapter = engine.adapter
+
+    result = evolve_recommend(catalog, engine)
+    business = result["business_validation"]
+
+    assert business["available"] is True
+    assert business["discovery_requests"] == MAX_BUSINESS_OPTIMIZER_REQUESTS == 64
+    assert business["holdout_requests"] == 22
+    assert business["confidence"]["samples"] == 22
+    assert result["candidate"]["business_requests"] == 88
+    assert result["reference"]["business_requests"] == 88
+    assert engine.adapter is adapter
 
 
 def test_explicit_runtime_registry_uses_official_als_for_active_strategy_serving():
