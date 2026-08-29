@@ -1,12 +1,17 @@
 name: Collaborative Routing Calibration
 
 on:
-  push:
-    branches: ['benchmark/collaborative-model-selection']
-    paths:
-      - 'scripts/collaborative_routing_benchmark.py'
-      - '.github/workflows/collaborative-routing-calibration.yml'
   workflow_dispatch:
+    inputs:
+      model:
+        description: 'implicit model to calibrate'
+        required: true
+        default: 'als'
+        type: choice
+        options:
+          - als
+          - bpr
+          - bm25
 
 permissions:
   contents: read
@@ -24,9 +29,9 @@ jobs:
       - run: pip install -e . --no-deps
       - name: Install official implicit evaluation stack
         run: pip install 'implicit==0.7.3' h5py
-      - name: Sweep ALS history thresholds on MovieLens 100K
+      - name: Sweep collaborative history thresholds on MovieLens 100K
         env:
           OPENBLAS_NUM_THREADS: '1'
           OMP_NUM_THREADS: '1'
-          COLLABORATIVE_MODEL: 'als'
+          COLLABORATIVE_MODEL: ${{ inputs.model }}
         run: python scripts/collaborative_routing_benchmark.py
