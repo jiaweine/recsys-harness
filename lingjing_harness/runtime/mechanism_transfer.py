@@ -215,7 +215,7 @@ def record_runtime_mechanism_evidence(
         "deduplicated": 0,
         "mechanisms": 0,
         "contexts": 0,
-        "method": "context_mechanism_experiment_evidence_outcome_v1",
+        "method": "context_mechanism_experiment_evidence_outcome",
     }
     seen_mechanisms = 0
     seen_contexts = 0
