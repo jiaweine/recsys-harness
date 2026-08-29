@@ -117,7 +117,8 @@ class SegmentRouter:
         }
 
     def search_features(self, query: str) -> SearchRequestFeatures:
-        prepared = self.search.prepare((query or "").strip())
+        prepare = getattr(self.search, "routing_prepare", self.search.prepare)
+        prepared = prepare((query or "").strip())
         if not prepared:
             return SearchRequestFeatures(candidate_count=0, anchor_strength=0.0)
         anchor = max(
