@@ -290,7 +290,6 @@ def evaluate_logged_policy(
     for request_id, rows in sorted(grouped.items()):
         if any(row.propensity is not None for row in rows):
             propensity_rows += sum(1 for row in rows if row.propensity is not None)
-        context = rows[0]
         if surface == "search":
             query = next((row.query for row in rows if row.query), "")
             if not query:
@@ -331,35 +330,43 @@ def paired_bootstrap_delta(
     *,
     iterations: int = 600,
 ) -> dict[str, Any]:
+    """Estimate a paired request-level delta without fabricating singleton uncertainty."""
+
     common = sorted(set(reference_scores) & set(candidate_scores))
     if not common:
         return {
+            "available": False,
             "samples": 0,
             "delta": 0.0,
-            "ci95": [0.0, 0.0],
-            "probability_positive": 0.0,
+            "ci95": None,
+            "probability_positive": None,
+            "reason": "no common request identities are available for paired confidence",
         }
     deltas = [float(candidate_scores[key]) - float(reference_scores[key]) for key in common]
     observed = mean(deltas)
     if len(deltas) == 1:
         return {
+            "available": False,
             "samples": 1,
             "delta": round(observed, 6),
-            "ci95": [round(observed, 6), round(observed, 6)],
-            "probability_positive": 1.0 if observed > 0 else 0.0,
+            "ci95": None,
+            "probability_positive": None,
+            "reason": "at least two paired requests are required for bootstrap uncertainty",
         }
     raw = "|".join(f"{key}:{reference_scores[key]:.8f}:{candidate_scores[key]:.8f}" for key in common)
     seed = int.from_bytes(blake2b(raw.encode("utf-8"), digest_size=8).digest(), "little")
     rng = Random(seed)
     draws: list[float] = []
     count = len(deltas)
-    for _ in range(max(100, iterations)):
+    draw_count = max(100, min(10000, int(iterations)))
+    for _ in range(draw_count):
         draws.append(mean(deltas[rng.randrange(count)] for _ in range(count)))
     draws.sort()
     low = draws[max(0, int(len(draws) * 0.025) - 1)]
     high = draws[min(len(draws) - 1, int(len(draws) * 0.975))]
     positive = sum(1 for value in draws if value > 0.0) / len(draws)
     return {
+        "available": True,
         "samples": len(common),
         "delta": round(observed, 6),
         "ci95": [round(low, 6), round(high, 6)],

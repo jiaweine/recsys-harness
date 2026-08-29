@@ -18,6 +18,18 @@ from . import evolution_core as core
 
 
 MIN_BUSINESS_REQUESTS = 4
+MIN_PAIRED_CONFIDENCE_REQUESTS = 2
+MIN_PROBABILITY_POSITIVE = 0.65
+
+
+def _business_confidence_supports_trust(confidence: dict[str, Any]) -> bool:
+    probability = confidence.get("probability_positive")
+    return (
+        bool(confidence.get("available"))
+        and int(confidence.get("samples", 0) or 0) >= MIN_PAIRED_CONFIDENCE_REQUESTS
+        and probability is not None
+        and float(probability) >= MIN_PROBABILITY_POSITIVE
+    )
 
 
 def _business_events_ready(catalog: Catalog, surface: str) -> bool:
@@ -218,7 +230,7 @@ def evolve_search(
         and business_delta > 0.0
         and discovery_business_delta > 0.001
         and holdout_business_delta >= -0.003
-        and float(confidence["probability_positive"]) >= 0.65
+        and _business_confidence_supports_trust(confidence)
     )
     trial = _attach_business(trial, full_candidate_business)
     reference = _attach_business(reference, full_reference_business)
@@ -467,7 +479,7 @@ def evolve_recommend(
         and business_delta > 0.0
         and discovery_business_delta > 0.001
         and holdout_business_delta >= -0.003
-        and float(confidence["probability_positive"]) >= 0.65
+        and _business_confidence_supports_trust(confidence)
     )
     trial = _attach_business(trial, full_candidate_business)
     reference = _attach_business(reference, full_reference_business)

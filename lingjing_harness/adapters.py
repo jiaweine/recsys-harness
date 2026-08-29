@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import isfinite
+from operator import index
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 
@@ -17,8 +18,22 @@ class RecommendServingAdapter(Protocol):
     def recommend(self, user_id: str, *, limit: int = 10) -> Sequence[Mapping[str, Any]]: ...
 
 
+def _normalized_limit(limit: int) -> int:
+    """Normalize the public ranking limit without coercing non-integer values."""
+
+    try:
+        value = index(limit)
+    except TypeError as exc:
+        raise ValueError("limit must be an integer") from exc
+    return max(0, value)
+
+
 def normalize_ranked_rows(rows: Sequence[Mapping[str, Any]], *, limit: int) -> list[dict[str, Any]]:
     """Fail closed on malformed external ranking rows and deduplicate IDs."""
+
+    normalized_limit = _normalized_limit(limit)
+    if normalized_limit == 0:
+        return []
 
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -29,19 +44,22 @@ def normalize_ranked_rows(rows: Sequence[Mapping[str, Any]], *, limit: int) -> l
         if not item_id or item_id in seen:
             continue
         score = raw.get("score")
+        normalized_score: float | None = None
         if score is not None:
             try:
-                number = float(score)
+                normalized_score = float(score)
             except (TypeError, ValueError):
                 continue
-            if not isfinite(number):
+            if not isfinite(normalized_score):
                 continue
         seen.add(item_id)
         row = dict(raw)
         row["id"] = item_id
+        if normalized_score is not None:
+            row["score"] = normalized_score
         row["rank"] = len(out) + 1
         out.append(row)
-        if len(out) >= max(0, int(limit)):
+        if len(out) >= normalized_limit:
             break
     return out
 
@@ -53,7 +71,13 @@ class AdapterSearchEngine:
     adapter: SearchServingAdapter
 
     def search(self, query: str, *, limit: int = 10) -> list[dict[str, Any]]:
-        return normalize_ranked_rows(self.adapter.search(query, limit=limit), limit=limit)
+        normalized_limit = _normalized_limit(limit)
+        if normalized_limit == 0:
+            return []
+        return normalize_ranked_rows(
+            self.adapter.search(query, limit=normalized_limit),
+            limit=normalized_limit,
+        )
 
 
 @dataclass(slots=True)
@@ -63,7 +87,13 @@ class AdapterRecommendationEngine:
     adapter: RecommendServingAdapter
 
     def recommend(self, user_id: str, *, limit: int = 10) -> list[dict[str, Any]]:
-        return normalize_ranked_rows(self.adapter.recommend(user_id, limit=limit), limit=limit)
+        normalized_limit = _normalized_limit(limit)
+        if normalized_limit == 0:
+            return []
+        return normalize_ranked_rows(
+            self.adapter.recommend(user_id, limit=normalized_limit),
+            limit=normalized_limit,
+        )
 
 
 @dataclass(slots=True)
