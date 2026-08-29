@@ -11,6 +11,7 @@ from .credit_assignment import apply_semantic_trajectory_credit
 from .deliberation import DeliberationEngine, TrajectoryCritic
 from .harness import AgentHarness as _BaseAgentHarness, RunCancelled
 from .invocation_maintenance import discard_completed_run_invocations
+from .memory import AgentMemory, catalog_fingerprint
 from .mechanism_graph import (
     mechanism_graph_snapshot,
     mechanism_stats,
@@ -18,7 +19,11 @@ from .mechanism_graph import (
     validate_mechanism_graph,
     validate_mechanism_graph_with_shacl,
 )
-from .memory import AgentMemory, catalog_fingerprint
+from .mechanism_transfer import (
+    install_mechanism_transfer,
+    mechanism_pair_priors,
+    record_runtime_mechanism_evidence,
+)
 from .mission_compiler import MissionCompiler
 from .network import NetworkResearch
 from .optimizer_tools import OptimizerToolRegistry
@@ -29,6 +34,12 @@ from .skill_retention import prune_retired_strategy_history
 from .tools import ToolRegistry
 from .verifier import ResultVerifier
 from .backend_config import RuntimeBackendConfig, build_runtime_tools
+
+
+# Public runtimes enrich evolution memory with second-order mechanism interaction
+# priors. The original single-arm credit path remains authoritative for first-order
+# routing; the bridge appends only co-occurrence pair evidence.
+install_mechanism_transfer()
 
 
 class AgentHarness(_BaseAgentHarness):
@@ -102,7 +113,7 @@ class AgentHarness(_BaseAgentHarness):
         }
         result["policy_credit"] = credit
 
-        mechanisms = record_mechanism_evidence(self.memory, self.catalog_key, result)
+        mechanisms = record_runtime_mechanism_evidence(self.memory, self.catalog_key, result)
         autonomy["mechanism_evidence_graph"] = {
             "method": mechanisms.get("method"),
             "recorded": int(mechanisms.get("recorded", 0) or 0),
@@ -133,6 +144,7 @@ __all__ = [
     "OwnedPolicy",
     "ToolRegistry",
     "ResultVerifier",
-    "record_mechanism_evidence", "mechanism_stats", "mechanism_graph_snapshot",
+    "record_mechanism_evidence", "record_runtime_mechanism_evidence",
+    "mechanism_stats", "mechanism_graph_snapshot", "mechanism_pair_priors",
     "validate_mechanism_graph", "validate_mechanism_graph_with_shacl",
 ]
