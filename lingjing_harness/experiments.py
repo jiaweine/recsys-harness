@@ -11,6 +11,12 @@ from math import isfinite
 from typing import Any, Iterable, Mapping
 
 from .counterfactual import CounterfactualRecord, evaluate_off_policy
+from .counterfactual_robust import evaluate_robust_off_policy
+
+
+_BASE_ESTIMATORS = frozenset({"ips", "snips", "dr"})
+_ROBUST_ESTIMATORS = frozenset({"raw_dr", "switch_dr", "dros"})
+_SUPPORTED_ESTIMATORS = _BASE_ESTIMATORS | _ROBUST_ESTIMATORS
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +28,12 @@ class ExperimentCriteria:
     for their product/risk class. Effective-sample-ratio eligibility is evaluated
     on raw importance weights before clipping so variance reduction cannot make
     weak logging-policy overlap look stronger than it actually is.
+
+    ``maximum_estimator_spread`` is optional and disabled by default for backward
+    compatibility. When supplied, the experiment also requires Raw-DR, Switch-DR
+    and DRos to agree within the declared value-scale tolerance. This turns strong
+    estimator disagreement into an explicit evidence blocker rather than silently
+    choosing the most optimistic estimate.
     """
 
     minimum_samples: int
@@ -30,6 +42,7 @@ class ExperimentCriteria:
     minimum_support_coverage: float
     minimum_probability_positive: float
     minimum_estimated_delta: float = 0.0
+    maximum_estimator_spread: float | None = None
 
     def __post_init__(self) -> None:
         if int(self.minimum_samples) < 1:
@@ -45,6 +58,10 @@ class ExperimentCriteria:
                 raise ValueError(f"{name} must be within [0, 1]")
         if not isfinite(float(self.minimum_estimated_delta)):
             raise ValueError("minimum_estimated_delta must be finite")
+        if self.maximum_estimator_spread is not None:
+            spread = float(self.maximum_estimator_spread)
+            if not isfinite(spread) or spread < 0.0:
+                raise ValueError("maximum_estimator_spread must be finite and >= 0")
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> "ExperimentCriteria":
@@ -63,6 +80,7 @@ class ExperimentCriteria:
                 "experiment criteria are missing explicit thresholds: " + ", ".join(missing)
             )
         try:
+            spread_raw = raw.get("maximum_estimator_spread")
             return cls(
                 minimum_samples=int(raw["minimum_samples"]),
                 minimum_effective_sample_ratio=float(raw["minimum_effective_sample_ratio"]),
@@ -70,6 +88,11 @@ class ExperimentCriteria:
                 minimum_support_coverage=float(raw["minimum_support_coverage"]),
                 minimum_probability_positive=float(raw["minimum_probability_positive"]),
                 minimum_estimated_delta=float(raw.get("minimum_estimated_delta", 0.0)),
+                maximum_estimator_spread=(
+                    None
+                    if spread_raw in (None, "")
+                    else float(spread_raw)
+                ),
             )
         except (TypeError, ValueError) as exc:
             if isinstance(exc, ValueError) and "must" in str(exc):
@@ -84,6 +107,7 @@ class ExperimentCriteria:
             "minimum_support_coverage": self.minimum_support_coverage,
             "minimum_probability_positive": self.minimum_probability_positive,
             "minimum_estimated_delta": self.minimum_estimated_delta,
+            "maximum_estimator_spread": self.maximum_estimator_spread,
         }
 
 
@@ -107,8 +131,11 @@ class ExperimentSpec:
             raise ValueError("experiment hypothesis must not be empty")
         if not self.logging_policy_id.strip() or not self.candidate_policy_id.strip():
             raise ValueError("logging_policy_id and candidate_policy_id are required")
-        if self.primary_estimator not in {"ips", "snips", "dr"}:
-            raise ValueError("primary_estimator must be ips, snips or dr")
+        if self.primary_estimator not in _SUPPORTED_ESTIMATORS:
+            raise ValueError(
+                "primary_estimator must be one of "
+                + ", ".join(sorted(_SUPPORTED_ESTIMATORS))
+            )
         cap = float(self.importance_weight_cap)
         if not isfinite(cap) or cap < 1.0 or cap > 1000.0:
             raise ValueError("importance_weight_cap must be within [1, 1000]")
@@ -152,6 +179,9 @@ def evaluate_counterfactual_experiment(
 
     Passing this gate means only "eligible for a controlled online experiment".
     It never means "safe to deploy globally" and never activates a policy.
+    Robust DR estimators are evaluated in parallel when the required reward model
+    is complete. Their tuning diagnostics remain visible and cannot bypass the raw
+    overlap/support gates owned by this experiment contract.
     """
 
     rows = list(records)
@@ -168,16 +198,26 @@ def evaluate_counterfactual_experiment(
         importance_weight_cap=spec.importance_weight_cap,
         bootstrap_iterations=bootstrap_iterations,
     )
+    robust_report = evaluate_robust_off_policy(
+        rows,
+        bootstrap_iterations=bootstrap_iterations,
+    )
     criteria = spec.criteria
     diagnostics = report.get("diagnostics") or {}
-    estimators = report.get("estimators") or {}
-    confidence = report.get("confidence") or {}
-    primary = estimators.get(spec.primary_estimator) or {
+
+    if spec.primary_estimator in _ROBUST_ESTIMATORS:
+        primary_estimators = robust_report.get("estimators") or {}
+        primary_confidences = robust_report.get("confidence") or {}
+    else:
+        primary_estimators = report.get("estimators") or {}
+        primary_confidences = report.get("confidence") or {}
+
+    primary = primary_estimators.get(spec.primary_estimator) or {
         "available": False,
         "value": None,
         "delta_vs_logged": None,
     }
-    primary_confidence = confidence.get(spec.primary_estimator) or {
+    primary_confidence = primary_confidences.get(spec.primary_estimator) or {
         "available": False,
         "probability_positive": None,
     }
@@ -226,15 +266,34 @@ def evaluate_counterfactual_experiment(
             f"probability_positive<{criteria.minimum_probability_positive:g}"
         )
 
+    if criteria.maximum_estimator_spread is not None:
+        if not robust_report.get("available"):
+            blockers.append("robust_estimators_unavailable_for_agreement_gate")
+        else:
+            robust_diagnostics = robust_report.get("diagnostics") or {}
+            spread = float(robust_diagnostics.get("robust_estimator_spread", 0.0) or 0.0)
+            if spread > criteria.maximum_estimator_spread:
+                blockers.append(
+                    f"estimator_spread>{criteria.maximum_estimator_spread:g}"
+                )
+
+    blockers = list(dict.fromkeys(blockers))
     eligible = not blockers
     return {
         "experiment": spec.to_dict(),
         "counterfactual_evaluation": report,
+        "robust_counterfactual_evaluation": robust_report,
         "decision": {
             "eligible_for_online_test": eligible,
             "automatic_activation": False,
             "primary_estimator": spec.primary_estimator,
+            "primary_estimator_family": (
+                "robust_doubly_robust"
+                if spec.primary_estimator in _ROBUST_ESTIMATORS
+                else "base_counterfactual"
+            ),
             "effective_sample_ratio_basis": "raw_importance_weights",
+            "estimator_agreement_gate": criteria.maximum_estimator_spread is not None,
             "blockers": blockers,
             "next_step": (
                 "controlled_online_experiment"
