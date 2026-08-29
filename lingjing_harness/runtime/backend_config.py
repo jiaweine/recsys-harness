@@ -27,6 +27,7 @@ RECOMMEND_BACKEND_ENV = "LINGJING_RECOMMEND_BACKEND"
 OPTIMIZER_BACKEND_ENV = "LINGJING_OPTIMIZER_BACKEND"
 SEARCH_BACKEND_KWARGS_ENV = "LINGJING_SEARCH_BACKEND_KWARGS"
 RECOMMEND_BACKEND_KWARGS_ENV = "LINGJING_RECOMMEND_BACKEND_KWARGS"
+_SEARCH_ADAPTER_STATE_ATTR = "_lingjing_runtime_search_adapter_state"
 
 
 def _backend_name(
@@ -73,6 +74,42 @@ def _backend_kwargs(value: Any, *, field_name: str) -> dict[str, Any]:
     if not isinstance(decoded, dict):
         raise ValueError(f"{field_name} must be a JSON object")
     return _validate_json_mapping(decoded, field_name=field_name)
+
+
+def _rebound_cached_search_adapter(
+    memory: Any,
+    *,
+    search_scope: str,
+    catalog: Catalog,
+) -> Any | None:
+    """Reuse one prepared semantic model only inside the same AgentMemory runtime."""
+
+    if not search_scope or not isinstance(memory, AgentMemory):
+        return None
+    state = getattr(memory, _SEARCH_ADAPTER_STATE_ATTR, None)
+    if not isinstance(state, tuple) or len(state) != 2 or state[0] != search_scope:
+        return None
+    adapter = state[1]
+    rebind = getattr(adapter, "for_catalog", None)
+    if not callable(rebind):
+        return None
+    return rebind(catalog)
+
+
+def _remember_search_adapter(
+    memory: Any,
+    *,
+    search_scope: str,
+    registry: Any,
+) -> None:
+    """Keep a single semantic adapter slot; config changes replace, never grow, it."""
+
+    if not search_scope or not isinstance(memory, AgentMemory):
+        return
+    adapter = getattr(getattr(registry, "search", None), "adapter", None)
+    if adapter is None or not callable(getattr(adapter, "for_catalog", None)):
+        return
+    setattr(memory, _SEARCH_ADAPTER_STATE_ATTR, (search_scope, adapter))
 
 
 @dataclass(slots=True)
@@ -212,6 +249,11 @@ def build_runtime_tools(
             invocation_scope=invocation_scope,
         )
 
+    search_adapter = _rebound_cached_search_adapter(
+        base_memory,
+        search_scope=scopes["search"],
+        catalog=catalog,
+    )
     registry = RecommendationBackendToolRegistry(
         catalog,
         tool_memory,
@@ -219,8 +261,14 @@ def build_runtime_tools(
         optimizer_backend=resolved.optimizer_backend,
         search_backend=resolved.search_backend,
         search_backend_kwargs=resolved.search_backend_kwargs,
+        search_backend_adapter=search_adapter,
         recommend_backend=resolved.recommend_backend,
         recommend_backend_kwargs=resolved.recommend_backend_kwargs,
+    )
+    _remember_search_adapter(
+        base_memory,
+        search_scope=scopes["search"],
+        registry=registry,
     )
     registry.runtime_backend_config = resolved.manifest()
     return registry
