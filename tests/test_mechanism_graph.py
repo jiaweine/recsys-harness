@@ -13,6 +13,7 @@ from lingjing_harness.runtime.mechanism_graph import (
     validate_mechanism_graph,
     validate_mechanism_graph_with_shacl,
 )
+from lingjing_harness.runtime.mechanism_transfer import mechanism_pair_priors
 
 
 def _search_configs() -> tuple[dict, dict]:
@@ -151,6 +152,23 @@ def test_rejected_mechanism_retains_named_failure_modes() -> None:
         if row.get("@type") == "xushu:FailureMode"
     ]
     assert "domain_guardrail_holdout_regressed" in failures
+
+
+def test_mechanism_pair_memory_is_second_order_and_visible_to_evolution() -> None:
+    memory = AgentMemory()
+    record_mechanism_evidence(memory, "catalog-a", _synthetic_result())
+
+    pairs = mechanism_pair_priors(memory, "catalog-a", "search")
+    assert pairs
+    assert all(row["status"] == "mechanism_pair" for row in pairs)
+    assert all(len(row["pair"]["arms"]) == 2 for row in pairs)
+    assert any(int(row["pair"]["negative"]) == 1 for row in pairs)
+
+    remembered = memory.evolution_memory("catalog-a", "search", limit=5)
+    assert any(row.get("status") == "mechanism_pair" for row in remembered)
+    # Pair memory must not masquerade as first-order strategy-arm credit.
+    pair_rows = [row for row in remembered if row.get("status") == "mechanism_pair"]
+    assert all("credit" not in row for row in pair_rows)
 
 
 def test_mechanism_graph_passes_packaged_shacl_when_ontology_extra_is_installed() -> None:
