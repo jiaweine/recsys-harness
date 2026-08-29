@@ -7,6 +7,7 @@ from typing import Iterable
 
 from .capabilities import CapabilityContract, CapabilityRegistry, RUNTIME_CAPABILITIES
 from .contracts import AgentPlan, EvidenceRequirement, Hypothesis, MissionGraph
+from .semantic_governance import compile_semantic_governance
 
 
 class MissionCompiler:
@@ -14,7 +15,9 @@ class MissionCompiler:
 
     Capability contracts decide when they participate, what evidence they require,
     and which requirement they can satisfy. The compiler only checks dependency
-    closure and groups interchangeable capability implementations.
+    closure and groups interchangeable capability implementations.  The resulting
+    mission is then projected into the semantic governance graph and must satisfy
+    its closed-world ontology shapes before it can execute.
     """
 
     EXIT_CRITERIA = (
@@ -77,7 +80,7 @@ class MissionCompiler:
                         ),
                     )
 
-        return MissionGraph(
+        mission = MissionGraph(
             objective=plan.goal,
             mode=plan.mode,
             requirements=requirements,
@@ -85,6 +88,20 @@ class MissionCompiler:
             exit_criteria=self.EXIT_CRITERIA,
             capability_snapshot=tuple(row.name for row in enabled),
         )
+        semantic = compile_semantic_governance(plan, mission, self.registry)
+        if not bool(semantic.get("valid")):
+            violations = semantic.get("violations") or []
+            detail = "; ".join(
+                str(row.get("message") or row.get("shape") or "semantic violation")
+                for row in violations[:4]
+                if isinstance(row, dict)
+            )
+            raise ValueError(
+                "mission semantic governance validation failed"
+                + (f": {detail}" if detail else "")
+            )
+        mission.semantic_governance = semantic
+        return mission
 
     @staticmethod
     def _ordered_requirement_keys(
