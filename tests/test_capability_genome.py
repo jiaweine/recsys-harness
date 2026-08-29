@@ -51,6 +51,28 @@ def test_recommend_structural_genome_switches_profile_candidate_exploration_and_
     assert len(rows) >= 6
 
 
+def test_recommend_serving_is_a_real_strategy_gene_with_owned_default():
+    catalog = build_sample_catalog()
+    engine = RecommendationEngine(catalog)
+    manifest = engine.capability_manifest()
+
+    assert engine.config.serving_strategy == "reference"
+    assert "recommend.serving" in manifest
+    assert "reference" in CAPABILITIES.names("recommend.serving")
+    assert engine.recommend("u-lin", limit=4)
+
+
+def test_unknown_recommend_serving_capability_fails_closed_to_reference():
+    catalog = build_sample_catalog()
+    engine = RecommendationEngine(
+        catalog,
+        RecommendConfig(serving_strategy="removed-serving-backend"),
+    )
+
+    assert engine.config.serving_strategy == "reference"
+    assert engine.recommend("u-lin", limit=4)
+
+
 def test_cold_start_capability_is_a_real_stage_not_a_readme_label():
     catalog = build_sample_catalog()
     base = RecommendationEngine(catalog, RecommendConfig())
