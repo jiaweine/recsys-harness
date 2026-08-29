@@ -241,7 +241,12 @@ def prepare_recommend_relevance(
             reward_spec=None,
             name=f"{catalog.name}:temporal-relevance:{user_id}",
         )
-        base_engine = RecommendationEngine(training_catalog, config=engine.config)
+        runtime_factory = getattr(engine, "for_catalog", None)
+        base_engine = (
+            runtime_factory(training_catalog)
+            if callable(runtime_factory)
+            else RecommendationEngine(training_catalog, config=engine.config)
+        )
         slices.append(
             _PreparedSlice(
                 user_id=user_id,
