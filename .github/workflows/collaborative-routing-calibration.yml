@@ -1,11 +1,6 @@
 name: Collaborative Routing Calibration
 
 on:
-  push:
-    branches: ['benchmark/collaborative-routing-calibration']
-    paths:
-      - 'scripts/collaborative_routing_benchmark.py'
-      - '.github/workflows/collaborative-routing-calibration.yml'
   workflow_dispatch:
 
 permissions:
