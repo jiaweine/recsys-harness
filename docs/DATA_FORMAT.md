@@ -140,6 +140,7 @@ configured event weight × event.value
 - weights 必须是有限数值；
 - reward 可以为负；
 - `inverse_propensity_cap` 必须在 `[1, 100]`；
+- 数值字符串可以在 ingestion 边界规范化为数值；布尔值不作为数值接受；
 - RewardSpec 属于产品/业务 contract，不属于 optimizer 的搜索空间。
 
 ---
@@ -167,6 +168,14 @@ configured event weight × event.value
 - `model_version`
 - `experiment_id`
 - `metadata`
+
+### 数值 ingestion 边界
+
+- `timestamp`、`value`、`propensity` 接受有限数值或可解析的数值字符串；
+- `true` / `false` 不作为数值接受，避免被隐式解释成 `1` / `0`；
+- `position` 必须是正整数或整数字符串，例如 `2` / `"2"`；
+- `position` 不接受 `1.0`、`"1.0"` 或其他浮点形式，也不会做截断；
+- `NaN`、`+inf`、`-inf` 不属于有效 production evidence。
 
 ### Search 示例
 
