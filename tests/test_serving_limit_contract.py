@@ -4,7 +4,7 @@ import pytest
 
 from lingjing_harness.algorithms import RecommendationEngine, SearchEngine
 from lingjing_harness.sample_data import build_sample_catalog
-from lingjing_harness.serving import normalize_serving_limit
+from lingjing_harness.serving import normalize_serving_limit, normalize_serving_score
 
 
 class _IndexLike:
@@ -29,6 +29,28 @@ def test_shared_serving_limit_normalization(raw, expected):
 def test_shared_serving_limit_rejects_non_integer_values(raw):
     with pytest.raises(ValueError, match="limit must be an integer"):
         normalize_serving_limit(raw)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (1, 1.0),
+        (0.25, 0.25),
+        ("0.75", 0.75),
+        (-3, -3.0),
+    ],
+)
+def test_shared_serving_score_normalizes_finite_numbers(raw, expected):
+    assert normalize_serving_score(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [True, False, None, "not-a-score", float("nan"), float("inf"), float("-inf")],
+)
+def test_shared_serving_score_rejects_invalid_values(raw):
+    with pytest.raises(ValueError, match="score must be a finite number"):
+        normalize_serving_score(raw)
 
 
 def test_owned_search_zero_limit_short_circuits_before_prepare(monkeypatch):

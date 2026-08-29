@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import isfinite
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
-from .serving import normalize_serving_limit
+from .serving import normalize_serving_limit, normalize_serving_score
 
 
 class SearchServingAdapter(Protocol):
@@ -38,10 +37,8 @@ def normalize_ranked_rows(rows: Sequence[Mapping[str, Any]], *, limit: int) -> l
         normalized_score: float | None = None
         if score is not None:
             try:
-                normalized_score = float(score)
-            except (TypeError, ValueError):
-                continue
-            if not isfinite(normalized_score):
+                normalized_score = normalize_serving_score(score)
+            except ValueError:
                 continue
         seen.add(item_id)
         row = dict(raw)
