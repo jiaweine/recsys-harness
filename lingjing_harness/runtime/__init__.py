@@ -47,7 +47,11 @@ class AgentHarness(_BaseAgentHarness):
                 shared_memory,
                 config=backend_config,
             )
-            memory = shared_memory
+            # The tool registry owns the effective procedural-memory facade. For
+            # reference backends this is the shared AgentMemory itself; mature
+            # backends wrap it with backend-scoped strategy/credit namespaces
+            # while still delegating episodes, recall and policy learning.
+            memory = tools.memory
         super().__init__(
             catalog,
             max_tools=max_tools,

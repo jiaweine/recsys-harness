@@ -17,6 +17,7 @@ on:
       - 'lingjing_harness/algorithms/segment_credit.py'
       - 'lingjing_harness/algorithms/segment_evolution.py'
       - 'scripts/collaborative_backend_smoke.py'
+      - 'tests/test_backend_scoped_memory_stats.py'
       - 'tests/test_runtime_backend_config.py'
       - 'tests/test_business_replay_budget.py'
       - 'tests/test_collaborative_runtime.py'
@@ -40,6 +41,7 @@ on:
       - 'lingjing_harness/algorithms/segment_credit.py'
       - 'lingjing_harness/algorithms/segment_evolution.py'
       - 'scripts/collaborative_backend_smoke.py'
+      - 'tests/test_backend_scoped_memory_stats.py'
       - 'tests/test_runtime_backend_config.py'
       - 'tests/test_business_replay_budget.py'
       - 'tests/test_collaborative_runtime.py'
@@ -71,6 +73,7 @@ jobs:
           OMP_NUM_THREADS: '1'
         run: >-
           pytest -q
+          tests/test_backend_scoped_memory_stats.py
           tests/test_runtime_backend_config.py
           tests/test_business_replay_budget.py
           tests/test_collaborative_runtime.py
