@@ -1,21 +1,23 @@
 """Influence-aware process credit for long-horizon tool trajectories.
 
-The base harness intentionally learns from a terminal run reward, but assigning the
-same terminal value to every successful tool call creates a classic long-horizon
-credit-assignment problem. This module replaces only the *policy-stat contribution*
-of the completed run with an auditable process-aware value after execution.
+The base harness learns a terminal run reward, but assigning that same value to
+every successful tool call creates a long-horizon credit-assignment problem. This
+module replaces only the completed run's *policy-stat contribution* with an
+auditable semantic transition value after execution.
 
-Credit is derived from the semantic Mission Graph rather than an opaque judge:
+Credit is derived from the persisted Mission Graph rather than an opaque judge:
 
 - requirement priority defines task importance;
-- transitive `dependsOn` structure defines downstream influence;
-- the reflection that actually closes the target requirement establishes local
-  process progress;
-- terminal reward is mixed with process credit using a horizon-adaptive weight,
-  so sparse outcome feedback matters less as trajectories get longer.
+- transitive ``dependsOn`` structure defines downstream influence;
+- every requirement changed by the post-tool reflection is credited, not only the
+  planner's nominal target requirement;
+- satisfied transitions add semantic mass, blocked transitions and newly-created
+  contradictions subtract process value;
+- terminal reward is mixed with process credit using a horizon-adaptive weight, so
+  sparse outcome feedback matters less as trajectories grow longer.
 
-The original run reward, episode record, verifier, trust gates and activation
-authority are unchanged. The correction is idempotent by run_id.
+The original run reward, episode record, verifier, trust gates, activation
+authority, and trial counts are unchanged. The correction is idempotent by run_id.
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ from __future__ import annotations
 from collections import defaultdict
 import json
 from math import log2, sqrt
-from typing import Any, Iterable
+from typing import Any
 
 
 _PRIORITY_MASS = {
@@ -32,6 +34,9 @@ _PRIORITY_MASS = {
     "medium": 2.0,
     "low": 1.0,
 }
+_BLOCKED_MASS_PENALTY = 0.70
+_CONTRADICTION_PENALTY = 0.18
+_MAX_CONTRADICTION_PENALTY = 0.54
 
 
 def _fragment(value: str) -> str:
@@ -42,7 +47,7 @@ def _fragment(value: str) -> str:
 
 
 def _semantic_dependency_graph(mission: dict[str, Any]) -> dict[str, set[str]]:
-    """Return prerequisite -> direct dependents from the persisted JSON-LD graph."""
+    """Return prerequisite -> direct dependents from persisted JSON-LD."""
 
     semantic = mission.get("semantic_governance") or {}
     jsonld = semantic.get("jsonld") if isinstance(semantic, dict) else None
@@ -131,8 +136,17 @@ def _terminal_reward(result: dict[str, Any]) -> float:
     return 0.5
 
 
+def _final_status(requirements: Any, key: str) -> str:
+    if not isinstance(requirements, dict):
+        return ""
+    row = requirements.get(key)
+    if not isinstance(row, dict):
+        return ""
+    return str(row.get("status") or "")
+
+
 def trajectory_policy_credits(result: dict[str, Any]) -> dict[str, Any]:
-    """Derive per-tool credit from semantic influence and actual requirement closure."""
+    """Derive per-tool credit from all semantic transitions caused by each action."""
 
     mode = str((result.get("plan") or {}).get("mode") or "audit")
     mission = ((result.get("deliberation") or {}).get("mission") or {})
@@ -148,14 +162,18 @@ def trajectory_policy_credits(result: dict[str, Any]) -> dict[str, Any]:
         for row in (result.get("actions") or [])
         if isinstance(row, dict) and row.get("status") == "completed"
     ]
+    method = "semantic_influence_transition_credit_v2"
     if not actions:
         return {
-            "method": "semantic_influence_transition_credit_v1",
+            "method": method,
             "mode": mode,
             "terminal_reward": _terminal_reward(result),
             "horizon": 0,
             "tool_credits": {},
             "action_credits": [],
+            "semantic_requirement_mass": {
+                key: round(value, 6) for key, value in sorted(masses.items())
+            },
         }
 
     local_rows: list[dict[str, Any]] = []
@@ -164,44 +182,84 @@ def trajectory_policy_credits(result: dict[str, Any]) -> dict[str, Any]:
         cycle = int(decision.get("cycle", -1) or -1)
         target = str(decision.get("requirement") or "")
         reflection = reflections.get(cycle) or {}
-        changed = {str(key) for key in reflection.get("requirements_changed") or []}
-        final_requirement = requirements.get(target) if isinstance(requirements, dict) else None
-        closed = bool(
-            target
-            and target in changed
-            and isinstance(final_requirement, dict)
-            and final_requirement.get("status") == "satisfied"
+        changed = list(
+            dict.fromkeys(
+                str(key)
+                for key in reflection.get("requirements_changed") or []
+                if str(key)
+            )
         )
-        local_mass = float(masses.get(target, 0.0)) if closed else 0.0
+        satisfied = [key for key in changed if _final_status(requirements, key) == "satisfied"]
+        blocked = [key for key in changed if _final_status(requirements, key) == "blocked"]
+        contradictions = list(
+            dict.fromkeys(
+                str(value)
+                for value in reflection.get("new_contradictions") or []
+                if str(value)
+            )
+        )
+        positive_mass = sum(float(masses.get(key, 0.0)) for key in satisfied)
+        blocked_mass = sum(float(masses.get(key, 0.0)) for key in blocked)
         local_rows.append(
             {
                 "cycle": cycle,
                 "tool": str(action.get("tool") or ""),
-                "requirement": target,
-                "closed": closed,
-                "semantic_mass": local_mass,
+                "target_requirement": target,
+                "touched_requirements": changed,
+                "satisfied_requirements": satisfied,
+                "blocked_requirements": blocked,
+                "new_contradictions": contradictions,
+                "positive_semantic_mass": positive_mass,
+                "blocked_semantic_mass": blocked_mass,
             }
         )
 
-    max_mass = max((row["semantic_mass"] for row in local_rows), default=0.0)
+    max_positive_mass = max(
+        (float(row["positive_semantic_mass"]) for row in local_rows),
+        default=0.0,
+    )
+    max_requirement_mass = max((float(value) for value in masses.values()), default=0.0)
     terminal = _terminal_reward(result)
     horizon = len(local_rows)
     # Terminal rewards become less informative as the horizon grows. 1/sqrt(T)
-    # is a simple variance-aware decay that leaves a one-step task unchanged.
+    # leaves a one-step task unchanged while increasing process resolution on long
+    # trajectories without deleting sparse terminal supervision entirely.
     terminal_weight = min(1.0, 1.0 / sqrt(max(1, horizon)))
     process_weight = 1.0 - terminal_weight
 
     by_tool: dict[str, list[float]] = defaultdict(list)
     for row in local_rows:
-        process = (
-            float(row["semantic_mass"]) / max_mass
-            if max_mass > 0.0
+        positive_score = (
+            min(1.0, float(row["positive_semantic_mass"]) / max_positive_mass)
+            if max_positive_mass > 0.0
             else 0.0
+        )
+        blocked_score = (
+            min(1.0, float(row["blocked_semantic_mass"]) / max_requirement_mass)
+            if max_requirement_mass > 0.0
+            else 0.0
+        )
+        contradiction_penalty = min(
+            _MAX_CONTRADICTION_PENALTY,
+            _CONTRADICTION_PENALTY * len(row["new_contradictions"]),
+        )
+        process = max(
+            0.0,
+            min(
+                1.0,
+                positive_score
+                - _BLOCKED_MASS_PENALTY * blocked_score
+                - contradiction_penalty,
+            ),
         )
         credit = max(
             0.0,
             min(1.0, terminal_weight * terminal + process_weight * process),
         )
+        row["positive_score"] = round(positive_score, 6)
+        row["blocked_score"] = round(blocked_score, 6)
+        row["blocked_penalty"] = round(_BLOCKED_MASS_PENALTY * blocked_score, 6)
+        row["contradiction_penalty"] = round(contradiction_penalty, 6)
         row["process_score"] = round(process, 6)
         row["credit"] = round(credit, 6)
         if row["tool"]:
@@ -213,7 +271,7 @@ def trajectory_policy_credits(result: dict[str, Any]) -> dict[str, Any]:
         if values
     }
     return {
-        "method": "semantic_influence_transition_credit_v1",
+        "method": method,
         "mode": mode,
         "terminal_reward": round(terminal, 6),
         "horizon": horizon,
@@ -224,11 +282,16 @@ def trajectory_policy_credits(result: dict[str, Any]) -> dict[str, Any]:
         "semantic_requirement_mass": {
             key: round(value, 6) for key, value in sorted(masses.items())
         },
+        "process_semantics": {
+            "positive": "all reflection-changed requirements ending satisfied",
+            "negative": "all reflection-changed requirements ending blocked plus new contradictions",
+            "terminal_mixing": "1/sqrt(completed_policy_actions)",
+        },
     }
 
 
 def _memory_primitives(memory: Any) -> tuple[Any, Any, Any]:
-    """Resolve the shared SQLite primitives through backend-scoped facades."""
+    """Resolve shared SQLite primitives through backend-scoped facades."""
 
     lock = getattr(memory, "_lock")
     connect = getattr(memory, "_connect")
@@ -240,9 +303,9 @@ def apply_semantic_trajectory_credit(memory: Any, result: dict[str, Any]) -> dic
     """Idempotently replace equal terminal credit with process-aware credit.
 
     ``AgentHarness`` has already incremented one policy trial per successful unique
-    tool using the terminal reward. We preserve that trial count and only replace
-    the reward contribution for this run. A small audit table guarantees retries
-    cannot apply the correction twice.
+    tool using terminal reward. We preserve that trial count and only replace this
+    run's reward contribution. An audit table guarantees retries cannot apply the
+    correction twice.
     """
 
     report = trajectory_policy_credits(result)
