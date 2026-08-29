@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import isfinite
-from operator import index
 from typing import Any, Callable, Mapping, Protocol, Sequence
+
+from .serving import normalize_serving_limit
 
 
 class SearchServingAdapter(Protocol):
@@ -18,20 +19,10 @@ class RecommendServingAdapter(Protocol):
     def recommend(self, user_id: str, *, limit: int = 10) -> Sequence[Mapping[str, Any]]: ...
 
 
-def _normalized_limit(limit: int) -> int:
-    """Normalize the public ranking limit without coercing non-integer values."""
-
-    try:
-        value = index(limit)
-    except TypeError as exc:
-        raise ValueError("limit must be an integer") from exc
-    return max(0, value)
-
-
 def normalize_ranked_rows(rows: Sequence[Mapping[str, Any]], *, limit: int) -> list[dict[str, Any]]:
     """Fail closed on malformed external ranking rows and deduplicate IDs."""
 
-    normalized_limit = _normalized_limit(limit)
+    normalized_limit = normalize_serving_limit(limit)
     if normalized_limit == 0:
         return []
 
@@ -71,7 +62,7 @@ class AdapterSearchEngine:
     adapter: SearchServingAdapter
 
     def search(self, query: str, *, limit: int = 10) -> list[dict[str, Any]]:
-        normalized_limit = _normalized_limit(limit)
+        normalized_limit = normalize_serving_limit(limit)
         if normalized_limit == 0:
             return []
         return normalize_ranked_rows(
@@ -87,7 +78,7 @@ class AdapterRecommendationEngine:
     adapter: RecommendServingAdapter
 
     def recommend(self, user_id: str, *, limit: int = 10) -> list[dict[str, Any]]:
-        normalized_limit = _normalized_limit(limit)
+        normalized_limit = normalize_serving_limit(limit)
         if normalized_limit == 0:
             return []
         return normalize_ranked_rows(

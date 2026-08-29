@@ -18,6 +18,7 @@ class _Matrix:
 class _FakeFlagModel:
     init_args = None
     corpus = None
+    queries = None
 
     def __init__(self, model_name, **kwargs):
         type(self).init_args = (model_name, kwargs)
@@ -27,6 +28,7 @@ class _FakeFlagModel:
         return _Matrix([[1.0, 0.0], [0.0, 1.0]])
 
     def encode_queries(self, queries):
+        type(self).queries = list(queries)
         assert queries == ["夜跑装备"]
         return [[1.0, 0.0]]
 
@@ -61,15 +63,30 @@ def test_flag_embedding_adapter_delegates_encoding_and_filters_ineligible(monkey
         "夜跑反光腰包 轻量反光跑步装备 跑步 夜跑",
         "运动蓝牙耳机 防汗无线耳机 耳机 运动",
     ]
+    assert _FakeFlagModel.queries == ["夜跑装备"]
 
 
 def test_flag_embedding_adapter_handles_empty_query_and_limit(monkeypatch):
     monkeypatch.setattr(flag_embedding, "_load_flag_model", lambda: _FakeFlagModel)
     adapter = FlagEmbeddingSearchAdapter(_catalog())
 
+    _FakeFlagModel.queries = None
     assert adapter.search("", limit=10) == []
     assert adapter.search("夜跑装备", limit=0) == []
+    assert adapter.search("夜跑装备", limit=-3) == []
+    assert _FakeFlagModel.queries is None
     assert adapter.capability_manifest()["corpus_items"] == 2
+
+
+@pytest.mark.parametrize("raw", [1.5, "2", True])
+def test_flag_embedding_adapter_rejects_invalid_limit_before_query_encoding(monkeypatch, raw):
+    monkeypatch.setattr(flag_embedding, "_load_flag_model", lambda: _FakeFlagModel)
+    adapter = FlagEmbeddingSearchAdapter(_catalog())
+
+    _FakeFlagModel.queries = None
+    with pytest.raises(ValueError, match="limit must be an integer"):
+        adapter.search("夜跑装备", limit=raw)  # type: ignore[arg-type]
+    assert _FakeFlagModel.queries is None
 
 
 def test_flag_embedding_dependency_error_is_lazy(monkeypatch):

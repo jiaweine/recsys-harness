@@ -5,6 +5,7 @@ from math import isfinite
 from typing import Any
 
 from lingjing_harness.domain import Catalog
+from lingjing_harness.serving import normalize_serving_limit
 
 
 DEFAULT_MODEL = "BAAI/bge-small-zh-v1.5"
@@ -72,8 +73,8 @@ class FlagEmbeddingSearchAdapter:
         }
 
     def search(self, query: str, *, limit: int = 10) -> list[dict[str, Any]]:
+        limit = normalize_serving_limit(limit)
         query = str(query or "").strip()
-        limit = max(0, int(limit))
         if not query or limit == 0 or not self._items or self._corpus_embeddings is None:
             return []
 

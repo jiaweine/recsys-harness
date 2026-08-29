@@ -4,6 +4,7 @@ from typing import Any
 
 from lingjing_harness.algorithms import RecommendationEngine
 from lingjing_harness.domain import Catalog
+from lingjing_harness.serving import normalize_serving_limit
 
 
 SUPPORTED_IMPLICIT_MODELS = ("bpr", "als", "bm25")
@@ -156,7 +157,9 @@ class ImplicitRecommendationAdapter:
         ]
 
     def recommend(self, user_id: str, *, limit: int = 10) -> list[dict[str, Any]]:
-        limit = max(1, int(limit))
+        limit = normalize_serving_limit(limit)
+        if limit == 0:
+            return []
         user_index = self.user_index.get(user_id)
         if user_index is None:
             return self._fallback(user_id, limit=limit, reason="unknown_user")

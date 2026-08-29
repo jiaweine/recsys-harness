@@ -108,6 +108,43 @@ def test_explicit_bpr_override_remains_available():
     assert adapter.recommend("u-chen", limit=4)[0]["backend"] == "implicit_bpr"
 
 
+def test_zero_limit_skips_collaborative_model_and_reference_fallback(monkeypatch):
+    adapter = ImplicitRecommendationAdapter(
+        build_sample_catalog(),
+        model="bpr",
+        min_history=3,
+        model_kwargs={"iterations": 1, "num_threads": 1, "random_state": 42},
+    )
+
+    def should_not_call(*args, **kwargs):
+        pytest.fail("zero-limit recommend must not invoke a serving backend")
+
+    monkeypatch.setattr(adapter.model, "recommend", should_not_call)
+    monkeypatch.setattr(adapter.fallback, "recommend", should_not_call)
+
+    assert adapter.recommend("u-chen", limit=0) == []
+    assert adapter.recommend("new-user", limit=-2) == []
+
+
+@pytest.mark.parametrize("raw", [1.5, "2", True])
+def test_invalid_limit_fails_before_collaborative_model_or_reference_fallback(monkeypatch, raw):
+    adapter = ImplicitRecommendationAdapter(
+        build_sample_catalog(),
+        model="bpr",
+        min_history=3,
+        model_kwargs={"iterations": 1, "num_threads": 1, "random_state": 42},
+    )
+
+    def should_not_call(*args, **kwargs):
+        pytest.fail("invalid-limit recommend must fail before a serving backend is invoked")
+
+    monkeypatch.setattr(adapter.model, "recommend", should_not_call)
+    monkeypatch.setattr(adapter.fallback, "recommend", should_not_call)
+
+    with pytest.raises(ValueError, match="limit must be an integer"):
+        adapter.recommend("u-chen", limit=raw)  # type: ignore[arg-type]
+
+
 def test_adapter_rejects_unknown_model():
     catalog = build_sample_catalog()
     with pytest.raises(ValueError, match="unknown implicit recommendation model"):
