@@ -6,6 +6,7 @@ pytest.importorskip("implicit")
 
 from lingjing_harness.domain import Interaction
 from lingjing_harness.integrations import ImplicitRecommendationAdapter
+from lingjing_harness.integrations.implicit_recommendation import DEFAULT_MIN_HISTORY
 from lingjing_harness.sample_data import build_sample_catalog
 
 
@@ -58,6 +59,21 @@ def test_implicit_models_rank_warm_users_and_filter_seen_items(model, model_kwar
     assert all(row["id"] != "p02" for row in results)
     assert results[0]["backend"] == f"implicit_{model}"
     assert adapter.capability_manifest()["training_interactions"] == len(catalog.interactions)
+
+
+def test_default_history_boundary_routes_from_three_positive_interactions():
+    catalog = build_sample_catalog()
+    adapter = ImplicitRecommendationAdapter(
+        catalog,
+        model="bpr",
+        model_kwargs={"iterations": 3, "num_threads": 1, "random_state": 42},
+    )
+
+    assert DEFAULT_MIN_HISTORY == 3
+    assert adapter.min_history == 3
+    assert adapter.capability_manifest()["min_history"] == 3
+    assert adapter.history_count("u-chen") == 4
+    assert adapter.recommend("u-chen", limit=4)[0]["backend"] == "implicit_bpr"
 
 
 def test_sparse_and_unknown_users_use_reference_fallback():
