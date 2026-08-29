@@ -19,7 +19,7 @@ jobs:
       - run: pip install -e . --no-deps
       - name: Install official FlagEmbedding release
         run: pip install 'FlagEmbedding==1.4.2'
-      - name: Exercise BGE semantic backend
+      - name: Exercise BGE semantic backend through public AgentHarness
         env:
           TOKENIZERS_PARALLELISM: 'false'
         run: python scripts/semantic_backend_smoke.py

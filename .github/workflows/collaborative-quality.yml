@@ -6,12 +6,16 @@ on:
       - '.github/workflows/collaborative-quality.yml'
       - 'pyproject.toml'
       - 'lingjing_harness/integrations/**'
+      - 'lingjing_harness/runtime/backend_config.py'
+      - 'lingjing_harness/runtime/backend_memory.py'
       - 'lingjing_harness/runtime/collaborative_tools.py'
       - 'lingjing_harness/runtime/__init__.py'
       - 'lingjing_harness/algorithms/business_replay_budget.py'
       - 'lingjing_harness/algorithms/evolution.py'
       - 'lingjing_harness/algorithms/production_evolution.py'
       - 'lingjing_harness/algorithms/recommend_validation.py'
+      - 'scripts/collaborative_backend_smoke.py'
+      - 'tests/test_runtime_backend_config.py'
       - 'tests/test_business_replay_budget.py'
       - 'tests/test_collaborative_runtime.py'
       - 'tests/test_implicit_hybrid_runtime.py'
@@ -22,12 +26,16 @@ on:
       - '.github/workflows/collaborative-quality.yml'
       - 'pyproject.toml'
       - 'lingjing_harness/integrations/**'
+      - 'lingjing_harness/runtime/backend_config.py'
+      - 'lingjing_harness/runtime/backend_memory.py'
       - 'lingjing_harness/runtime/collaborative_tools.py'
       - 'lingjing_harness/runtime/__init__.py'
       - 'lingjing_harness/algorithms/business_replay_budget.py'
       - 'lingjing_harness/algorithms/evolution.py'
       - 'lingjing_harness/algorithms/production_evolution.py'
       - 'lingjing_harness/algorithms/recommend_validation.py'
+      - 'scripts/collaborative_backend_smoke.py'
+      - 'tests/test_runtime_backend_config.py'
       - 'tests/test_business_replay_budget.py'
       - 'tests/test_collaborative_runtime.py'
       - 'tests/test_implicit_hybrid_runtime.py'
@@ -57,8 +65,14 @@ jobs:
           OMP_NUM_THREADS: '1'
         run: >-
           pytest -q
+          tests/test_runtime_backend_config.py
           tests/test_business_replay_budget.py
           tests/test_collaborative_runtime.py
           tests/test_implicit_hybrid_runtime.py
           tests/test_implicit_recommendation.py
           tests/test_optional_integrations.py
+      - name: Exercise public AgentHarness with official implicit ALS
+        env:
+          OPENBLAS_NUM_THREADS: '1'
+          OMP_NUM_THREADS: '1'
+        run: python scripts/collaborative_backend_smoke.py
