@@ -8,10 +8,16 @@ from typing import Any, ClassVar, Mapping
 from lingjing_harness.algorithms.optimizer_backends import SUPPORTED_OPTIMIZER_BACKENDS
 from lingjing_harness.domain import Catalog
 
+from .backend_memory import (
+    BackendScopedMemory,
+    backend_strategy_scope,
+    runtime_invocation_scope,
+)
 from .collaborative_tools import (
     SUPPORTED_RECOMMEND_BACKENDS,
     RecommendationBackendToolRegistry,
 )
+from .memory import AgentMemory
 from .semantic_tools import SUPPORTED_SEARCH_BACKENDS
 from .tools import ToolRegistry
 
@@ -38,11 +44,26 @@ def _backend_name(
     return normalized
 
 
+def _validate_json_mapping(value: Mapping[Any, Any], *, field_name: str) -> dict[str, Any]:
+    normalized = {str(key): item for key, item in value.items()}
+    try:
+        json.dumps(
+            normalized,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must contain JSON-compatible values") from exc
+    return normalized
+
+
 def _backend_kwargs(value: Any, *, field_name: str) -> dict[str, Any]:
     if value in (None, ""):
         return {}
     if isinstance(value, Mapping):
-        return {str(key): item for key, item in value.items()}
+        return _validate_json_mapping(value, field_name=field_name)
     if not isinstance(value, str):
         raise ValueError(f"{field_name} must be a JSON object")
     try:
@@ -51,7 +72,7 @@ def _backend_kwargs(value: Any, *, field_name: str) -> dict[str, Any]:
         raise ValueError(f"{field_name} must be valid JSON") from exc
     if not isinstance(decoded, dict):
         raise ValueError(f"{field_name} must be a JSON object")
-    return {str(key): item for key, item in decoded.items()}
+    return _validate_json_mapping(decoded, field_name=field_name)
 
 
 @dataclass(slots=True)
@@ -134,6 +155,21 @@ class RuntimeBackendConfig:
             and not self.recommend_backend_kwargs
         )
 
+    @property
+    def strategy_scopes(self) -> dict[str, str]:
+        return {
+            "search": backend_strategy_scope(
+                "search",
+                self.search_backend,
+                self.search_backend_kwargs,
+            ),
+            "recommend": backend_strategy_scope(
+                "recommend",
+                self.recommend_backend,
+                self.recommend_backend_kwargs,
+            ),
+        }
+
     def manifest(self) -> dict[str, Any]:
         return {
             "search_backend": self.search_backend,
@@ -141,6 +177,7 @@ class RuntimeBackendConfig:
             "optimizer_backend": self.optimizer_backend,
             "search_backend_kwargs": dict(self.search_backend_kwargs),
             "recommend_backend_kwargs": dict(self.recommend_backend_kwargs),
+            "strategy_scopes": dict(self.strategy_scopes),
         }
 
 
@@ -157,9 +194,27 @@ def build_runtime_tools(
     resolved = config or RuntimeBackendConfig.from_env(env)
     if resolved.is_dependency_light_default:
         return ToolRegistry(catalog, memory, network)
-    return RecommendationBackendToolRegistry(
+
+    base_memory = memory
+    if isinstance(base_memory, BackendScopedMemory):
+        base_memory = base_memory.base_memory
+    if base_memory is None:
+        base_memory = AgentMemory()
+
+    scopes = resolved.strategy_scopes
+    invocation_scope = runtime_invocation_scope(scopes["search"], scopes["recommend"])
+    tool_memory: Any = base_memory
+    if scopes["search"] or scopes["recommend"]:
+        tool_memory = BackendScopedMemory(
+            base_memory,
+            search_scope=scopes["search"],
+            recommend_scope=scopes["recommend"],
+            invocation_scope=invocation_scope,
+        )
+
+    registry = RecommendationBackendToolRegistry(
         catalog,
-        memory,
+        tool_memory,
         network,
         optimizer_backend=resolved.optimizer_backend,
         search_backend=resolved.search_backend,
@@ -167,6 +222,8 @@ def build_runtime_tools(
         recommend_backend=resolved.recommend_backend,
         recommend_backend_kwargs=resolved.recommend_backend_kwargs,
     )
+    registry.runtime_backend_config = resolved.manifest()
+    return registry
 
 
 __all__ = [

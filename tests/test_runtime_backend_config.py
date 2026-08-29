@@ -1,17 +1,23 @@
 from __future__ import annotations
 
+from dataclasses import asdict, replace
+import time
+
 import pytest
 
+from lingjing_harness.algorithms import RecommendConfig, SearchConfig
 from lingjing_harness.integrations import (
     FlagEmbeddingHybridSearchEngine,
     ImplicitHybridRecommendationEngine,
 )
 from lingjing_harness.runtime import (
     AgentHarness,
+    AgentMemory,
     RecommendationBackendToolRegistry,
     RuntimeBackendConfig,
     ToolRegistry,
     build_runtime_tools,
+    catalog_fingerprint,
 )
 from lingjing_harness.runtime.backend_config import (
     OPTIMIZER_BACKEND_ENV,
@@ -89,6 +95,18 @@ def _fake_optional_backends(monkeypatch):
     )
 
 
+def _active(memory, catalog_key, domain, config):
+    return memory.remember_strategy(
+        catalog_key,
+        domain,
+        asdict(config),
+        score=0.8,
+        evidence=8,
+        status="active",
+        payload={"validated_at": time.time()},
+    )
+
+
 def test_dependency_light_defaults_keep_original_registry_and_lazy_optional_imports(monkeypatch):
     import lingjing_harness.integrations.flag_embedding as flag_embedding
     import lingjing_harness.integrations.implicit_recommendation as implicit_recommendation
@@ -108,6 +126,7 @@ def test_dependency_light_defaults_keep_original_registry_and_lazy_optional_impo
     tools = build_runtime_tools(build_sample_catalog(), config=config)
 
     assert config.is_dependency_light_default is True
+    assert config.strategy_scopes == {"search": "", "recommend": ""}
     assert type(tools) is ToolRegistry
     assert tools.inspect_data().get("search_backend") is None
     assert tools.inspect_data().get("recommend_backend") is None
@@ -132,6 +151,8 @@ def test_environment_contract_parses_backend_names_and_json_kwargs():
         "min_history": 4,
         "collaborative_limit": 32,
     }
+    assert config.strategy_scopes["search"].startswith("search-")
+    assert config.strategy_scopes["recommend"].startswith("recommend-")
     assert config.is_dependency_light_default is False
 
 
@@ -148,6 +169,14 @@ def test_environment_contract_parses_backend_names_and_json_kwargs():
 def test_invalid_environment_backend_contract_fails_closed(env, message):
     with pytest.raises(ValueError, match=message):
         RuntimeBackendConfig.from_env(env)
+
+
+def test_non_json_backend_options_are_rejected_before_identity_is_created():
+    with pytest.raises(ValueError, match="JSON-compatible"):
+        RuntimeBackendConfig(
+            search_backend="flag_embedding",
+            search_backend_kwargs={"model_kwargs": {"device": object()}},
+        )
 
 
 def test_public_harness_composes_explicit_search_and_recommend_backends(monkeypatch):
@@ -167,6 +196,7 @@ def test_public_harness_composes_explicit_search_and_recommend_backends(monkeypa
     assert inspected["search_backend"]["backend"] == "flag_embedding"
     assert inspected["recommend_backend"]["backend"] == "implicit"
     assert inspected["optimizer_backend"] == "native"
+    assert harness.tools.runtime_backend_config["strategy_scopes"] == config.strategy_scopes
 
     forked = harness.fork()
     assert forked.tools.search.adapter is harness.tools.search.adapter
@@ -183,6 +213,102 @@ def test_public_harness_reads_environment_when_registry_is_not_injected(monkeypa
     assert isinstance(harness.tools, RecommendationBackendToolRegistry)
     assert isinstance(harness.tools.search, FlagEmbeddingHybridSearchEngine)
     assert harness.tools.recommend_backend == "reference"
+
+
+def test_strategy_memory_is_scoped_by_serving_backend_but_not_other_surface(monkeypatch):
+    _fake_optional_backends(monkeypatch)
+    catalog = build_sample_catalog()
+    memory = AgentMemory()
+    key = catalog_fingerprint(catalog)
+
+    reference_search = replace(SearchConfig(), diversity=0.12)
+    reference_recommend = replace(RecommendConfig(), diversity=0.14)
+    _active(memory, key, "search", reference_search)
+    _active(memory, key, "recommend", reference_recommend)
+
+    semantic_config = RuntimeBackendConfig(
+        search_backend="flag_embedding",
+        search_backend_kwargs={"dense_limit": 2, "model_name": "fake-bge"},
+    )
+    semantic = build_runtime_tools(catalog, memory, config=semantic_config)
+
+    assert semantic.catalog_key == key
+    assert semantic.search.config == SearchConfig()
+    assert semantic.recommend.config == reference_recommend
+
+    semantic_search = replace(SearchConfig(), diversity=0.21)
+    _active(semantic.memory, key, "search", semantic_search)
+
+    same_search_new_recommend = build_runtime_tools(
+        catalog,
+        memory,
+        config=RuntimeBackendConfig(
+            search_backend="flag_embedding",
+            recommend_backend="implicit_als",
+            search_backend_kwargs={"dense_limit": 2, "model_name": "fake-bge"},
+            recommend_backend_kwargs={"min_history": 1, "collaborative_limit": 4},
+        ),
+    )
+    assert same_search_new_recommend.search.config == semantic_search
+    assert same_search_new_recommend.recommend.config == RecommendConfig()
+
+    reference = build_runtime_tools(catalog, memory, config=RuntimeBackendConfig())
+    assert reference.search.config == reference_search
+    assert reference.recommend.config == reference_recommend
+
+
+def test_backend_kwargs_change_strategy_identity_and_invocation_replay(monkeypatch):
+    _fake_optional_backends(monkeypatch)
+    catalog = build_sample_catalog()
+    memory = AgentMemory()
+    key = catalog_fingerprint(catalog)
+    first = build_runtime_tools(
+        catalog,
+        memory,
+        config=RuntimeBackendConfig(
+            search_backend="flag_embedding",
+            search_backend_kwargs={"dense_limit": 2, "model_name": "first"},
+        ),
+    )
+    second = build_runtime_tools(
+        catalog,
+        memory,
+        config=RuntimeBackendConfig(
+            search_backend="flag_embedding",
+            search_backend_kwargs={"dense_limit": 3, "model_name": "second"},
+        ),
+    )
+    first_config = replace(SearchConfig(), diversity=0.18)
+    second_config = replace(SearchConfig(), diversity=0.24)
+
+    first.memory.remember_strategy(
+        key,
+        "search",
+        asdict(first_config),
+        score=0.7,
+        evidence=5,
+        status="active",
+        payload={"validated_at": time.time()},
+        invocation_id="same-invocation",
+        tool_result={"backend": "first"},
+    )
+    second.memory.remember_strategy(
+        key,
+        "search",
+        asdict(second_config),
+        score=0.8,
+        evidence=5,
+        status="active",
+        payload={"validated_at": time.time()},
+        invocation_id="same-invocation",
+        tool_result={"backend": "second"},
+    )
+
+    assert first.memory.active_config(key, "search") == asdict(first_config)
+    assert second.memory.active_config(key, "search") == asdict(second_config)
+    assert first.memory.invocation_result("same-invocation")["result"]["backend"] == "first"
+    assert second.memory.invocation_result("same-invocation")["result"]["backend"] == "second"
+    assert memory.invocation_result("same-invocation") is None
 
 
 def test_explicit_tool_injection_is_not_overridden_by_environment(monkeypatch):
