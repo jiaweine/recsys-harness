@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from math import isfinite
 from typing import Any
 
 from lingjing_harness.domain import Catalog
-from lingjing_harness.serving import normalize_serving_limit
+from lingjing_harness.serving import normalize_serving_limit, normalize_serving_score
 
 
 DEFAULT_MODEL = "BAAI/bge-small-zh-v1.5"
@@ -81,17 +80,20 @@ class FlagEmbeddingSearchAdapter:
         query_embeddings = self._model.encode_queries([query])
         query_embedding = query_embeddings[0]
         scores = self._corpus_embeddings @ query_embedding
-        order = sorted(
-            range(len(self._items)),
-            key=lambda index: float(scores[index]),
-            reverse=True,
-        )
+
+        ranked: list[tuple[float, int]] = []
+        for index, raw_score in enumerate(scores):
+            if index >= len(self._items):
+                break
+            try:
+                score = normalize_serving_score(raw_score)
+            except ValueError:
+                continue
+            ranked.append((score, index))
+        ranked.sort(key=lambda row: (-row[0], row[1]))
 
         rows: list[dict[str, Any]] = []
-        for index in order:
-            score = float(scores[index])
-            if not isfinite(score):
-                continue
+        for score, index in ranked:
             item = self._items[index]
             rows.append(
                 {

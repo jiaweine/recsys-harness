@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from math import isfinite
+
 import pytest
 
 pytest.importorskip("implicit")
@@ -143,6 +145,59 @@ def test_invalid_limit_fails_before_collaborative_model_or_reference_fallback(mo
 
     with pytest.raises(ValueError, match="limit must be an integer"):
         adapter.recommend("u-chen", limit=raw)  # type: ignore[arg-type]
+
+
+def test_invalid_collaborative_scores_are_dropped_and_reference_fills_slate(monkeypatch):
+    catalog = build_sample_catalog()
+    adapter = ImplicitRecommendationAdapter(
+        catalog,
+        model="bpr",
+        min_history=3,
+        model_kwargs={"iterations": 1, "num_threads": 1, "random_state": 42},
+    )
+    candidate_ids = ["p01", "p02", "p03"]
+    candidate_indices = [adapter.item_index[item_id] for item_id in candidate_ids]
+
+    def bad_scores(*args, **kwargs):
+        return (
+            adapter._np.asarray(candidate_indices),
+            adapter._np.asarray([float("nan"), "not-a-score", 0.75], dtype=object),
+        )
+
+    monkeypatch.setattr(adapter.model, "recommend", bad_scores)
+    results = adapter.recommend("u-chen", limit=3)
+
+    assert len(results) == 3
+    collaborative = [row for row in results if row["backend"] == "implicit_bpr"]
+    reference_fill = [row for row in results if row["backend"] == "reference_fill"]
+    assert [row["id"] for row in collaborative] == ["p03"]
+    assert len(reference_fill) == 2
+    assert all(isfinite(float(row["score"])) for row in results)
+    assert len({row["id"] for row in results}) == 3
+
+
+def test_non_finite_collaborative_scores_never_escape_serving(monkeypatch):
+    catalog = build_sample_catalog()
+    adapter = ImplicitRecommendationAdapter(
+        catalog,
+        model="bpr",
+        min_history=3,
+        model_kwargs={"iterations": 1, "num_threads": 1, "random_state": 42},
+    )
+    candidate_indices = [adapter.item_index[item_id] for item_id in ("p01", "p02", "p03")]
+
+    def non_finite(*args, **kwargs):
+        return (
+            adapter._np.asarray(candidate_indices),
+            adapter._np.asarray([float("inf"), float("-inf"), float("nan")]),
+        )
+
+    monkeypatch.setattr(adapter.model, "recommend", non_finite)
+    results = adapter.recommend("u-chen", limit=3)
+
+    assert len(results) == 3
+    assert all(row["backend"] == "reference_fill" for row in results)
+    assert all(isfinite(float(row["score"])) for row in results)
 
 
 def test_adapter_rejects_unknown_model():

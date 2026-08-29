@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from math import isfinite
+
 import pytest
 
 from lingjing_harness.domain import Catalog, Item
@@ -13,6 +15,14 @@ class _Matrix:
 
     def __matmul__(self, vector):
         return [sum(left * right for left, right in zip(row, vector)) for row in self.rows]
+
+
+class _ScoreVector:
+    def __init__(self, values):
+        self.values = values
+
+    def __matmul__(self, vector):
+        return list(self.values)
 
 
 class _FakeFlagModel:
@@ -87,6 +97,28 @@ def test_flag_embedding_adapter_rejects_invalid_limit_before_query_encoding(monk
     with pytest.raises(ValueError, match="limit must be an integer"):
         adapter.search("夜跑装备", limit=raw)  # type: ignore[arg-type]
     assert _FakeFlagModel.queries is None
+
+
+@pytest.mark.parametrize("bad_score", [float("nan"), float("inf"), float("-inf"), "not-a-score"])
+def test_flag_embedding_adapter_drops_invalid_scores_before_ranking(monkeypatch, bad_score):
+    monkeypatch.setattr(flag_embedding, "_load_flag_model", lambda: _FakeFlagModel)
+    adapter = FlagEmbeddingSearchAdapter(_catalog())
+    adapter._corpus_embeddings = _ScoreVector([bad_score, 0.42])
+
+    results = adapter.search("夜跑装备", limit=2)
+
+    assert [row["id"] for row in results] == ["audio"]
+    assert all(isfinite(float(row["score"])) for row in results)
+
+
+def test_flag_embedding_adapter_ignores_extra_scores_beyond_eligible_corpus(monkeypatch):
+    monkeypatch.setattr(flag_embedding, "_load_flag_model", lambda: _FakeFlagModel)
+    adapter = FlagEmbeddingSearchAdapter(_catalog())
+    adapter._corpus_embeddings = _ScoreVector([0.5, 0.4, 100.0])
+
+    results = adapter.search("夜跑装备", limit=3)
+
+    assert [row["id"] for row in results] == ["run", "audio"]
 
 
 def test_flag_embedding_dependency_error_is_lazy(monkeypatch):

@@ -4,7 +4,7 @@ from typing import Any
 
 from lingjing_harness.algorithms import RecommendationEngine
 from lingjing_harness.domain import Catalog
-from lingjing_harness.serving import normalize_serving_limit
+from lingjing_harness.serving import normalize_serving_limit, normalize_serving_score
 
 
 SUPPORTED_IMPLICIT_MODELS = ("bpr", "als", "bm25")
@@ -197,7 +197,10 @@ class ImplicitRecommendationAdapter:
             item = self.catalog.item_by_id[item_id]
             if not item.eligible or item_id in selected_ids:
                 continue
-            score = float(raw_score)
+            try:
+                score = normalize_serving_score(raw_score)
+            except ValueError:
+                continue
             selected_ids.add(item_id)
             selected.append(
                 {
