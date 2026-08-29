@@ -117,6 +117,9 @@ class RecommendationBackendToolRegistry(_ToolRegistry):
         return clone
 
     def replace_catalog(self, catalog: Any) -> None:
+        search_adapter = getattr(self.search, "adapter", None)
+        rebind_search = getattr(search_adapter, "for_catalog", None)
+        rebound_search_adapter = rebind_search(catalog) if callable(rebind_search) else None
         self.__init__(
             catalog,
             self.memory,
@@ -124,6 +127,7 @@ class RecommendationBackendToolRegistry(_ToolRegistry):
             optimizer_backend=self.optimizer_backend,
             search_backend=self.search_backend,
             search_backend_kwargs=self.search_backend_kwargs,
+            search_backend_adapter=rebound_search_adapter,
             recommend_backend=self.recommend_backend,
             recommend_backend_kwargs=self.recommend_backend_kwargs,
         )

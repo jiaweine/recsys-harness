@@ -45,13 +45,15 @@ class FlagEmbeddingSearchAdapter:
 
     def __post_init__(self) -> None:
         FlagModel = _load_flag_model()
-        self._items = [item for item in self.catalog.items if item.eligible]
-
         kwargs = dict(self.model_kwargs)
         kwargs.setdefault("query_instruction_for_retrieval", self.query_instruction)
         kwargs.setdefault("use_fp16", self.use_fp16)
         self._model = FlagModel(self.model_name, **kwargs)
+        self._bind_catalog(self.catalog)
 
+    def _bind_catalog(self, catalog: Catalog) -> None:
+        self.catalog = catalog
+        self._items = [item for item in catalog.items if item.eligible]
         corpus = [
             " ".join(
                 part
@@ -65,6 +67,23 @@ class FlagEmbeddingSearchAdapter:
             for item in self._items
         ]
         self._corpus_embeddings = self._model.encode_corpus(corpus) if corpus else None
+
+    def for_catalog(self, catalog: Catalog) -> "FlagEmbeddingSearchAdapter":
+        """Rebind corpus state while reusing immutable loaded model weights."""
+
+        if catalog is self.catalog:
+            return self
+        clone = object.__new__(type(self))
+        clone.catalog = catalog
+        clone.model_name = self.model_name
+        clone.query_instruction = self.query_instruction
+        clone.use_fp16 = self.use_fp16
+        clone.model_kwargs = dict(self.model_kwargs)
+        clone._model = self._model
+        clone._items = []
+        clone._corpus_embeddings = None
+        clone._bind_catalog(catalog)
+        return clone
 
     def capability_manifest(self) -> dict[str, Any]:
         return {
