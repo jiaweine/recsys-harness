@@ -12,6 +12,7 @@ discovered strategy basin. Sparse segments keep the global strategy as fallback.
 from typing import Any
 
 from . import evolution_core as _core
+from .basin_routing import install_basin_router
 from .business_replay_budget import install_business_replay_budget
 from .credit_routing import install_credit_router
 from .optimizer_backends import (
@@ -30,15 +31,17 @@ from .recommend_objective_routing import (
 )
 from .recommend_validation import RecommendRelevanceSliceCache, prepare_recommend_relevance
 from .segment_credit import attach_recommend_portfolio, attach_search_portfolio
+from .statistical_trust import assess_paired_trust
 
 
 # Install once at the stable public boundary. The core/production modules resolve
 # these globals at call time, so every public evolution path receives durable arm
-# credit, bounded discovery replay cost and temporal recommendation relevance
-# without per-run global mutable context.
+# credit, bounded discovery replay cost, stagnation-aware structural basin jumps,
+# and temporal recommendation relevance without per-run global mutable context.
 install_credit_router()
 install_business_replay_budget()
 install_recommend_objective_router()
+install_basin_router()
 
 EvolutionDimension = _core.EvolutionDimension
 _evolution_schema = _core._evolution_schema
@@ -50,29 +53,42 @@ _stable_split = _core._stable_split
 
 
 def _trust_evidence_gate(result: dict[str, Any]) -> dict[str, Any]:
-    """Do not call a one-request future slice statistically trustworthy.
+    """Require independent guardrails and an uncertainty-aware paired certificate.
 
-    Business replay may still route exploration with sparse production logs, but
-    durable trust requires at least two paired future requests and an independent
-    domain guardrail holdout. This keeps a tiny log from silently becoming an
-    activation certificate.
+    Business replay may route exploration with sparse production logs, but durable
+    trust must not be granted merely because a fixed minimum sample count was met.
+    The paired bootstrap interval is converted into an explicit uncertainty
+    certificate, including a non-inferiority check and an approximate sample need
+    when the interval is too wide for the observed effect.
     """
 
     business = result.get("business_validation") or {}
     if not business.get("available"):
         return result
+
     confidence = business.get("confidence") or {}
-    independent_guardrail = bool((result.get("validation") or {}).get("holdout", {}).get("independent"))
-    samples = int(confidence.get("samples", 0) or 0)
-    if result.get("trusted") and (samples < 2 or not independent_guardrail):
-        result = dict(result)
-        result["trusted"] = False
-        result["business_trusted"] = False
-        result["trust_blocked_by"] = [
-            *(["business_holdout_samples<2"] if samples < 2 else []),
-            *([] if independent_guardrail else ["domain_guardrail_holdout_unavailable"]),
-        ]
-    return result
+    statistical_trust = assess_paired_trust(confidence)
+    independent_guardrail = bool(
+        (result.get("validation") or {}).get("holdout", {}).get("independent")
+    )
+
+    gated = dict(result)
+    business_copy = dict(business)
+    business_copy["statistical_trust"] = statistical_trust
+    gated["business_validation"] = business_copy
+
+    blockers = list(gated.get("trust_blocked_by") or [])
+    if not independent_guardrail:
+        blockers.append("domain_guardrail_holdout_unavailable")
+    blockers.extend(str(row) for row in statistical_trust.get("blockers") or [])
+    blockers = list(dict.fromkeys(blockers))
+
+    if gated.get("trusted") and blockers:
+        gated["trusted"] = False
+        gated["business_trusted"] = False
+    if blockers:
+        gated["trust_blocked_by"] = blockers
+    return gated
 
 
 def _recommend_relevance_gate(

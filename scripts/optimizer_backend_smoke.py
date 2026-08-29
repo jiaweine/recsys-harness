@@ -29,6 +29,8 @@ def _summary(result: dict) -> dict:
         "optimizer_version": evolution.get("optimizer_version"),
         "optimizer_budget_contract": evolution.get("optimizer_budget_contract"),
         "optimizer_new_evaluations": evolution.get("optimizer_new_evaluations"),
+        "pareto_search": evolution.get("pareto_search", False),
+        "optimizer_objectives": evolution.get("optimizer_objectives"),
         "method": evolution.get("method"),
     }
 
@@ -54,6 +56,11 @@ def main() -> None:
         RecommendationEngine(catalog),
         optimizer_backend="optuna",
     )
+    motpe_search = evolve_search(
+        catalog,
+        SearchEngine(catalog),
+        optimizer_backend="optuna_motpe",
+    )
 
     for result in (search_first, search_second, recommend):
         evolution = result.get("evolution") or {}
@@ -64,8 +71,22 @@ def main() -> None:
         assert evolution.get("method") == "optuna_tpe_with_evidence_response_surface"
         assert evolution.get("optimizer_budget_contract") == "native_distinct_evaluator_calls"
 
-    # Seeded TPE + serial trial execution should preserve reproducibility for the
-    # same catalog/evaluator contract.
+    motpe_evolution = motpe_search.get("evolution") or {}
+    assert motpe_search.get("evaluation_ready") is True
+    assert int(motpe_search.get("candidate_count", 0)) > 0
+    assert motpe_evolution.get("optimizer_backend") == "optuna_motpe"
+    assert motpe_evolution.get("optimizer_library") == "optuna"
+    assert motpe_evolution.get("method") == "optuna_motpe_with_evidence_response_surface"
+    assert motpe_evolution.get("pareto_search") is True
+    assert motpe_evolution.get("optimizer_objectives") == [
+        "primary_objective",
+        "domain_quality",
+        "negative_worse_share",
+    ]
+    assert motpe_evolution.get("optimizer_budget_contract") == "native_distinct_evaluator_calls"
+
+    # Seeded serial TPE should preserve reproducibility for the same
+    # catalog/evaluator contract.
     assert search_first["candidate_config"] == search_second["candidate_config"]
     assert search_first["objective_delta"] == search_second["objective_delta"]
 
@@ -73,17 +94,20 @@ def main() -> None:
     native_recommend_summary = _summary(native_recommend)
     optuna_search_summary = _summary(search_first)
     optuna_recommend_summary = _summary(recommend)
+    motpe_search_summary = _summary(motpe_search)
 
     # Fairness is defined by expensive, new distinct evaluator calls. Reused
     # response-surface evidence and cheap sampler trials do not spend this budget.
     assert optuna_search_summary["loop_distinct_candidates"] <= native_search_summary["loop_distinct_candidates"]
     assert optuna_recommend_summary["loop_distinct_candidates"] <= native_recommend_summary["loop_distinct_candidates"]
+    assert motpe_search_summary["loop_distinct_candidates"] <= native_search_summary["loop_distinct_candidates"]
     assert optuna_search_summary["optimizer_new_evaluations"] == optuna_search_summary["loop_distinct_candidates"]
     assert optuna_recommend_summary["optimizer_new_evaluations"] == optuna_recommend_summary["loop_distinct_candidates"]
+    assert motpe_search_summary["optimizer_new_evaluations"] == motpe_search_summary["loop_distinct_candidates"]
 
-    registry = OptimizerToolRegistry(catalog, optimizer_backend="optuna")
+    registry = OptimizerToolRegistry(catalog, optimizer_backend="optuna_motpe")
     registry_result = registry.search_evolve(activate=False)
-    assert (registry_result.get("evolution") or {}).get("optimizer_backend") == "optuna"
+    assert (registry_result.get("evolution") or {}).get("optimizer_backend") == "optuna_motpe"
     assert registry_result.get("activated") is False
 
     print(
@@ -93,6 +117,7 @@ def main() -> None:
                 "native_recommend": native_recommend_summary,
                 "optuna_search": optuna_search_summary,
                 "optuna_recommend": optuna_recommend_summary,
+                "motpe_search": motpe_search_summary,
                 "registry_search": _summary(registry_result),
             },
             ensure_ascii=False,

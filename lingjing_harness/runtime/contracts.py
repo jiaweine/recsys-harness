@@ -127,7 +127,12 @@ class Hypothesis:
 
 @dataclass(slots=True)
 class MissionGraph:
-    """Task-specific evidence graph compiled before the first tool call."""
+    """Task-specific evidence graph compiled before the first tool call.
+
+    ``semantic_governance`` is a stable, typed projection used to validate the
+    mission's evidence/capability/authority semantics.  It is persisted with the
+    mission so resumed runs keep the same governance contract.
+    """
 
     objective: str
     mode: str
@@ -135,6 +140,7 @@ class MissionGraph:
     hypotheses: dict[str, Hypothesis] = field(default_factory=dict)
     exit_criteria: tuple[str, ...] = ()
     capability_snapshot: tuple[str, ...] = ()
+    semantic_governance: dict[str, Any] = field(default_factory=dict)
 
     def dict(self) -> dict[str, Any]:
         return {
@@ -144,6 +150,7 @@ class MissionGraph:
             "hypotheses": {key: hyp.dict() for key, hyp in self.hypotheses.items()},
             "exit_criteria": list(self.exit_criteria),
             "capability_snapshot": list(self.capability_snapshot),
+            "semantic_governance": dict(self.semantic_governance),
         }
 
     @classmethod
@@ -158,6 +165,7 @@ class MissionGraph:
             for key, value in (row.get("hypotheses") or {}).items()
             if isinstance(value, dict)
         }
+        semantic = row.get("semantic_governance") or {}
         return cls(
             objective=str(row.get("objective") or ""),
             mode=str(row.get("mode") or "audit"),
@@ -165,6 +173,7 @@ class MissionGraph:
             hypotheses=hypotheses,
             exit_criteria=tuple(str(x) for x in row.get("exit_criteria") or ()),
             capability_snapshot=tuple(str(x) for x in row.get("capability_snapshot") or ()),
+            semantic_governance=dict(semantic) if isinstance(semantic, dict) else {},
         )
 
 

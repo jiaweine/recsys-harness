@@ -7,7 +7,7 @@ from typing import Any, Callable, Iterator
 from . import evolution_core as core
 
 
-SUPPORTED_OPTIMIZER_BACKENDS = ("native", "optuna")
+SUPPORTED_OPTIMIZER_BACKENDS = ("native", "optuna", "optuna_motpe")
 _OPTIMIZER_BACKEND: ContextVar[str] = ContextVar("xushu_optimizer_backend", default="native")
 _ORIGINAL_EVOLUTION_LOOP = core._evolution_loop
 _INSTALLED = False
@@ -19,7 +19,7 @@ def _load_optuna():
         import optuna
     except ImportError as exc:
         raise RuntimeError(
-            "optimizer_backend='optuna' requires the optional optimizer dependencies; "
+            "Optuna optimizer backends require the optional optimizer dependencies; "
             "install with `pip install -e '.[optimizer]'`"
         ) from exc
     return optuna
@@ -40,7 +40,7 @@ def optimizer_backend(name: str | None) -> Iterator[str]:
     """Select one optimizer for this evolution call without global cross-talk."""
 
     backend = _normalize_backend(name)
-    if backend == "optuna":
+    if backend.startswith("optuna"):
         # Fail before spending any response-surface evaluation budget.
         _load_optuna()
     token = _OPTIMIZER_BACKEND.set(backend)
@@ -83,6 +83,109 @@ def _native_distinct_evaluation_budget(
     return first_generation_new + max(0, core.MAX_GENERATIONS - 1) * refill_slots
 
 
+def _suggest_config(
+    trial: Any,
+    *,
+    base_config: dict[str, Any],
+    dimensions: list[core.EvolutionDimension],
+    group_totals: dict[str, float],
+) -> dict[str, Any]:
+    raw = dict(base_config)
+    for dimension in dimensions:
+        if dimension.kind == "continuous":
+            raw[dimension.name] = trial.suggest_float(
+                dimension.name,
+                dimension.low,
+                dimension.high,
+            )
+        else:
+            raw[dimension.name] = trial.suggest_categorical(
+                dimension.name,
+                list(dimension.choices),
+            )
+    return core._project(raw, dimensions, group_totals)
+
+
+def _evaluate_once(
+    config: dict[str, Any],
+    *,
+    evaluated: dict[tuple[tuple[str, Any], ...], dict[str, Any]],
+    evaluate: Callable[[dict[str, Any]], tuple[dict[str, Any], dict[str, float], float]],
+    source: str,
+) -> tuple[dict[str, Any], bool]:
+    key = core._config_key(config)
+    if key in evaluated:
+        return evaluated[key], False
+    report, robust, score = evaluate(config)
+    row = {
+        "config": config,
+        "report": report,
+        "robustness": robust,
+        "objective": round(float(score), 7),
+        "generation": 0,
+        "source": source,
+    }
+    evaluated[key] = row
+    return row, True
+
+
+def _motpe_values(row: dict[str, Any]) -> tuple[float, float, float]:
+    """Return generic Pareto signals without changing final promotion semantics.
+
+    The first objective remains the harness-owned scalar routing objective so the
+    selected candidate and trust lifecycle stay backward compatible. The second
+    preserves domain quality as an independent optimization signal instead of
+    letting business/proxy scalarization erase it. The third rewards robustness
+    by minimizing the fraction of materially worse evaluation identities.
+    """
+
+    report = row.get("report") if isinstance(row.get("report"), dict) else {}
+    robust = row.get("robustness") if isinstance(row.get("robustness"), dict) else {}
+    primary = float(row.get("objective", 0.0) or 0.0)
+    domain_quality = float(
+        report.get(
+            "quality",
+            report.get("business_reward", report.get("recall", report.get("coverage", 0.0))),
+        )
+        or 0.0
+    )
+    negative_worse_share = -float(robust.get("worse_share", 0.0) or 0.0)
+    return primary, domain_quality, negative_worse_share
+
+
+def _warm_start_study(
+    study: Any,
+    *,
+    base_config: dict[str, Any],
+    population: list[dict[str, Any]],
+    dimensions: list[core.EvolutionDimension],
+    group_totals: dict[str, float],
+) -> list[dict[str, Any]]:
+    warm_starts = core._unique_configs([dict(base_config), *population])
+    accepted: list[dict[str, Any]] = []
+    for config in warm_starts:
+        try:
+            projected = core._project(config, dimensions, group_totals)
+            study.enqueue_trial(
+                _trial_params(projected, dimensions),
+                skip_if_exists=True,
+            )
+            accepted.append(projected)
+        except (TypeError, ValueError, KeyError):
+            continue
+    return accepted
+
+
+def _trial_budget(warm_start_count: int, evaluation_budget: int) -> int:
+    # Cached/enqueued trials are cheap evidence reuse and must not consume the
+    # black-box evaluation budget. Allow extra sampler attempts for projected
+    # duplicates, but stop as soon as the native-equivalent distinct budget is hit.
+    return warm_start_count + max(
+        core.POPULATION_SIZE * core.MAX_GENERATIONS,
+        evaluation_budget * 4,
+    )
+
+
 def _optuna_evolution_loop(
     *,
     base_config: dict[str, Any],
@@ -93,12 +196,7 @@ def _optuna_evolution_loop(
     rng: Any,
     cache: dict[tuple[tuple[str, Any], ...], dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Delegate black-box population search to Optuna's official TPE sampler.
-
-    Harness keeps the typed genome, exact projection, response-surface evidence,
-    trusted-memory warm starts, evaluator, holdout, trust gates, and evaluation
-    budget. Optuna owns generic trial suggestion and study optimization.
-    """
+    """Delegate scalar black-box population search to Optuna's official TPE."""
 
     optuna = _load_optuna()
     evaluated = dict(cache or {})
@@ -113,58 +211,35 @@ def _optuna_evolution_loop(
     seed = int(rng.randrange(0, 2**31 - 1))
     sampler = optuna.samplers.TPESampler(seed=seed, multivariate=True)
     study = optuna.create_study(direction="maximize", sampler=sampler)
-
-    warm_starts = core._unique_configs([dict(base_config), *population])
-    for config in warm_starts:
-        try:
-            projected = core._project(config, dimensions, group_totals)
-            study.enqueue_trial(
-                _trial_params(projected, dimensions),
-                skip_if_exists=True,
-            )
-        except (TypeError, ValueError, KeyError):
-            continue
-
-    # Cached/enqueued trials are cheap evidence reuse and must not consume the
-    # black-box evaluation budget. Allow extra sampler attempts for projected
-    # duplicates, but stop as soon as the native-equivalent distinct budget is hit.
-    trial_budget = len(warm_starts) + max(
-        core.POPULATION_SIZE * core.MAX_GENERATIONS,
-        evaluation_budget * 4,
+    warm_starts = _warm_start_study(
+        study,
+        base_config=base_config,
+        population=population,
+        dimensions=dimensions,
+        group_totals=group_totals,
     )
     new_evaluations = 0
 
     def objective(trial: Any) -> float:
         nonlocal new_evaluations
-        raw = dict(base_config)
-        for dimension in dimensions:
-            if dimension.kind == "continuous":
-                raw[dimension.name] = trial.suggest_float(
-                    dimension.name,
-                    dimension.low,
-                    dimension.high,
-                )
-            else:
-                raw[dimension.name] = trial.suggest_categorical(
-                    dimension.name,
-                    list(dimension.choices),
-                )
-        config = core._project(raw, dimensions, group_totals)
+        config = _suggest_config(
+            trial,
+            base_config=base_config,
+            dimensions=dimensions,
+            group_totals=group_totals,
+        )
         key = core._config_key(config)
-        if key not in evaluated:
-            if new_evaluations >= evaluation_budget:
-                raise optuna.TrialPruned("distinct evaluation budget exhausted")
-            report, robust, score = evaluate(config)
-            evaluated[key] = {
-                "config": config,
-                "report": report,
-                "robustness": robust,
-                "objective": round(float(score), 7),
-                "generation": 0,
-                "source": "optuna_tpe",
-            }
+        if key not in evaluated and new_evaluations >= evaluation_budget:
+            raise optuna.TrialPruned("distinct evaluation budget exhausted")
+        row, is_new = _evaluate_once(
+            config,
+            evaluated=evaluated,
+            evaluate=evaluate,
+            source="optuna_tpe",
+        )
+        if is_new:
             new_evaluations += 1
-        return float(evaluated[key]["objective"])
+        return float(row["objective"])
 
     def stop_at_budget(study_: Any, trial: Any) -> None:
         del trial
@@ -173,7 +248,7 @@ def _optuna_evolution_loop(
 
     study.optimize(
         objective,
-        n_trials=trial_budget,
+        n_trials=_trial_budget(len(warm_starts), evaluation_budget),
         n_jobs=1,
         show_progress_bar=False,
         catch=(TypeError, ValueError, KeyError),
@@ -187,12 +262,102 @@ def _optuna_evolution_loop(
     return rows, core._quality_diversity_archive(base_config, rows, dimensions)
 
 
+def _optuna_motpe_evolution_loop(
+    *,
+    base_config: dict[str, Any],
+    population: list[dict[str, Any]],
+    dimensions: list[core.EvolutionDimension],
+    group_totals: dict[str, float],
+    evaluate: Callable[[dict[str, Any]], tuple[dict[str, Any], dict[str, float], float]],
+    rng: Any,
+    cache: dict[tuple[tuple[str, Any], ...], dict[str, Any]] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Use Optuna MOTPE to propose Pareto-aware candidates under the same budget.
+
+    Optuna's multi-objective TPE uses hypervolume contribution when constructing
+    the good set. Xushu deliberately keeps final candidate ordering by the original
+    harness objective, and keeps holdout/trust gates outside the optimizer. MOTPE
+    therefore improves *proposal search* without granting the optimizer promotion
+    authority or changing the expensive-evaluation budget contract.
+    """
+
+    optuna = _load_optuna()
+    evaluated = dict(cache or {})
+    evaluation_budget = _native_distinct_evaluation_budget(population, evaluated)
+    if evaluation_budget <= 0:
+        rows = sorted(
+            evaluated.values(),
+            key=lambda row: (-float(row["objective"]), core._config_key(row["config"])),
+        )
+        return rows, core._quality_diversity_archive(base_config, rows, dimensions)
+
+    seed = int(rng.randrange(0, 2**31 - 1))
+    sampler = optuna.samplers.TPESampler(seed=seed, multivariate=True)
+    study = optuna.create_study(
+        directions=["maximize", "maximize", "maximize"],
+        sampler=sampler,
+    )
+    warm_starts = _warm_start_study(
+        study,
+        base_config=base_config,
+        population=population,
+        dimensions=dimensions,
+        group_totals=group_totals,
+    )
+    new_evaluations = 0
+
+    def objective(trial: Any) -> tuple[float, float, float]:
+        nonlocal new_evaluations
+        config = _suggest_config(
+            trial,
+            base_config=base_config,
+            dimensions=dimensions,
+            group_totals=group_totals,
+        )
+        key = core._config_key(config)
+        if key not in evaluated and new_evaluations >= evaluation_budget:
+            raise optuna.TrialPruned("distinct evaluation budget exhausted")
+        row, is_new = _evaluate_once(
+            config,
+            evaluated=evaluated,
+            evaluate=evaluate,
+            source="optuna_motpe",
+        )
+        if is_new:
+            new_evaluations += 1
+        return _motpe_values(row)
+
+    def stop_at_budget(study_: Any, trial: Any) -> None:
+        del trial
+        if new_evaluations >= evaluation_budget:
+            study_.stop()
+
+    study.optimize(
+        objective,
+        n_trials=_trial_budget(len(warm_starts), evaluation_budget),
+        n_jobs=1,
+        show_progress_bar=False,
+        catch=(TypeError, ValueError, KeyError),
+        callbacks=[stop_at_budget],
+    )
+
+    # Search is Pareto-aware, but the harness-owned scalar remains the incumbent
+    # selection contract so historical comparisons and trust semantics do not drift.
+    rows = sorted(
+        evaluated.values(),
+        key=lambda row: (-float(row["objective"]), core._config_key(row["config"])),
+    )
+    return rows, core._quality_diversity_archive(base_config, rows, dimensions)
+
+
 def _routed_evolution_loop(**kwargs: Any):
     backend = current_optimizer_backend()
     if backend == "native":
         return _ORIGINAL_EVOLUTION_LOOP(**kwargs)
     if backend == "optuna":
         return _optuna_evolution_loop(**kwargs)
+    if backend == "optuna_motpe":
+        return _optuna_motpe_evolution_loop(**kwargs)
     raise AssertionError(f"unsupported optimizer backend after validation: {backend}")
 
 
@@ -220,16 +385,33 @@ def annotate_optimizer_backend(result: dict[str, Any], backend: str) -> dict[str
                 updated = dict(evolution)
                 surface_count = len(updated.get("response_surface") or [])
                 candidate_count = int(node.get("candidate_count", 0) or 0)
+                if backend == "optuna_motpe":
+                    method = "optuna_motpe_with_evidence_response_surface"
+                    router = "optuna.samplers.TPESampler(multi-objective)"
+                    extra = {
+                        "optimizer_objectives": [
+                            "primary_objective",
+                            "domain_quality",
+                            "negative_worse_share",
+                        ],
+                        "pareto_search": True,
+                        "final_selection": "harness_primary_objective",
+                    }
+                else:
+                    method = "optuna_tpe_with_evidence_response_surface"
+                    router = "optuna.samplers.TPESampler"
+                    extra = {"pareto_search": False}
                 updated.update(
                     {
-                        "method": "optuna_tpe_with_evidence_response_surface",
-                        "router": "optuna.samplers.TPESampler",
-                        "optimizer_backend": "optuna",
+                        "method": method,
+                        "router": router,
+                        "optimizer_backend": backend,
                         "optimizer_library": "optuna",
                         "optimizer_version": str(getattr(optuna, "__version__", "unknown")),
                         "optimizer_warm_start": "current+response_surface+trusted_memory",
                         "optimizer_budget_contract": "native_distinct_evaluator_calls",
                         "optimizer_new_evaluations": max(0, candidate_count - surface_count),
+                        **extra,
                     }
                 )
                 node["evolution"] = updated

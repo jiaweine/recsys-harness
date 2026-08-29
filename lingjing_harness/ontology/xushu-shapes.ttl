@@ -1,0 +1,50 @@
+@prefix xushu: <https://xushu.ai/ontology/recsys#> .
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+xushu:EvidenceRequirementShape a sh:NodeShape ;
+    sh:targetClass xushu:EvidenceRequirement ;
+    sh:property [
+        sh:path xushu:satisfiableBy ;
+        sh:minCount 1 ;
+        sh:class xushu:Capability ;
+        sh:message "Every evidence requirement must be satisfiable by at least one typed capability." ;
+    ] .
+
+xushu:CapabilityRiskShape a sh:NodeShape ;
+    sh:targetClass xushu:Capability ;
+    sh:property [
+        sh:path xushu:hasRisk ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class xushu:RiskClass ;
+        sh:message "Every capability must declare exactly one risk class." ;
+    ] .
+
+xushu:NetworkCapabilityShape a sh:NodeShape ;
+    sh:targetSubjectsOf xushu:requiresAuthority ;
+    sh:property [
+        sh:path xushu:requiresAuthority ;
+        sh:minCount 1 ;
+        sh:class xushu:Authority ;
+        sh:message "Authority-gated capabilities must point to an explicit Authority node." ;
+    ] .
+
+xushu:AdaptiveGovernanceShape a sh:NodeShape ;
+    sh:targetSubjectsOf xushu:governedBy ;
+    sh:property [
+        sh:path xushu:governedBy ;
+        sh:minCount 1 ;
+        sh:class xushu:Authority ;
+        sh:message "Adaptive capabilities must remain connected to the strategy-activation governance boundary." ;
+    ] .
+
+xushu:ObjectiveEvidenceShape a sh:NodeShape ;
+    sh:targetClass xushu:Objective ;
+    sh:property [
+        sh:path xushu:requiresEvidence ;
+        sh:minCount 1 ;
+        sh:class xushu:EvidenceRequirement ;
+        sh:message "A mission objective must compile to at least one evidence requirement." ;
+    ] .

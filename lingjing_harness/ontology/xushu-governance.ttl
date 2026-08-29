@@ -1,0 +1,79 @@
+@prefix xushu: <https://xushu.ai/ontology/recsys#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+xushu:RecSysGovernanceOntology a owl:Ontology ;
+    rdfs:label "Xushu Search/Recommendation Governance Ontology" ;
+    rdfs:comment "Control-plane ontology for objectives, evidence, capabilities, authority, risk, hypotheses and strategy evolution." .
+
+xushu:Objective a owl:Class .
+xushu:EvidenceRequirement a owl:Class .
+xushu:EvidenceKind a owl:Class .
+xushu:Capability a owl:Class .
+xushu:Authority a owl:Class .
+xushu:RiskClass a owl:Class .
+xushu:Hypothesis a owl:Class .
+xushu:Strategy a owl:Class .
+xushu:Experiment a owl:Class .
+xushu:ValidationEvidence a owl:Class ; rdfs:subClassOf xushu:EvidenceKind .
+xushu:HoldoutEvidence a owl:Class ; rdfs:subClassOf xushu:ValidationEvidence .
+xushu:CounterfactualEvidence a owl:Class ; rdfs:subClassOf xushu:ValidationEvidence .
+xushu:ActivationDecision a owl:Class .
+
+xushu:requiresEvidence a owl:ObjectProperty ;
+    rdfs:domain xushu:Objective ;
+    rdfs:range xushu:EvidenceRequirement .
+
+xushu:dependsOn a owl:ObjectProperty ;
+    rdfs:domain xushu:EvidenceRequirement ;
+    rdfs:range xushu:EvidenceRequirement .
+
+xushu:satisfiableBy a owl:ObjectProperty ;
+    rdfs:domain xushu:EvidenceRequirement ;
+    rdfs:range xushu:Capability .
+
+xushu:providesEvidence a owl:ObjectProperty ;
+    rdfs:domain xushu:Capability ;
+    rdfs:range xushu:EvidenceKind .
+
+xushu:hasRisk a owl:ObjectProperty ;
+    rdfs:domain xushu:Capability ;
+    rdfs:range xushu:RiskClass .
+
+xushu:requiresAuthority a owl:ObjectProperty ;
+    rdfs:domain xushu:Capability ;
+    rdfs:range xushu:Authority .
+
+xushu:governedBy a owl:ObjectProperty ;
+    rdfs:range xushu:Authority .
+
+xushu:considersHypothesis a owl:ObjectProperty ;
+    rdfs:domain xushu:Objective ;
+    rdfs:range xushu:Hypothesis .
+
+xushu:diagnoses a owl:ObjectProperty ;
+    rdfs:domain xushu:Capability ;
+    rdfs:range xushu:Hypothesis .
+
+xushu:evaluatedBy a owl:ObjectProperty ;
+    rdfs:domain xushu:Strategy ;
+    rdfs:range xushu:ValidationEvidence .
+
+xushu:authorizedBy a owl:ObjectProperty ;
+    rdfs:domain xushu:ActivationDecision ;
+    rdfs:range xushu:Authority .
+
+xushu:testedBy a owl:ObjectProperty ;
+    rdfs:domain xushu:Strategy ;
+    rdfs:range xushu:Experiment .
+
+xushu:supersedes a owl:ObjectProperty, owl:TransitiveProperty ;
+    rdfs:domain xushu:Strategy ;
+    rdfs:range xushu:Strategy .
+
+xushu:contradicts a owl:ObjectProperty ;
+    a owl:SymmetricProperty .
+
+xushu:supports a owl:ObjectProperty .

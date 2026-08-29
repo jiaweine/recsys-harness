@@ -1,0 +1,45 @@
+name: Ontology Quality
+
+on:
+  push:
+    paths:
+      - '.github/workflows/ontology-quality.yml'
+      - 'pyproject.toml'
+      - 'lingjing_harness/runtime/contracts.py'
+      - 'lingjing_harness/runtime/mission_compiler.py'
+      - 'lingjing_harness/runtime/semantic_governance.py'
+      - 'lingjing_harness/runtime/capabilities.py'
+      - 'lingjing_harness/ontology/**'
+      - 'tests/test_semantic_governance.py'
+      - 'tests/test_ontology_integration.py'
+  pull_request:
+    paths:
+      - '.github/workflows/ontology-quality.yml'
+      - 'pyproject.toml'
+      - 'lingjing_harness/runtime/contracts.py'
+      - 'lingjing_harness/runtime/mission_compiler.py'
+      - 'lingjing_harness/runtime/semantic_governance.py'
+      - 'lingjing_harness/runtime/capabilities.py'
+      - 'lingjing_harness/ontology/**'
+      - 'tests/test_semantic_governance.py'
+      - 'tests/test_ontology_integration.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shacl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e '.[ontology]'
+      - name: Compile semantic governance tests
+        run: python -m compileall -q lingjing_harness tests/test_semantic_governance.py tests/test_ontology_integration.py
+      - name: Validate runtime ontology and SHACL shapes
+        run: pytest -q tests/test_semantic_governance.py tests/test_ontology_integration.py
