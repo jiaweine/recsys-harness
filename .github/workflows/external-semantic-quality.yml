@@ -1,16 +1,6 @@
 name: External Semantic Quality
 
 on:
-  push:
-    branches:
-      - integration/runtime-backend-config
-    paths:
-      - '.github/workflows/external-semantic-quality.yml'
-      - 'lingjing_harness/runtime/backend_config.py'
-      - 'lingjing_harness/runtime/backend_memory.py'
-      - 'lingjing_harness/runtime/__init__.py'
-      - 'scripts/semantic_backend_smoke.py'
-      - 'tests/test_runtime_backend_config.py'
   workflow_dispatch:
 
 permissions:
