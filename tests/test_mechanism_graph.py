@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict
 
 import pytest
@@ -162,6 +163,11 @@ def test_mechanism_pair_memory_is_second_order_and_visible_to_evolution() -> Non
     assert pairs
     assert all(row["status"] == "mechanism_pair" for row in pairs)
     assert all(len(row["pair"]["arms"]) == 2 for row in pairs)
+    assert all(
+        row["pair"]["evidence_semantics"]
+        == "independent_holdout_or_segment_future_slice"
+        for row in pairs
+    )
     assert any(int(row["pair"]["negative"]) == 1 for row in pairs)
 
     remembered = memory.evolution_memory("catalog-a", "search", limit=5)
@@ -169,6 +175,28 @@ def test_mechanism_pair_memory_is_second_order_and_visible_to_evolution() -> Non
     # Pair memory must not masquerade as first-order strategy-arm credit.
     pair_rows = [row for row in remembered if row.get("status") == "mechanism_pair"]
     assert all("credit" not in row for row in pair_rows)
+
+
+def test_thin_or_nonindependent_evidence_is_retained_in_graph_but_not_transferred() -> None:
+    memory = AgentMemory()
+    result = deepcopy(_synthetic_result())
+    result["run_id"] = "run-mechanism-thin"
+    action = result["actions"][0]
+    action["invocation_id"] = "run-mechanism-thin:1:search.evolve"
+    evolution = action["result"]
+    evolution["business_validation"]["confidence"]["samples"] = 1
+    evolution["validation"]["holdout"]["independent"] = False
+    # Make segment evidence thin as well. The observational graph still stores it.
+    segment = evolution["segment_portfolio"]["entries"][0]
+    segment["discovery_requests"] = 1
+    segment["holdout_requests"] = 1
+
+    report = record_mechanism_evidence(memory, "catalog-thin", result)
+    assert report["recorded"] >= 3
+    snapshot = mechanism_graph_snapshot(memory, "catalog-thin")
+    assert snapshot["events"] >= 3
+    assert mechanism_pair_priors(memory, "catalog-thin", "search") == []
+    assert mechanism_pair_priors(memory, "catalog-thin", "search.segment.head") == []
 
 
 def test_mechanism_graph_passes_packaged_shacl_when_ontology_extra_is_installed() -> None:
