@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from statistics import mean, pstdev
 
@@ -18,6 +19,7 @@ MIN_POSITIVE_RATING = 4.0
 MIN_USER_POSITIVES = 3
 SPLIT_SEEDS = (17, 42, 91)
 THRESHOLDS = (1, 2, 3, 4, 5, 6, 8, 12, 20, 32, 64)
+SUPPORTED_MODELS = ("bpr", "als", "bm25")
 
 
 def _positive_user_items():
@@ -126,7 +128,7 @@ def _masked_test(test, history_counts: np.ndarray, lower: int, upper: int | None
     return masked
 
 
-def _run_split(titles: list[str], positives, seed: int) -> dict:
+def _run_split(titles: list[str], positives, seed: int, model_name: str) -> dict:
     train, test = leave_k_out_split(positives, K=1, random_state=seed)
     train = train.tocsr()
     test = test.tocsr()
@@ -141,7 +143,7 @@ def _run_split(titles: list[str], positives, seed: int) -> dict:
     reference = RecommendationEngine(catalog)
     collaborative = ImplicitRecommendationAdapter(
         catalog,
-        model="bpr",
+        model=model_name,
         min_history=1,
         fallback=reference,
     )
@@ -181,7 +183,7 @@ def _run_split(titles: list[str], positives, seed: int) -> dict:
             }
         )
 
-    pure_bpr = CachedRoutingModel(
+    pure_collaborative = CachedRoutingModel(
         collaborative_ids,
         collaborative_scores,
         reference_ids,
@@ -212,7 +214,7 @@ def _run_split(titles: list[str], positives, seed: int) -> dict:
             {
                 "history": label,
                 "users": users,
-                "bpr": _metrics(pure_bpr, train, bucket_test),
+                "collaborative": _metrics(pure_collaborative, train, bucket_test),
                 "reference": _metrics(pure_reference, train, bucket_test),
             }
         )
@@ -272,8 +274,8 @@ def _aggregate_buckets(runs: list[dict]) -> list[dict]:
             {
                 "history": label,
                 "users": _aggregate_metric([float(row["users"]) for row in matches]),
-                "bpr": {
-                    metric: _aggregate_metric([row["bpr"][metric] for row in matches])
+                "collaborative": {
+                    metric: _aggregate_metric([row["collaborative"][metric] for row in matches])
                     for metric in ("precision", "map", "ndcg", "auc")
                 },
                 "reference": {
@@ -286,8 +288,14 @@ def _aggregate_buckets(runs: list[dict]) -> list[dict]:
 
 
 def main() -> None:
+    model_name = str(os.environ.get("COLLABORATIVE_MODEL", "bpr")).strip().lower()
+    if model_name not in SUPPORTED_MODELS:
+        raise SystemExit(
+            f"COLLABORATIVE_MODEL must be one of {', '.join(SUPPORTED_MODELS)}; got {model_name!r}"
+        )
+
     titles, positives = _positive_user_items()
-    runs = [_run_split(titles, positives, seed) for seed in SPLIT_SEEDS]
+    runs = [_run_split(titles, positives, seed, model_name) for seed in SPLIT_SEEDS]
     sweep = _aggregate_sweeps(runs)
     buckets = _aggregate_buckets(runs)
     best = max(
@@ -300,6 +308,7 @@ def main() -> None:
         "protocol": "implicit.evaluation.leave_k_out_split(K=1) over fixed split seeds",
         "split_seeds": list(SPLIT_SEEDS),
         "metrics": "implicit.evaluation.ranking_metrics_at_k(K=10)",
+        "collaborative_model": model_name,
         "positive_rating_threshold": MIN_POSITIVE_RATING,
         "users": int(positives.shape[0]),
         "items": int(positives.shape[1]),
