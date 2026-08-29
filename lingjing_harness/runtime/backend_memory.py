@@ -116,6 +116,69 @@ class BackendScopedMemory:
     def invocation_result(self, invocation_id: str) -> dict[str, Any] | None:
         return self.base_memory.invocation_result(self._scoped_invocation_id(invocation_id))
 
+    @staticmethod
+    def _strategy_domains() -> list[str]:
+        """Return every durable global/segment strategy domain owned by the runtime."""
+
+        from lingjing_harness.algorithms.segments import (
+            RECOMMEND_SEGMENTS,
+            SEARCH_SEGMENTS,
+            strategy_domain,
+        )
+
+        return [
+            "search",
+            *(strategy_domain("search", segment) for segment in SEARCH_SEGMENTS),
+            "recommend",
+            *(strategy_domain("recommend", segment) for segment in RECOMMEND_SEGMENTS),
+        ]
+
+    def stats(self, catalog_key: str | None = None) -> dict[str, Any]:
+        """Report shared episodes plus strategy state visible to this runtime.
+
+        Episodes deliberately remain shared at the stable workspace key. Procedural
+        strategy state and arm credit do not: search and recommendation may each use
+        a distinct backend namespace. Aggregate the current runtime's global and
+        segment domains instead of reporting an inactive reference or alternate
+        mature backend.
+        """
+
+        if not catalog_key:
+            return self.base_memory.stats(catalog_key)
+
+        key = str(catalog_key)
+        result = dict(self.base_memory.stats(key))
+        skills = 0
+        active = 0
+        for domain in self._strategy_domains():
+            rows = self.strategies(key, domain, limit=512)
+            skills += len(rows)
+            active += sum(1 for row in rows if row.get("status") == "active")
+
+        credits = [
+            *self.strategy_credits(key, "search", include_segments=True, limit=512),
+            *self.strategy_credits(key, "recommend", include_segments=True, limit=512),
+        ]
+        credit_rows = [
+            row.get("credit") or {}
+            for row in credits
+            if isinstance(row, dict)
+        ]
+        result.update(
+            {
+                "skills": skills,
+                "active_strategies": active,
+                "credit_arms": len(credit_rows),
+                "negative_credit_arms": sum(
+                    1
+                    for row in credit_rows
+                    if int(row.get("negative", 0) or 0) > int(row.get("positive", 0) or 0)
+                ),
+                "credit_events": sum(int(row.get("trials", 0) or 0) for row in credit_rows),
+            }
+        )
+        return result
+
     def __getattr__(self, name: str) -> Any:
         attribute = getattr(self.base_memory, name)
         if name not in _SCOPED_CATALOG_METHODS or not callable(attribute):
