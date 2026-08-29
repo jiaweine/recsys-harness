@@ -1,24 +1,26 @@
 """Robust doubly-robust off-policy evaluation for heavy-tailed importance weights.
 
-The base ``counterfactual`` module intentionally provides a small explicit
-IPS/SNIPS/DR surface.  This module adds a clean-room robust DR family inspired by
-well-established OPE estimators without changing the base contract:
+This module extends the explicit IPS/SNIPS/DR surface with a clean-room robust
+DR family while preserving the repository's causal-evidence rules:
 
 - Direct Method (DM)
 - raw Doubly Robust (Raw-DR)
 - Switch-DR
 - optimistic-shrinkage DR (DRos-style weight shrinkage)
 
-All estimators require the same explicit logged-action policy probabilities as the
-base module.  The robust DR family additionally requires complete reward-model
-inputs for every decision.  No probabilities or reward models are inferred from
-ranking scores.
+The public estimator entry points validate decision identity, surface, policy
+identity, and reward-model completeness exactly once. Bootstrap resamples then
+operate on already validated rows and are *allowed* to contain repeated sampled
+indices, as a correct non-parametric bootstrap requires.
 
-Parameter selection is deliberately described as a *stability routing heuristic*,
-not a proof of optimal statistical tuning.  Candidate Switch thresholds and DRos
-shrinkage parameters are evaluated with deterministic bootstrap variance plus a
-squared-deviation proxy from Raw-DR.  The full candidate table is returned so a
-product team can audit or override the selection.
+Automatic Switch/DRos parameters are selected with an auditable empirical
+bias/variance stability proxy. For confidence intervals, automatically tuned
+estimators re-select their parameter inside every bootstrap resample so tuning
+uncertainty is not silently treated as fixed. Each bootstrap delta is measured
+against that resample's own logged-policy mean.
+
+The tuning score remains a stability-routing heuristic, not a proof that a
+hyperparameter is statistically optimal and never grants activation authority.
 """
 
 from __future__ import annotations
@@ -37,7 +39,7 @@ DEFAULT_SWITCH_TAU_GRID = (0.0, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0)
 DEFAULT_DROS_LAMBDA_GRID = (0.0, 0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0)
 
 
-def _ordered_rows(records: Iterable[CounterfactualRecord]) -> list[CounterfactualRecord]:
+def _validated_rows(records: Iterable[CounterfactualRecord]) -> list[CounterfactualRecord]:
     rows = sorted(list(records), key=lambda row: row.decision_id)
     seen: set[str] = set()
     for row in rows:
@@ -72,23 +74,66 @@ def _logged_mean(rows: list[CounterfactualRecord]) -> float:
     return mean(float(row.reward) for row in rows) if rows else 0.0
 
 
-def direct_method(rows: Iterable[CounterfactualRecord]) -> float:
-    ordered = _ordered_rows(rows)
-    if not _has_complete_reward_model(ordered):
-        raise ValueError("direct method requires complete reward-model inputs")
-    return mean(float(row.target_reward_estimate) for row in ordered)
+def _dm_on_rows(rows: list[CounterfactualRecord]) -> float:
+    return mean(float(row.target_reward_estimate) for row in rows)
 
 
-def raw_doubly_robust(rows: Iterable[CounterfactualRecord]) -> float:
-    ordered = _ordered_rows(rows)
-    if not _has_complete_reward_model(ordered):
-        raise ValueError("raw DR requires complete reward-model inputs")
-    return mean(
+def _raw_dr_contribution(row: CounterfactualRecord) -> float:
+    return (
         float(row.target_reward_estimate)
         + _raw_weight(row)
         * (float(row.reward) - float(row.logged_reward_estimate))
-        for row in ordered
     )
+
+
+def _raw_dr_on_rows(rows: list[CounterfactualRecord]) -> float:
+    return mean(_raw_dr_contribution(row) for row in rows)
+
+
+def _switch_contribution(row: CounterfactualRecord, tau: float) -> float:
+    weight = _raw_weight(row)
+    correction = (
+        weight * (float(row.reward) - float(row.logged_reward_estimate))
+        if weight <= tau
+        else 0.0
+    )
+    return float(row.target_reward_estimate) + correction
+
+
+def _switch_on_rows(rows: list[CounterfactualRecord], tau: float) -> float:
+    return mean(_switch_contribution(row, tau) for row in rows)
+
+
+def _dros_weight(weight: float, lambda_: float) -> float:
+    if lambda_ <= 0.0:
+        return 0.0
+    return (lambda_ / (weight * weight + lambda_)) * weight
+
+
+def _dros_contribution(row: CounterfactualRecord, lambda_: float) -> float:
+    return (
+        float(row.target_reward_estimate)
+        + _dros_weight(_raw_weight(row), lambda_)
+        * (float(row.reward) - float(row.logged_reward_estimate))
+    )
+
+
+def _dros_on_rows(rows: list[CounterfactualRecord], lambda_: float) -> float:
+    return mean(_dros_contribution(row, lambda_) for row in rows)
+
+
+def direct_method(rows: Iterable[CounterfactualRecord]) -> float:
+    ordered = _validated_rows(rows)
+    if not _has_complete_reward_model(ordered):
+        raise ValueError("direct method requires complete reward-model inputs")
+    return _dm_on_rows(ordered)
+
+
+def raw_doubly_robust(rows: Iterable[CounterfactualRecord]) -> float:
+    ordered = _validated_rows(rows)
+    if not _has_complete_reward_model(ordered):
+        raise ValueError("raw DR requires complete reward-model inputs")
+    return _raw_dr_on_rows(ordered)
 
 
 def switch_doubly_robust(
@@ -96,31 +141,15 @@ def switch_doubly_robust(
     *,
     tau: float,
 ) -> float:
-    """Switch-DR: use the DR correction only when the raw weight is <= tau."""
+    """Switch-DR: apply the importance correction only for raw weight <= tau."""
 
-    ordered = _ordered_rows(rows)
+    ordered = _validated_rows(rows)
     if not _has_complete_reward_model(ordered):
         raise ValueError("Switch-DR requires complete reward-model inputs")
     tau = float(tau)
     if not isfinite(tau) or tau < 0.0:
         raise ValueError("Switch-DR tau must be finite and >= 0")
-    return mean(
-        float(row.target_reward_estimate)
-        + (
-            _raw_weight(row)
-            * (float(row.reward) - float(row.logged_reward_estimate))
-            if _raw_weight(row) <= tau
-            else 0.0
-        )
-        for row in ordered
-    )
-
-
-def _dros_weight(weight: float, lambda_: float) -> float:
-    lambda_ = float(lambda_)
-    if lambda_ <= 0.0:
-        return 0.0
-    return (lambda_ / (weight * weight + lambda_)) * weight
+    return _switch_on_rows(ordered, tau)
 
 
 def dros_doubly_robust(
@@ -130,18 +159,13 @@ def dros_doubly_robust(
 ) -> float:
     """DRos-style optimistic shrinkage of the raw importance correction."""
 
-    ordered = _ordered_rows(rows)
+    ordered = _validated_rows(rows)
     if not _has_complete_reward_model(ordered):
         raise ValueError("DRos requires complete reward-model inputs")
     lambda_ = float(lambda_)
     if not isfinite(lambda_) or lambda_ < 0.0:
         raise ValueError("DRos lambda must be finite and >= 0")
-    return mean(
-        float(row.target_reward_estimate)
-        + _dros_weight(_raw_weight(row), lambda_)
-        * (float(row.reward) - float(row.logged_reward_estimate))
-        for row in ordered
-    )
+    return _dros_on_rows(ordered, lambda_)
 
 
 def _percentile(values: list[float], fraction: float) -> float:
@@ -176,6 +200,13 @@ def _coefficient_of_variation(values: list[float]) -> float:
     return sqrt(max(0.0, variance)) / abs(avg)
 
 
+def _sample_variance(values: list[float]) -> float:
+    if len(values) < 2:
+        return 0.0
+    avg = mean(values)
+    return sum((value - avg) ** 2 for value in values) / (len(values) - 1)
+
+
 def _stable_seed(rows: list[CounterfactualRecord], label: str) -> int:
     raw = "|".join(
         f"{row.decision_id}:{row.reward:.10g}:{row.logging_propensity:.10g}:"
@@ -188,13 +219,19 @@ def _stable_seed(rows: list[CounterfactualRecord], label: str) -> int:
     )
 
 
-def _bootstrap_draws(
+def _bootstrap_delta_draws(
     rows: list[CounterfactualRecord],
     estimator: Callable[[list[CounterfactualRecord]], float],
     *,
     label: str,
     iterations: int,
 ) -> list[float]:
+    """Bootstrap estimator-minus-logged deltas using sampled row indices.
+
+    Duplicate decision identities are expected in a non-parametric bootstrap and
+    therefore must not be passed back through the external uniqueness validator.
+    """
+
     if len(rows) < 2:
         return []
     rng = Random(_stable_seed(rows, label))
@@ -202,7 +239,7 @@ def _bootstrap_draws(
     draws: list[float] = []
     for _ in range(max(100, min(5000, int(iterations)))):
         sample = [rows[rng.randrange(count)] for _ in range(count)]
-        draws.append(float(estimator(sample)))
+        draws.append(float(estimator(sample)) - _logged_mean(sample))
     return draws
 
 
@@ -212,11 +249,11 @@ def _confidence(
     *,
     label: str,
     iterations: int,
+    tuning_semantics: str = "fixed",
 ) -> dict[str, Any]:
     value = float(estimator(rows))
-    baseline = _logged_mean(rows)
-    delta = value - baseline
-    draws = _bootstrap_draws(
+    delta = value - _logged_mean(rows)
+    draws = _bootstrap_delta_draws(
         rows,
         estimator,
         label=label,
@@ -229,17 +266,21 @@ def _confidence(
             "delta": round(delta, 6),
             "ci95": None,
             "probability_positive": None,
+            "bootstrap_baseline": "resampled_logged_mean",
+            "tuning_semantics": tuning_semantics,
         }
-    delta_draws = sorted(draw - baseline for draw in draws)
-    low = delta_draws[max(0, int(len(delta_draws) * 0.025) - 1)]
-    high = delta_draws[min(len(delta_draws) - 1, int(len(delta_draws) * 0.975))]
-    probability_positive = sum(1 for draw in delta_draws if draw > 0.0) / len(delta_draws)
+    draws.sort()
+    low = draws[max(0, int(len(draws) * 0.025) - 1)]
+    high = draws[min(len(draws) - 1, int(len(draws) * 0.975))]
+    probability_positive = sum(1 for draw in draws if draw > 0.0) / len(draws)
     return {
         "available": True,
         "samples": len(rows),
         "delta": round(delta, 6),
         "ci95": [round(low, 6), round(high, 6)],
         "probability_positive": round(probability_positive, 4),
+        "bootstrap_baseline": "resampled_logged_mean",
+        "tuning_semantics": tuning_semantics,
     }
 
 
@@ -258,52 +299,63 @@ def _empirical_dros_grid(weights: list[float]) -> list[float]:
     return sorted({round(max(0.0, value), 8) for value in values})
 
 
-def _variance(values: list[float]) -> float:
-    if len(values) < 2:
-        return 0.0
-    avg = mean(values)
-    return mean((value - avg) ** 2 for value in values)
-
-
 def _select_stable_parameter(
     rows: list[CounterfactualRecord],
     *,
     family: str,
     candidates: list[float],
-    raw_dr_value: float,
-    iterations: int,
 ) -> tuple[float, list[dict[str, Any]]]:
-    """Route to a bias/variance compromise; return all evidence for auditability."""
+    """Choose a transparent empirical bias/variance compromise.
 
+    The variance term is the plug-in variance of the estimator mean. The bias
+    proxy is squared deviation from Raw-DR. It is intentionally exposed as a
+    heuristic, not a hidden claim of MSE-optimal tuning.
+    """
+
+    raw_dr_value = _raw_dr_on_rows(rows)
     table: list[dict[str, Any]] = []
     for value in candidates:
         if family == "switch_dr":
-            estimator = lambda sample, value=value: switch_doubly_robust(sample, tau=value)
+            contributions = [_switch_contribution(row, value) for row in rows]
         elif family == "dros":
-            estimator = lambda sample, value=value: dros_doubly_robust(sample, lambda_=value)
+            contributions = [_dros_contribution(row, value) for row in rows]
         else:  # pragma: no cover - internal contract
             raise ValueError("unknown robust estimator family")
-        estimate = float(estimator(rows))
-        draws = _bootstrap_draws(
-            rows,
-            estimator,
-            label=f"tune:{family}:{value:.12g}",
-            iterations=max(100, min(1000, iterations // 2)),
-        )
-        variance = _variance(draws)
+        estimate = mean(contributions)
+        variance_proxy = _sample_variance(contributions) / max(1, len(contributions))
         bias_proxy = (estimate - raw_dr_value) ** 2
-        risk_proxy = variance + bias_proxy
+        risk_proxy = variance_proxy + bias_proxy
         table.append(
             {
                 "parameter": value,
                 "estimate": round(estimate, 8),
-                "bootstrap_variance": round(variance, 10),
+                "sampling_variance_proxy": round(variance_proxy, 10),
                 "squared_raw_dr_deviation": round(bias_proxy, 10),
                 "stability_risk_proxy": round(risk_proxy, 10),
             }
         )
     table.sort(key=lambda row: (float(row["stability_risk_proxy"]), float(row["parameter"])))
     return float(table[0]["parameter"]), table
+
+
+def _auto_switch_estimator(sample: list[CounterfactualRecord]) -> float:
+    weights = [_raw_weight(row) for row in sample]
+    tau, _ = _select_stable_parameter(
+        sample,
+        family="switch_dr",
+        candidates=_empirical_switch_grid(weights),
+    )
+    return _switch_on_rows(sample, tau)
+
+
+def _auto_dros_estimator(sample: list[CounterfactualRecord]) -> float:
+    weights = [_raw_weight(row) for row in sample]
+    lambda_, _ = _select_stable_parameter(
+        sample,
+        family="dros",
+        candidates=_empirical_dros_grid(weights),
+    )
+    return _dros_on_rows(sample, lambda_)
 
 
 def evaluate_robust_off_policy(
@@ -313,9 +365,9 @@ def evaluate_robust_off_policy(
     dros_lambda: float | None = None,
     bootstrap_iterations: int = DEFAULT_BOOTSTRAP_ITERATIONS,
 ) -> dict[str, Any]:
-    """Evaluate a robust DR family and report overlap/tail/agreement diagnostics."""
+    """Evaluate robust DR estimators plus overlap, tail, and agreement diagnostics."""
 
-    rows = _ordered_rows(records)
+    rows = _validated_rows(records)
     if not rows:
         return {
             "available": False,
@@ -348,39 +400,43 @@ def evaluate_robust_off_policy(
         }
 
     weights = [_raw_weight(row) for row in rows]
-    raw_dr_value = raw_doubly_robust(rows)
-    dm_value = direct_method(rows)
+    raw_dr_value = _raw_dr_on_rows(rows)
+    dm_value = _dm_on_rows(rows)
 
     if switch_tau is None:
         selected_tau, switch_table = _select_stable_parameter(
             rows,
             family="switch_dr",
             candidates=_empirical_switch_grid(weights),
-            raw_dr_value=raw_dr_value,
-            iterations=bootstrap_iterations,
         )
+        switch_estimator = _auto_switch_estimator
+        switch_tuning_semantics = "retuned_within_each_bootstrap_resample"
     else:
         selected_tau = float(switch_tau)
         if not isfinite(selected_tau) or selected_tau < 0.0:
             raise ValueError("switch_tau must be finite and >= 0")
         switch_table = []
+        switch_estimator = lambda sample: _switch_on_rows(sample, selected_tau)
+        switch_tuning_semantics = "fixed_user_parameter"
 
     if dros_lambda is None:
         selected_lambda, dros_table = _select_stable_parameter(
             rows,
             family="dros",
             candidates=_empirical_dros_grid(weights),
-            raw_dr_value=raw_dr_value,
-            iterations=bootstrap_iterations,
         )
+        dros_estimator = _auto_dros_estimator
+        dros_tuning_semantics = "retuned_within_each_bootstrap_resample"
     else:
         selected_lambda = float(dros_lambda)
         if not isfinite(selected_lambda) or selected_lambda < 0.0:
             raise ValueError("dros_lambda must be finite and >= 0")
         dros_table = []
+        dros_estimator = lambda sample: _dros_on_rows(sample, selected_lambda)
+        dros_tuning_semantics = "fixed_user_parameter"
 
-    switch_value = switch_doubly_robust(rows, tau=selected_tau)
-    dros_value = dros_doubly_robust(rows, lambda_=selected_lambda)
+    switch_value = _switch_on_rows(rows, selected_tau)
+    dros_value = _dros_on_rows(rows, selected_lambda)
     baseline = _logged_mean(rows)
 
     def estimator_row(value: float, **metadata: Any) -> dict[str, Any]:
@@ -400,21 +456,31 @@ def evaluate_robust_off_policy(
     confidence = {
         "raw_dr": _confidence(
             rows,
-            lambda sample: raw_doubly_robust(sample),
+            _raw_dr_on_rows,
             label="raw_dr",
             iterations=bootstrap_iterations,
         ),
         "switch_dr": _confidence(
             rows,
-            lambda sample: switch_doubly_robust(sample, tau=selected_tau),
-            label=f"switch_dr:{selected_tau:.12g}",
+            switch_estimator,
+            label=(
+                "switch_dr:auto"
+                if switch_tau is None
+                else f"switch_dr:fixed:{selected_tau:.12g}"
+            ),
             iterations=bootstrap_iterations,
+            tuning_semantics=switch_tuning_semantics,
         ),
         "dros": _confidence(
             rows,
-            lambda sample: dros_doubly_robust(sample, lambda_=selected_lambda),
-            label=f"dros:{selected_lambda:.12g}",
+            dros_estimator,
+            label=(
+                "dros:auto"
+                if dros_lambda is None
+                else f"dros:fixed:{selected_lambda:.12g}"
+            ),
             iterations=bootstrap_iterations,
+            tuning_semantics=dros_tuning_semantics,
         ),
     }
 
@@ -423,15 +489,14 @@ def evaluate_robust_off_policy(
     p95 = _percentile(weights, 0.95)
     raw_ess_ratio = _effective_sample_ratio(weights)
     weight_cv = _coefficient_of_variation(weights)
+    max_weight = max(weights, default=0.0)
     heavy_tail = bool(
-        max(weights, default=0.0) >= 20.0
+        max_weight >= 20.0
         or p95 >= 10.0
         or raw_ess_ratio < 0.35
         or weight_cv >= 1.5
     )
 
-    # This recommendation is a routing heuristic only. The experiment contract may
-    # still explicitly choose a different primary estimator.
     switch_risk = (
         float(switch_table[0]["stability_risk_proxy"])
         if switch_table
@@ -448,9 +513,20 @@ def evaluate_robust_off_policy(
             ("dros", dros_risk),
         ]
         finite_risks = [row for row in candidate_risks if row[1] is not None]
-        recommended = min(finite_risks, key=lambda row: (float(row[1]), row[0]))[0] if finite_risks else "dros"
+        recommended = (
+            min(finite_risks, key=lambda row: (float(row[1]), row[0]))[0]
+            if finite_risks
+            else "dros"
+        )
     else:
         recommended = "raw_dr"
+
+    value_scale = max(
+        1.0,
+        abs(baseline),
+        *(abs(value) for value in robust_values),
+    )
+    normalized_spread = spread / value_scale
 
     return {
         "available": True,
@@ -461,19 +537,22 @@ def evaluate_robust_off_policy(
         "estimators": estimators,
         "confidence": confidence,
         "diagnostics": {
-            "raw_weight_max": round(max(weights), 6),
+            "reward_model_coverage": 1.0,
+            "raw_weight_max": round(max_weight, 6),
             "raw_weight_p95": round(p95, 6),
             "raw_weight_cv": round(weight_cv, 6),
             "raw_effective_sample_ratio": round(raw_ess_ratio, 6),
             "heavy_tail_detected": heavy_tail,
             "robust_estimator_spread": round(spread, 6),
-            "robust_estimator_agreement": round(1.0 / (1.0 + abs(spread)), 6),
+            "robust_estimator_normalized_spread": round(normalized_spread, 6),
+            "robust_estimator_agreement": round(1.0 / (1.0 + normalized_spread), 6),
             "recommended_estimator": recommended,
             "recommendation_semantics": "stability_routing_heuristic_not_promotion_authority",
         },
         "tuning": {
-            "method": "deterministic_bootstrap_variance_plus_raw_dr_deviation_proxy",
+            "method": "plug_in_sampling_variance_plus_squared_raw_dr_deviation",
             "claim": "stability routing heuristic; not statistically optimal hyperparameter proof",
+            "bootstrap": "automatic parameters are retuned inside every resample",
             "switch_dr": {
                 "selected_tau": selected_tau,
                 "automatic": switch_tau is None,
