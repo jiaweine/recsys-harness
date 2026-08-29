@@ -5,6 +5,7 @@ from .capabilities import (
     CapabilityRegistry,
     RUNTIME_CAPABILITIES,
 )
+from .collaborative_tools import RecommendationBackendToolRegistry
 from .deliberation import DeliberationEngine, TrajectoryCritic
 from .harness import AgentHarness, RunCancelled
 from .memory import AgentMemory, catalog_fingerprint
@@ -27,6 +28,7 @@ __all__ = [
     "NetworkResearch",
     "OptimizerToolRegistry",
     "SearchBackendToolRegistry",
+    "RecommendationBackendToolRegistry",
     "PerceptionEngine",
     "OwnedPolicy",
     "ToolRegistry",
