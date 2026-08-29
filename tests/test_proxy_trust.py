@@ -1,4 +1,5 @@
 import ipaddress
+from pathlib import Path
 
 import pytest
 from starlette.requests import Request
@@ -114,3 +115,11 @@ def test_api_ignores_xff_when_direct_peer_is_not_trusted(monkeypatch) -> None:
 
     request = _request("203.0.113.9", "198.51.100.77")
     assert api_module._client_key(request) == "203.0.113.9"
+
+
+def test_container_disables_uvicorn_proxy_header_preprocessing() -> None:
+    dockerfile = (Path(__file__).resolve().parents[1] / "Dockerfile").read_text(encoding="utf-8")
+    command = next(line for line in dockerfile.splitlines() if line.startswith("CMD [\"uvicorn\""))
+
+    assert '"--no-proxy-headers"' in command
+    assert '"--proxy-headers"' not in command
