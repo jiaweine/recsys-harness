@@ -43,6 +43,10 @@ Malformed forwarding chains fail closed to the direct peer. If every address in 
 
 `LINGJING_TRUST_PROXY_IP=1` remains only as a compatibility mode for loopback proxies (`127.0.0.0/8` and `::1/128`). A proxy in another container, host or load-balancer network must use `LINGJING_TRUSTED_PROXY_CIDRS` explicitly.
 
+The application resolver must see the original socket peer before it decides whether `X-Forwarded-For` is trustworthy. The repository Docker image therefore starts Uvicorn with `--no-proxy-headers`; Uvicorn must not rewrite `request.client` from forwarded headers before the request reaches Xushu. If you provide your own Uvicorn command or process manager, preserve the same boundary: disable Uvicorn proxy-header preprocessing and let Xushu resolve client identity from `LINGJING_TRUSTED_PROXY_CIDRS`. In particular, do not combine this resolver with `FORWARDED_ALLOW_IPS=*` or another broad Uvicorn forwarded-header trust policy.
+
+Disabling Uvicorn proxy-header preprocessing also means Uvicorn does not infer the request scheme from `X-Forwarded-Proto`. Production cookie security is controlled explicitly with `LINGJING_COOKIE_SECURE`; if another component needs the external scheme for URL generation, configure that concern separately without rewriting the ASGI client address used by rate limiting.
+
 Do not configure broad private ranges unless the entire range is controlled proxy infrastructure. If application workers are directly reachable from untrusted networks, those direct connections will ignore XFF even when trusted proxy CIDRs are configured.
 
 ## Graceful active-run handoff

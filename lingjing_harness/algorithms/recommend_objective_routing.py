@@ -8,7 +8,11 @@ from typing import Any, Iterator
 from lingjing_harness.domain import Catalog
 from . import evolution_core as core
 from .recommend import RecommendConfig, RecommendationEngine
-from .recommend_validation import PreparedRecommendRelevance, prepare_recommend_relevance
+from .recommend_validation import (
+    PreparedRecommendRelevance,
+    RecommendRelevanceSliceCache,
+    prepare_recommend_relevance,
+)
 
 
 MIN_RELEVANCE_OBJECTIVE_EVIDENCE = 2 * core.MIN_RECOMMEND_EVIDENCE
@@ -50,11 +54,13 @@ class RecommendationObjectiveScope:
         discovery_users: list[str],
         prepared: PreparedRecommendRelevance | None,
         reference: dict[str, Any] | None,
+        slice_cache: RecommendRelevanceSliceCache,
     ) -> None:
         self.engine: Any = engine
         self.discovery_users = list(discovery_users)
         self.prepared = prepared
         self.reference = reference or {}
+        self.slice_cache = slice_cache
         self._cache: dict[tuple[tuple[str, Any], ...], dict[str, Any]] = {}
         model = self.reference.get("model") or {}
         self.reference_ndcg = float(model.get("ndcg", 0.0))
@@ -167,11 +173,13 @@ def recommend_relevance_objective(
 
     users = core._stable_limit(current.known_users(), lambda user: user)
     discovery_users, _ = core._stable_split(users, lambda user: user)
+    slice_cache = RecommendRelevanceSliceCache(catalog=catalog, engine=current)
     prepared = prepare_recommend_relevance(
         catalog,
         current,
         users_override=discovery_users,
         k=10,
+        slice_cache=slice_cache,
     )
     reference = prepared.evaluate(current.config)
     scope = RecommendationObjectiveScope(
@@ -179,6 +187,7 @@ def recommend_relevance_objective(
         discovery_users=discovery_users,
         prepared=prepared,
         reference=reference,
+        slice_cache=slice_cache,
     )
     if not scope.available:
         yield scope

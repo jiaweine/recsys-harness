@@ -12,6 +12,7 @@ discovered strategy basin. Sparse segments keep the global strategy as fallback.
 from typing import Any
 
 from . import evolution_core as _core
+from .business_replay_budget import install_business_replay_budget
 from .credit_routing import install_credit_router
 from .optimizer_backends import (
     annotate_optimizer_backend,
@@ -27,15 +28,16 @@ from .recommend_objective_routing import (
     install_recommend_objective_router,
     recommend_relevance_objective,
 )
-from .recommend_validation import prepare_recommend_relevance
+from .recommend_validation import RecommendRelevanceSliceCache, prepare_recommend_relevance
 from .segment_credit import attach_recommend_portfolio, attach_search_portfolio
 
 
-# Install once at the stable public boundary. ``evolution_core._response_surface``
-# resolves this module-global function at call time, so replacing it here makes
-# every public evolution path credit-aware without duplicating the core search
-# machinery or introducing per-run global mutable context.
+# Install once at the stable public boundary. The core/production modules resolve
+# these globals at call time, so every public evolution path receives durable arm
+# credit, bounded discovery replay cost and temporal recommendation relevance
+# without per-run global mutable context.
 install_credit_router()
+install_business_replay_budget()
 install_recommend_objective_router()
 
 EvolutionDimension = _core.EvolutionDimension
@@ -77,6 +79,8 @@ def _recommend_relevance_gate(
     catalog: Any,
     current: Any,
     result: dict[str, Any],
+    *,
+    slice_cache: RecommendRelevanceSliceCache | None = None,
 ) -> dict[str, Any]:
     """Attach cached interaction-temporal relevance evidence to promotion.
 
@@ -97,6 +101,7 @@ def _recommend_relevance_gate(
         current,
         users_override=current.known_users(),
         k=10,
+        slice_cache=slice_cache,
     )
     reference = prepared.evaluate(current.config)
     candidate = prepared.evaluate(RecommendConfig(**candidate_raw))
@@ -169,7 +174,12 @@ def _run_recommend(
             _evolve_recommend(catalog, objective_scope.engine, *args, **kwargs)
         )
     result = objective_scope.annotate(result)
-    result = _recommend_relevance_gate(catalog, current, result)
+    result = _recommend_relevance_gate(
+        catalog,
+        current,
+        result,
+        slice_cache=objective_scope.slice_cache,
+    )
     return attach_recommend_portfolio(
         catalog,
         current,

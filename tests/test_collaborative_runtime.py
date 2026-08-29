@@ -6,6 +6,7 @@ from lingjing_harness.algorithms import (
     RecommendConfig,
     RecommendationEngine,
     audit_recommend,
+    evolve_recommend,
     prepare_recommend_relevance,
 )
 from lingjing_harness.integrations import ImplicitHybridRecommendationEngine
@@ -149,6 +150,26 @@ def test_temporal_relevance_rebuilds_same_backend_on_point_in_time_catalogs(monk
         for row in prepared.slices
     )
     assert prepared.evaluate(engine.config)["available"] is True
+
+
+def test_evolution_reuses_temporal_backend_slices_between_objective_and_guardrail(monkeypatch):
+    catalog = build_sample_catalog()
+    engine = _hybrid(catalog)
+    _use_fake_temporal_adapter(monkeypatch)
+    original_for_catalog = engine.for_catalog
+    calls = 0
+
+    def counted_for_catalog(training_catalog):
+        nonlocal calls
+        calls += 1
+        return original_for_catalog(training_catalog)
+
+    monkeypatch.setattr(engine, "for_catalog", counted_for_catalog)
+    result = evolve_recommend(catalog, engine)
+
+    assert result["evaluation_ready"] is True
+    assert result["relevance_validation"]["prepared_slices"] > 0
+    assert calls == result["relevance_validation"]["prepared_slices"]
 
 
 def test_backend_registry_is_explicit_and_composes_with_existing_runtime(monkeypatch):
