@@ -1,17 +1,7 @@
-name: Collaborative Routing Calibration
+name: Collaborative Model Benchmark
 
 on:
   workflow_dispatch:
-    inputs:
-      model:
-        description: 'implicit model to calibrate'
-        required: true
-        default: 'als'
-        type: choice
-        options:
-          - als
-          - bpr
-          - bm25
 
 permissions:
   contents: read
@@ -29,9 +19,8 @@ jobs:
       - run: pip install -e . --no-deps
       - name: Install official implicit evaluation stack
         run: pip install 'implicit==0.7.3' h5py
-      - name: Sweep collaborative history thresholds on MovieLens 100K
+      - name: Compare official collaborative model families
         env:
           OPENBLAS_NUM_THREADS: '1'
           OMP_NUM_THREADS: '1'
-          COLLABORATIVE_MODEL: ${{ inputs.model }}
-        run: python scripts/collaborative_routing_benchmark.py
+        run: python scripts/collaborative_model_benchmark.py
