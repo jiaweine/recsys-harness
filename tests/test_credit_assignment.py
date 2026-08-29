@@ -82,10 +82,66 @@ def _synthetic_result() -> dict:
                 },
             },
             "reflections": [
-                {"cycle": 1, "requirements_changed": ["root"]},
-                {"cycle": 2, "requirements_changed": ["leaf"]},
+                {"cycle": 1, "requirements_changed": ["root"], "new_contradictions": []},
+                {"cycle": 2, "requirements_changed": ["leaf"], "new_contradictions": []},
                 # noop completed but did not create mission progress.
-                {"cycle": 3, "requirements_changed": []},
+                {"cycle": 3, "requirements_changed": [], "new_contradictions": []},
+            ],
+        },
+    }
+
+
+def _collateral_damage_result() -> dict:
+    return {
+        "run_id": "run-credit-collateral",
+        "plan": {"mode": "search"},
+        "events": [{"phase": "complete", "payload": {"reward": 0.9}}],
+        "actions": [
+            {
+                "tool": "clean.tool",
+                "status": "completed",
+                "decision": {"cycle": 1, "requirement": "clean"},
+            },
+            {
+                "tool": "mixed.tool",
+                "status": "completed",
+                "decision": {"cycle": 2, "requirement": "target"},
+            },
+        ],
+        "deliberation": {
+            "mission": {
+                "requirements": {
+                    "clean": {
+                        "priority": "high",
+                        "status": "satisfied",
+                        "optional": False,
+                        "prerequisites": [],
+                    },
+                    "target": {
+                        "priority": "critical",
+                        "status": "satisfied",
+                        "optional": False,
+                        "prerequisites": [],
+                    },
+                    "collateral": {
+                        "priority": "critical",
+                        "status": "blocked",
+                        "optional": False,
+                        "prerequisites": [],
+                    },
+                },
+            },
+            "reflections": [
+                {
+                    "cycle": 1,
+                    "requirements_changed": ["clean"],
+                    "new_contradictions": [],
+                },
+                {
+                    "cycle": 2,
+                    "requirements_changed": ["target", "collateral"],
+                    "new_contradictions": ["search:quality_vs_recall"],
+                },
             ],
         },
     }
@@ -101,11 +157,27 @@ def test_semantic_mass_rewards_high_priority_upstream_evidence() -> None:
 def test_trajectory_credit_is_nonuniform_and_horizon_aware() -> None:
     credit = trajectory_policy_credits(_synthetic_result())
 
-    assert credit["method"] == "semantic_influence_transition_credit_v1"
+    assert credit["method"] == "semantic_influence_transition_credit_v2"
     assert 0.0 < credit["terminal_weight"] < 1.0
     assert credit["process_weight"] > 0.0
     assert credit["tool_credits"]["root.tool"] > credit["tool_credits"]["leaf.tool"]
     assert credit["tool_credits"]["leaf.tool"] > credit["tool_credits"]["noop.tool"]
+
+
+def test_credit_uses_all_changed_requirements_and_penalizes_collateral_damage() -> None:
+    credit = trajectory_policy_credits(_collateral_damage_result())
+    rows = {row["tool"]: row for row in credit["action_credits"]}
+
+    mixed = rows["mixed.tool"]
+    assert mixed["target_requirement"] == "target"
+    assert mixed["satisfied_requirements"] == ["target"]
+    assert mixed["blocked_requirements"] == ["collateral"]
+    assert mixed["new_contradictions"] == ["search:quality_vs_recall"]
+    assert mixed["blocked_penalty"] > 0.0
+    assert mixed["contradiction_penalty"] > 0.0
+    assert mixed["process_score"] < rows["clean.tool"]["process_score"]
+    # A high-priority target cannot hide a simultaneous high-priority regression.
+    assert credit["tool_credits"]["mixed.tool"] < credit["tool_credits"]["clean.tool"]
 
 
 def test_policy_credit_correction_replaces_equal_terminal_contribution_once() -> None:
@@ -145,7 +217,7 @@ def test_public_harness_exposes_process_credit_provenance() -> None:
 
     credit = result["policy_credit"]
     autonomy = result["autonomy"]["policy_credit_assignment"]
-    assert credit["method"] == "semantic_influence_transition_credit_v1"
-    assert autonomy["method"] == "semantic_influence_transition_credit_v1"
+    assert credit["method"] == "semantic_influence_transition_credit_v2"
+    assert autonomy["method"] == "semantic_influence_transition_credit_v2"
     assert autonomy["horizon"] >= 1
     assert autonomy["applied"] is True
