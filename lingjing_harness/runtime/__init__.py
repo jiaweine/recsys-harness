@@ -11,6 +11,13 @@ from .credit_assignment import apply_semantic_trajectory_credit
 from .deliberation import DeliberationEngine, TrajectoryCritic
 from .harness import AgentHarness as _BaseAgentHarness, RunCancelled
 from .invocation_maintenance import discard_completed_run_invocations
+from .mechanism_graph import (
+    mechanism_graph_snapshot,
+    mechanism_stats,
+    record_mechanism_evidence,
+    validate_mechanism_graph,
+    validate_mechanism_graph_with_shacl,
+)
 from .memory import AgentMemory, catalog_fingerprint
 from .mission_compiler import MissionCompiler
 from .network import NetworkResearch
@@ -79,9 +86,10 @@ class AgentHarness(_BaseAgentHarness):
         )
 
     def run(self, *args, **kwargs):
-        """Run, apply process-aware policy credit, then bound durable state."""
+        """Run, apply process credit, persist mechanism evidence, then prune state."""
 
         result = super().run(*args, **kwargs)
+
         credit = apply_semantic_trajectory_credit(self.memory, result)
         autonomy = result.setdefault("autonomy", {})
         autonomy["policy_credit_assignment"] = {
@@ -93,6 +101,17 @@ class AgentHarness(_BaseAgentHarness):
             "adjusted_policy_rows": int(credit.get("adjusted_policy_rows", 0) or 0),
         }
         result["policy_credit"] = credit
+
+        mechanisms = record_mechanism_evidence(self.memory, self.catalog_key, result)
+        autonomy["mechanism_evidence_graph"] = {
+            "method": mechanisms.get("method"),
+            "recorded": int(mechanisms.get("recorded", 0) or 0),
+            "deduplicated": int(mechanisms.get("deduplicated", 0) or 0),
+            "mechanisms": int(mechanisms.get("mechanisms", 0) or 0),
+            "contexts": int(mechanisms.get("contexts", 0) or 0),
+        }
+        result["mechanism_evidence"] = mechanisms
+
         discard_completed_run_invocations(self.memory, str(result.get("run_id") or ""))
         prune_retired_strategy_history(self.memory)
         return result
@@ -114,4 +133,6 @@ __all__ = [
     "OwnedPolicy",
     "ToolRegistry",
     "ResultVerifier",
+    "record_mechanism_evidence", "mechanism_stats", "mechanism_graph_snapshot",
+    "validate_mechanism_graph", "validate_mechanism_graph_with_shacl",
 ]
