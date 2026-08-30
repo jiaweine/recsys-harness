@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import operator
 import sqlite3
 import threading
 import time
@@ -128,9 +129,33 @@ def _epoch_to_dict(epoch: AllocationEpoch, ordinal: int) -> dict[str, Any]:
 
 
 def _finite_unit_value(name: str, raw: Any) -> float:
-    value = float(raw)
+    if isinstance(raw, bool):
+        raise ValueError(f"{name} must be numeric, not boolean")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be numeric") from exc
     if not math.isfinite(value):
         raise ValueError(f"{name} must be finite")
+    return value
+
+
+def _strict_integer(name: str, raw: Any, *, minimum: int) -> int:
+    if isinstance(raw, bool):
+        raise ValueError(f"{name} must be an integer, not boolean")
+    try:
+        value = operator.index(raw)
+    except TypeError:
+        if isinstance(raw, str):
+            try:
+                value = int(raw.strip())
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{name} must be an integer") from exc
+        else:
+            raise ValueError(f"{name} must be an integer") from None
+    value = int(value)
+    if value < minimum:
+        raise ValueError(f"{name} must be >= {minimum}")
     return value
 
 
@@ -310,7 +335,8 @@ class DurableOnlineExperimentStore:
         *,
         spec: OnlineExperimentSpec,
         epoch_ids: set[str],
-    ) -> None:
+    ) -> int:
+        sequence = _strict_integer("observation.sequence", observation.sequence, minimum=0)
         if observation.epoch_id not in epoch_ids:
             raise ExperimentConflict(f"unknown allocation epoch: {observation.epoch_id}")
         if observation.arm not in {spec.control_arm, spec.candidate_arm}:
@@ -329,6 +355,7 @@ class DurableOnlineExperimentStore:
             if not str(name).strip():
                 raise ExperimentConflict("pre-exposure covariate name must not be empty")
             _finite_unit_value(f"pre_exposure.{name}", raw)
+        return sequence
 
     def create_experiment(
         self, spec: OnlineExperimentSpec, *, initial_epoch_id: str = "epoch-0"
@@ -341,13 +368,21 @@ class DurableOnlineExperimentStore:
         with self._lock, self._connect() as connection:
             connection.execute("begin immediate")
             existing = connection.execute(
-                "select spec_json,current_epoch_id from online_experiments where experiment_id=?",
+                "select spec_json from online_experiments where experiment_id=?",
                 (spec.experiment_id,),
             ).fetchone()
             if existing:
+                initial_epoch = connection.execute(
+                    """
+                    select epoch_id from online_experiment_epochs
+                    where experiment_id=? and ordinal=0
+                    """,
+                    (spec.experiment_id,),
+                ).fetchone()
                 if (
                     str(existing["spec_json"]) == spec_json
-                    and str(existing["current_epoch_id"]) == initial_epoch_id
+                    and initial_epoch is not None
+                    and str(initial_epoch["epoch_id"]) == initial_epoch_id
                 ):
                     connection.rollback()
                     return self.get_experiment(spec.experiment_id)
@@ -472,7 +507,9 @@ class DurableOnlineExperimentStore:
                 (experiment_id,),
             ).fetchone()[0]
             for observation in incoming:
-                self._validate_observation(observation, spec=spec, epoch_ids=epoch_ids)
+                sequence = self._validate_observation(
+                    observation, spec=spec, epoch_ids=epoch_ids
+                )
                 existing = connection.execute(
                     """
                     select sequence,epoch_id,arm,metrics_json,pre_exposure_json
@@ -494,7 +531,7 @@ class DurableOnlineExperimentStore:
                         )
                     if (
                         existing_max_sequence is not None
-                        and int(observation.sequence) <= int(existing_max_sequence)
+                        and sequence <= int(existing_max_sequence)
                     ):
                         connection.rollback()
                         raise ExperimentConflict(
@@ -505,7 +542,7 @@ class DurableOnlineExperimentStore:
                         select unit_id from online_experiment_observations
                         where experiment_id=? and sequence=?
                         """,
-                        (experiment_id, int(observation.sequence)),
+                        (experiment_id, sequence),
                     ).fetchone()
                     if sequence_owner:
                         connection.rollback()
@@ -522,7 +559,7 @@ class DurableOnlineExperimentStore:
                         (
                             experiment_id,
                             observation.unit_id,
-                            int(observation.sequence),
+                            sequence,
                             observation.epoch_id,
                             observation.arm,
                             _json_dumps(dict(observation.metrics)),
@@ -532,9 +569,10 @@ class DurableOnlineExperimentStore:
                         ),
                     )
                     inserted += 1
+                    existing_max_sequence = sequence
                     continue
                 if (
-                    int(existing["sequence"]) != int(observation.sequence)
+                    int(existing["sequence"]) != sequence
                     or str(existing["epoch_id"]) != observation.epoch_id
                     or str(existing["arm"]) != observation.arm
                 ):
@@ -664,12 +702,13 @@ class DurableOnlineExperimentStore:
         action = str(action).strip()
         if action not in MUTATING_RECOMMENDATIONS:
             raise ValueError("only mutating evidence recommendations can be applied")
+        expected_version = _strict_integer("expected_version", expected_version, minimum=1)
         now = time.time()
         with self._lock, self._connect() as connection:
             connection.execute("begin immediate")
             experiment = self._experiment_row(connection, experiment_id)
             current_version = int(experiment["version"])
-            if current_version != int(expected_version):
+            if current_version != expected_version:
                 connection.rollback()
                 raise ExperimentConflict(
                     "stale experiment version", current_version=current_version
