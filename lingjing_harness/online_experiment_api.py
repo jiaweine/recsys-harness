@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .online_experiment_store import (
     DurableOnlineExperimentStore,
@@ -38,7 +38,11 @@ def _finite(name: str, value: float) -> float:
     return number
 
 
-class MetricContractRequest(BaseModel):
+class _StrictRequestModel(BaseModel):
+    model_config = ConfigDict(strict=True)
+
+
+class MetricContractRequest(_StrictRequestModel):
     name: str = Field(min_length=1, max_length=120)
     role: Literal["primary", "guardrail"]
     kind: Literal["bernoulli", "bounded"]
@@ -73,7 +77,7 @@ class MetricContractRequest(BaseModel):
         return OnlineMetricSpec(**self.model_dump())
 
 
-class RampStageRequest(BaseModel):
+class RampStageRequest(_StrictRequestModel):
     stage_index: int = Field(ge=0, le=100)
     candidate_fraction: float = Field(gt=0.0, lt=1.0)
     minimum_randomized_units: int = Field(ge=2, le=1_000_000_000)
@@ -87,7 +91,7 @@ class RampStageRequest(BaseModel):
         return RampStage(**self.model_dump())
 
 
-class ExperimentCreateRequest(BaseModel):
+class ExperimentCreateRequest(_StrictRequestModel):
     experiment_id: str = Field(min_length=1, max_length=200)
     control_arm: str = Field(min_length=1, max_length=120)
     candidate_arm: str = Field(min_length=1, max_length=120)
@@ -129,7 +133,7 @@ class ExperimentCreateRequest(BaseModel):
         )
 
 
-class ObservationRequest(BaseModel):
+class ObservationRequest(_StrictRequestModel):
     unit_id: str = Field(min_length=1, max_length=200)
     sequence: int = Field(ge=0, le=9_000_000_000_000_000_000)
     epoch_id: str = Field(min_length=1, max_length=200)
@@ -174,11 +178,11 @@ class ObservationRequest(BaseModel):
         )
 
 
-class ObservationBatchRequest(BaseModel):
+class ObservationBatchRequest(_StrictRequestModel):
     observations: list[ObservationRequest] = Field(min_length=1, max_length=1000)
 
 
-class RecommendationApplyRequest(BaseModel):
+class RecommendationApplyRequest(_StrictRequestModel):
     expected_version: int = Field(ge=1)
     action: Literal[
         "advance_ramp", "rollback_recommended", "eligible_for_promotion_review"
