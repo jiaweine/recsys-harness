@@ -297,6 +297,75 @@ def test_new_evidence_invalidates_previously_read_transition_version(tmp_path: P
         )
 
 
+def test_new_assignments_are_fenced_to_current_epoch_and_global_sequence(tmp_path: Path):
+    store = _store(tmp_path)
+    store.create_experiment(_spec(), initial_epoch_id="e0")
+    rows = _epoch_rows(
+        epoch_id="e0",
+        start_sequence=1000,
+        control_count=300,
+        candidate_count=100,
+        control_conversion=0.10,
+        candidate_conversion=0.90,
+        control_error=0.30,
+        candidate_error=0.01,
+    )
+    # Leave one pre-exposure field delayed so we can prove historical epochs still
+    # accept maturation for an already-randomized unit after the ramp advances.
+    first = rows[0]
+    rows[0] = OnlineObservation(
+        first.unit_id,
+        first.sequence,
+        first.epoch_id,
+        first.arm,
+        first.metrics,
+        {},
+    )
+    ingest = store.ingest_observations("exp-1", rows)
+    assert store.evaluate("exp-1")["decision"]["action"] == "advance_ramp"
+    advanced = store.apply_recommendation(
+        "exp-1",
+        expected_version=ingest["version"],
+        action="advance_ramp",
+        new_epoch_id="e1",
+    )
+    assert advanced["experiment"]["current_epoch_id"] == "e1"
+
+    with pytest.raises(ExperimentConflict, match="current allocation epoch"):
+        store.ingest_observations(
+            "exp-1",
+            [OnlineObservation("late-e0-new", 1400, "e0", "control")],
+        )
+
+    matured = store.ingest_observations(
+        "exp-1",
+        [
+            OnlineObservation(
+                first.unit_id,
+                first.sequence,
+                "e0",
+                first.arm,
+                first.metrics,
+                {"pre_conversion": 0.7},
+            )
+        ],
+    )
+    assert matured["matured_units"] == 1
+    assert matured["version"] == advanced["experiment"]["version"] + 1
+
+    with pytest.raises(ExperimentConflict, match="follow previous allocation epochs"):
+        store.ingest_observations(
+            "exp-1",
+            [OnlineObservation("bad-e1-order", 500, "e1", "candidate")],
+        )
+
+    valid = store.ingest_observations(
+        "exp-1",
+        [OnlineObservation("good-e1", 1400, "e1", "candidate")],
+    )
+    assert valid["inserted_units"] == 1
+
+
 def test_harmful_guardrail_marks_rollback_without_applying_traffic(tmp_path: Path):
     store = _store(tmp_path)
     store.create_experiment(_spec(final_only=True), initial_epoch_id="e0")
