@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 
 import pytest
@@ -283,7 +284,9 @@ def test_api_rate_limit_uses_supplied_hardened_identity(tmp_path: Path):
 
 
 def test_stable_api_exports_online_experiment_routes_and_shared_database():
-    import lingjing_harness.api as stable_api
+    # importlib mirrors the module-loading path used by ASGI servers for
+    # ``lingjing_harness.api:app`` and observes the final sys.modules alias.
+    stable_api = importlib.import_module("lingjing_harness.api")
 
     paths = {getattr(route, "path", "") for route in stable_api.app.router.routes}
     assert "/api/online-experiments" in paths
