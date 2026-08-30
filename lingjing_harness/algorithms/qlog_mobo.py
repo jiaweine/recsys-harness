@@ -37,6 +37,7 @@ from .optimizer_contracts import optimizer_evidence_contract
 
 
 MIN_MODEL_POINTS = 4
+MODEL_FIT_MAXITER = 50
 ACQUISITION_RAW_SAMPLES = 256
 ACQUISITION_RESTARTS = 12
 MAX_DUPLICATE_PROPOSALS = 8
@@ -421,7 +422,10 @@ def _fit_model(
         models.append(model)
     model = stack.ModelListGP(*models)
     mll = stack.SumMarginalLogLikelihood(model.likelihood, model)
-    stack.fit_gpytorch_mll(mll)
+    stack.fit_gpytorch_mll(
+        mll,
+        optimizer_kwargs={"options": {"maxiter": MODEL_FIT_MAXITER}},
+    )
     return model
 
 
@@ -722,6 +726,7 @@ def qlognehvi_evolution_loop(
             if space.categorical_indices
             else "SingleTaskGP"
         ),
+        "model_fit_maxiter": MODEL_FIT_MAXITER,
         "native_distinct_evaluation_budget": budget,
         "new_evaluations": new_evaluations,
         "initial_design_evaluations": initial_design_evaluations,
