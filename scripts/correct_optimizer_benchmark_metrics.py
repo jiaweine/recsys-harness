@@ -6,7 +6,10 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
-from scripts import optimizer_equal_budget_benchmark as benchmark
+try:
+    from scripts import optimizer_equal_budget_benchmark as benchmark
+except ImportError:  # direct `python scripts/...py` execution
+    import optimizer_equal_budget_benchmark as benchmark
 
 
 def _initial_best_feasible_primary(landscape_name: str, seed: int) -> float | None:
