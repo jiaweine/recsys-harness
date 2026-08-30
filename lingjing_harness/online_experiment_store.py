@@ -535,7 +535,7 @@ class DurableOnlineExperimentStore:
                     ):
                         connection.rollback()
                         raise ExperimentConflict(
-                            "current epoch assignment sequence must follow previous allocation epochs"
+                            "current epoch sequence must follow existing assignment history from previous allocation epochs"
                         )
                     sequence_owner = connection.execute(
                         """
