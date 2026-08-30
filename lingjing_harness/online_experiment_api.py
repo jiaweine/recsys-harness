@@ -200,7 +200,13 @@ def install_online_experiment_routes(
     rate_limiter: Callable[..., bool] | None = None,
     client_key: Callable[[Request], str] | None = None,
 ) -> DurableOnlineExperimentStore:
-    """Install version-fenced online experiment routes on the stable API app."""
+    """Install version-fenced online experiment routes on the stable API app.
+
+    Route registration is idempotent, while request-identity and rate-limit hooks
+    are intentionally refreshable.  The stable API wrapper can therefore replace
+    a bootstrap identity resolver with its hardened proxy-aware resolver without
+    duplicating routes or leaving the original closure captured forever.
+    """
 
     resolved_path = str(Path(database_path).resolve())
     installed = getattr(app.state, "online_experiment_store", None)
@@ -209,16 +215,22 @@ def install_online_experiment_routes(
             raise RuntimeError("online experiment app state is owned by another component")
         if str(Path(installed.path).resolve()) != resolved_path:
             raise RuntimeError("online experiment routes already use a different database")
+        app.state.online_experiment_rate_limiter = rate_limiter
+        app.state.online_experiment_client_key = client_key
         return installed
 
     registry = DurableOnlineExperimentStore(database_path)
+    app.state.online_experiment_rate_limiter = rate_limiter
+    app.state.online_experiment_client_key = client_key
     router = APIRouter(prefix="/api/online-experiments", tags=["online-experiments"])
 
     def limit(request: Request, scope: str, *, requests: int, window: int) -> None:
-        if rate_limiter is None:
+        limiter = getattr(request.app.state, "online_experiment_rate_limiter", None)
+        if limiter is None:
             return
-        identity = client_key(request) if client_key is not None else "unknown"
-        if not rate_limiter(
+        resolver = getattr(request.app.state, "online_experiment_client_key", None)
+        identity = resolver(request) if resolver is not None else "unknown"
+        if not limiter(
             f"online-experiment:{scope}:{identity}",
             limit=requests,
             window_seconds=window,
