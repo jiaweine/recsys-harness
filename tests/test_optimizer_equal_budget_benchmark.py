@@ -56,7 +56,9 @@ def test_counting_evaluator_accepts_explicit_optimizer_contract():
 
 def test_native_benchmark_obeys_same_distinct_evaluator_budget(monkeypatch):
     # Keep the unit test cheap; the dedicated workflow runs the 101x101 oracle and
-    # all four real optimizers with pinned optional dependencies.
+    # all four real optimizers with pinned optional dependencies. A 21x21 grid is
+    # deliberately only an approximate oracle, so an off-grid continuous candidate
+    # may exceed it slightly; the contract here is accounting and metric finiteness.
     monkeypatch.setattr(benchmark, "GRID_STEPS", 21)
     report = benchmark.run_benchmark(backends=("native",), seeds=(17,))
 
@@ -67,5 +69,5 @@ def test_native_benchmark_obeys_same_distinct_evaluator_budget(monkeypatch):
         assert row["evaluation_budget"] == 10
         assert 0 < row["evaluator_calls"] <= row["evaluation_budget"]
         assert row["feasible_found"] is True
-        assert row["feasible_primary_regret"] >= -1e-9
+        assert math.isfinite(float(row["feasible_primary_regret"]))
         assert row["hypervolume_regret"] >= -1e-9
