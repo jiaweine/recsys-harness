@@ -1,0 +1,90 @@
+name: Equal-Budget Optimizer Benchmark
+
+on:
+  push:
+    paths:
+      - '.github/workflows/optimizer-benchmark.yml'
+      - 'scripts/optimizer_equal_budget_benchmark.py'
+      - 'tests/test_optimizer_equal_budget_benchmark.py'
+      - 'lingjing_harness/algorithms/evolution_core.py'
+      - 'lingjing_harness/algorithms/optimizer_backends.py'
+      - 'lingjing_harness/algorithms/optimizer_contracts.py'
+      - 'lingjing_harness/algorithms/qlog_mobo.py'
+      - 'pyproject.toml'
+  pull_request:
+    paths:
+      - '.github/workflows/optimizer-benchmark.yml'
+      - 'scripts/optimizer_equal_budget_benchmark.py'
+      - 'tests/test_optimizer_equal_budget_benchmark.py'
+      - 'lingjing_harness/algorithms/evolution_core.py'
+      - 'lingjing_harness/algorithms/optimizer_backends.py'
+      - 'lingjing_harness/algorithms/optimizer_contracts.py'
+      - 'lingjing_harness/algorithms/qlog_mobo.py'
+      - 'pyproject.toml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Install pinned comparison optimizers
+        run: pip install 'optuna==4.9.0' 'botorch==0.18.1'
+      - name: Verify benchmark dependencies
+        run: |
+          python - <<'PY'
+          import botorch
+          import optuna
+          assert botorch.__version__ == '0.18.1', botorch.__version__
+          assert optuna.__version__ == '4.9.0', optuna.__version__
+          PY
+      - name: Compile benchmark and optimizer contracts
+        run: |
+          python -m compileall -q \
+            scripts/optimizer_equal_budget_benchmark.py \
+            tests/test_optimizer_equal_budget_benchmark.py \
+            lingjing_harness/algorithms/qlog_mobo.py
+      - name: Run benchmark contract tests
+        run: pytest -q tests/test_optimizer_equal_budget_benchmark.py
+      - name: Run equal-budget benchmark
+        run: |
+          mkdir -p benchmark-artifacts
+          # Continuous PR validation uses one deterministic seed so this quality gate
+          # remains practical even though qLogNEHVI refits four GPs after each new
+          # expensive observation. The benchmark CLI accepts arbitrary multi-seed
+          # runs for deeper release / research comparisons.
+          python scripts/optimizer_equal_budget_benchmark.py \
+            --seeds 17 \
+            --output benchmark-artifacts/optimizer-equal-budget.json \
+            > /tmp/optimizer-benchmark.json
+      - name: Print compact benchmark summary and verify accounting
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path('benchmark-artifacts/optimizer-equal-budget.json')
+          report = json.loads(path.read_text())
+          print(json.dumps(report['summary'], indent=2, sort_keys=True))
+          budgets = {(r['landscape'], r['seed']): r['evaluation_budget'] for r in report['runs']}
+          for row in report['runs']:
+              key = (row['landscape'], row['seed'])
+              assert row['evaluation_budget'] == budgets[key]
+              assert row['evaluator_calls'] <= row['evaluation_budget']
+              assert row['feasible_found'], row
+          PY
+      - name: Upload equal-budget benchmark evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: optimizer-equal-budget
+          path: benchmark-artifacts/optimizer-equal-budget.json
+          retention-days: 14
