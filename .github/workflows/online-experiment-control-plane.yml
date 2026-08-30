@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/online-experiment-control-plane.yml'
       - 'lingjing_harness/api.py'
+      - 'lingjing_harness/api_core.py'
       - 'lingjing_harness/online_experiment_api.py'
       - 'lingjing_harness/online_experiment_store.py'
       - 'lingjing_harness/online_experiments.py'
@@ -16,6 +17,7 @@ on:
     paths:
       - '.github/workflows/online-experiment-control-plane.yml'
       - 'lingjing_harness/api.py'
+      - 'lingjing_harness/api_core.py'
       - 'lingjing_harness/online_experiment_api.py'
       - 'lingjing_harness/online_experiment_store.py'
       - 'lingjing_harness/online_experiments.py'
@@ -45,6 +47,7 @@ jobs:
           python -m compileall -q \
             lingjing_harness/online_experiment_store.py \
             lingjing_harness/online_experiment_api.py \
+            lingjing_harness/api_core.py \
             lingjing_harness/api.py \
             scripts/online_experiment_store_stress.py \
             tests/test_online_experiment_store.py \
