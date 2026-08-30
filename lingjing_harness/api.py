@@ -18,6 +18,7 @@ from fastapi import HTTPException
 
 from . import api_core as _core
 from .api_shutdown import install_shutdown_boundary
+from .online_experiment_api import install_online_experiment_routes
 from .proxy_trust import TRUSTED_PROXY_NETWORKS, client_key as _proxy_client_key
 from .rate_limit_maintenance import install_rate_limit_maintenance
 from .workspace_identity import workspace_fingerprint
@@ -453,6 +454,17 @@ _core.app.add_api_route("/health/ready", _health_ready, methods=["GET"], name="h
 _core.get_run = _coherent_get_run
 _core.health_live = _health_live
 _core.health_ready = _health_ready
+
+# Online experiments share the durable workspace database, hardened identity and
+# rate-limit counter, but they never call serving/production write APIs.  The
+# returned registry is exposed for diagnostics/tests after the stable module alias
+# is installed below.
+_core.online_experiment_store = install_online_experiment_routes(
+    _core.app,
+    database_path=_core.DATA / "workspace.db",
+    rate_limiter=_core.store.consume_rate_limit,
+    client_key=lambda request: _core._client_key(request),
+)
 
 # Install shutdown handoff after persistence/recovery wrappers are in place so
 # interrupted snapshots use the same compaction and fencing semantics.

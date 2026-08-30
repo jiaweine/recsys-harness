@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field, field_validator
 import frontend as frontend_package
 
 from .domain import Catalog
+from .online_experiment_api import install_online_experiment_routes
 from .sample_data import build_sample_catalog
 from .store import WorkspaceStore
 from .runtime import AgentHarness, AgentMemory, RunCancelled, catalog_fingerprint
@@ -137,6 +138,18 @@ def _client_key(request: Request) -> str:
         if forwarded:
             return forwarded[:80]
     return str(request.client.host if request.client else "unknown")[:80]
+
+
+# Install the durable online-experiment router at the core app boundary.  The
+# stable api wrapper calls the same installer again after hardening client identity;
+# installation is idempotent for the same app/database, so import order cannot
+# silently remove the control-plane surface.
+online_experiment_store = install_online_experiment_routes(
+    app,
+    database_path=DATA / "workspace.db",
+    rate_limiter=store.consume_rate_limit,
+    client_key=_client_key,
+)
 
 
 def _rate_rule(path: str, method: str) -> tuple[str, int, int] | None:
