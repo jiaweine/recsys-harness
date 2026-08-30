@@ -353,7 +353,7 @@ def test_new_assignments_are_fenced_to_current_epoch_and_global_sequence(tmp_pat
     assert matured["matured_units"] == 1
     assert matured["version"] == advanced["experiment"]["version"] + 1
 
-    with pytest.raises(ExperimentConflict, match="follow previous allocation epochs"):
+    with pytest.raises(ExperimentConflict, match="existing assignment history"):
         store.ingest_observations(
             "exp-1",
             [OnlineObservation("bad-e1-order", 500, "e1", "candidate")],
@@ -361,9 +361,17 @@ def test_new_assignments_are_fenced_to_current_epoch_and_global_sequence(tmp_pat
 
     valid = store.ingest_observations(
         "exp-1",
-        [OnlineObservation("good-e1", 1400, "e1", "candidate")],
+        [OnlineObservation("good-e1", 1600, "e1", "candidate")],
     )
     assert valid["inserted_units"] == 1
+
+    # Even within the current epoch, a late new assignment may not backfill the
+    # already-observed assignment order and rewrite the historical anytime path.
+    with pytest.raises(ExperimentConflict, match="existing assignment history"):
+        store.ingest_observations(
+            "exp-1",
+            [OnlineObservation("late-e1-backfill", 1500, "e1", "control")],
+        )
 
 
 def test_harmful_guardrail_marks_rollback_without_applying_traffic(tmp_path: Path):
