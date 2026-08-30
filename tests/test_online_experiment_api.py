@@ -125,6 +125,35 @@ def test_installer_is_idempotent_for_same_app_and_database(tmp_path: Path):
         install_online_experiment_routes(app, database_path=tmp_path / "other.db")
 
 
+def test_idempotent_install_refreshes_runtime_identity_hooks(tmp_path: Path):
+    app = FastAPI()
+    calls: list[str] = []
+
+    def limiter(scope_key: str, *, limit: int, window_seconds: float):
+        calls.append(scope_key)
+        return True
+
+    first = install_online_experiment_routes(
+        app,
+        database_path=tmp_path / "workspace.db",
+        rate_limiter=limiter,
+        client_key=lambda request: "bootstrap-client",
+    )
+    second = install_online_experiment_routes(
+        app,
+        database_path=tmp_path / "workspace.db",
+        rate_limiter=limiter,
+        client_key=lambda request: "hardened-client",
+    )
+
+    assert second is first
+    response = TestClient(app).post(
+        "/api/online-experiments", json=_create_payload("refresh-hooks")
+    )
+    assert response.status_code == 201
+    assert calls == ["online-experiment:create:hardened-client"]
+
+
 def test_api_create_ingest_evaluate_and_list(tmp_path: Path):
     app, _ = _app(tmp_path)
     client = TestClient(app)
