@@ -297,7 +297,7 @@ def test_new_evidence_invalidates_previously_read_transition_version(tmp_path: P
         )
 
 
-def test_new_assignments_are_fenced_to_current_epoch_and_global_sequence(tmp_path: Path):
+def test_new_assignments_are_fenced_to_current_allocation_epoch(tmp_path: Path):
     store = _store(tmp_path)
     store.create_experiment(_spec(), initial_epoch_id="e0")
     rows = _epoch_rows(
@@ -365,13 +365,14 @@ def test_new_assignments_are_fenced_to_current_epoch_and_global_sequence(tmp_pat
     )
     assert valid["inserted_units"] == 1
 
-    # Even within the current epoch, a late new assignment may not backfill the
-    # already-observed assignment order and rewrite the historical anytime path.
-    with pytest.raises(ExperimentConflict, match="existing assignment history"):
-        store.ingest_observations(
-            "exp-1",
-            [OnlineObservation("late-e1-backfill", 1500, "e1", "control")],
-        )
+    # Current-epoch batches may arrive out of sequence order across workers. The
+    # evidence version changes, so any earlier recommendation becomes stale and the
+    # transition CAS recomputes the complete sequence-ordered evidence before commit.
+    late_same_epoch = store.ingest_observations(
+        "exp-1",
+        [OnlineObservation("late-e1-backfill", 1500, "e1", "control")],
+    )
+    assert late_same_epoch["inserted_units"] == 1
 
 
 def test_harmful_guardrail_marks_rollback_without_applying_traffic(tmp_path: Path):
