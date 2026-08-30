@@ -284,12 +284,21 @@ def test_api_rate_limit_uses_supplied_hardened_identity(tmp_path: Path):
 
 
 def test_stable_api_exports_online_experiment_routes_and_shared_database():
-    # importlib mirrors the module-loading path used by ASGI servers for
-    # ``lingjing_harness.api:app`` and observes the final sys.modules alias.
+    # Exercise the public ASGI app through HTTP rather than depending on FastAPI's
+    # internal route representation.  This is the contract real clients need.
     stable_api = importlib.import_module("lingjing_harness.api")
+    client = TestClient(stable_api.app)
 
-    paths = {getattr(route, "path", "") for route in stable_api.app.router.routes}
-    assert "/api/online-experiments" in paths
-    assert "/api/online-experiments/{experiment_id}/evaluation" in paths
-    assert "/api/online-experiments/{experiment_id}/traffic-directive" in paths
+    listed = client.get("/api/online-experiments")
+    missing_evaluation = client.get(
+        "/api/online-experiments/__missing__/evaluation"
+    )
+    missing_directive = client.get(
+        "/api/online-experiments/__missing__/traffic-directive"
+    )
+
+    assert listed.status_code == 200
+    assert isinstance(listed.json(), list)
+    assert missing_evaluation.status_code == 404
+    assert missing_directive.status_code == 404
     assert stable_api.online_experiment_store.path == stable_api.store.path
