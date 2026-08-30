@@ -462,6 +462,15 @@ class DurableOnlineExperimentStore:
             spec = spec_from_dict(_json_object(experiment["spec_json"]))
             epochs = self._epochs(connection, experiment_id)
             epoch_ids = {epoch.epoch_id for epoch in epochs}
+            current_epoch_id = str(experiment["current_epoch_id"])
+            status = str(experiment["status"])
+            previous_epoch_max_sequence = connection.execute(
+                """
+                select max(sequence) from online_experiment_observations
+                where experiment_id=? and epoch_id<>?
+                """,
+                (experiment_id, current_epoch_id),
+            ).fetchone()[0]
             for observation in incoming:
                 self._validate_observation(observation, spec=spec, epoch_ids=epoch_ids)
                 existing = connection.execute(
@@ -473,6 +482,24 @@ class DurableOnlineExperimentStore:
                     (experiment_id, observation.unit_id),
                 ).fetchone()
                 if not existing:
+                    if status != "running":
+                        connection.rollback()
+                        raise ExperimentConflict(
+                            f"new randomized assignments are disabled while experiment is {status}"
+                        )
+                    if observation.epoch_id != current_epoch_id:
+                        connection.rollback()
+                        raise ExperimentConflict(
+                            "new randomized assignments must use the current allocation epoch"
+                        )
+                    if (
+                        previous_epoch_max_sequence is not None
+                        and int(observation.sequence) <= int(previous_epoch_max_sequence)
+                    ):
+                        connection.rollback()
+                        raise ExperimentConflict(
+                            "current epoch assignment sequence must follow previous allocation epochs"
+                        )
                     sequence_owner = connection.execute(
                         """
                         select unit_id from online_experiment_observations
