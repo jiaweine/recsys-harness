@@ -1,0 +1,63 @@
+name: MOBO Quality
+
+on:
+  push:
+    paths:
+      - '.github/workflows/mobo-quality.yml'
+      - 'pyproject.toml'
+      - 'lingjing_harness/algorithms/evolution.py'
+      - 'lingjing_harness/algorithms/optimizer_backends.py'
+      - 'lingjing_harness/algorithms/optimizer_contracts.py'
+      - 'lingjing_harness/algorithms/qlog_mobo.py'
+      - 'tests/test_optimizer_backends.py'
+      - 'tests/test_qlog_mobo.py'
+      - 'tests/test_qlog_mobo_botorch.py'
+  pull_request:
+    paths:
+      - '.github/workflows/mobo-quality.yml'
+      - 'pyproject.toml'
+      - 'lingjing_harness/algorithms/evolution.py'
+      - 'lingjing_harness/algorithms/optimizer_backends.py'
+      - 'lingjing_harness/algorithms/optimizer_contracts.py'
+      - 'lingjing_harness/algorithms/qlog_mobo.py'
+      - 'tests/test_optimizer_backends.py'
+      - 'tests/test_qlog_mobo.py'
+      - 'tests/test_qlog_mobo_botorch.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  constrained-qlognehvi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Install pinned BoTorch research stack
+        run: pip install 'botorch==0.18.1'
+      - name: Verify pinned BoTorch version
+        run: |
+          python - <<'PY'
+          import botorch
+          assert botorch.__version__ == '0.18.1', botorch.__version__
+          PY
+      - name: Compile constrained MOBO contracts
+        run: |
+          python -m compileall -q \
+            lingjing_harness/algorithms/qlog_mobo.py \
+            lingjing_harness/algorithms/optimizer_contracts.py \
+            tests/test_qlog_mobo.py \
+            tests/test_qlog_mobo_botorch.py
+      - name: Run qLogNEHVI and optimizer quality gates
+        run: |
+          pytest -q \
+            tests/test_qlog_mobo.py \
+            tests/test_qlog_mobo_botorch.py \
+            tests/test_optimizer_backends.py

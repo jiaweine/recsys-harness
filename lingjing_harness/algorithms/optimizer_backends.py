@@ -7,8 +7,11 @@ from typing import Any, Callable, Iterator
 from . import evolution_core as core
 
 
-SUPPORTED_OPTIMIZER_BACKENDS = ("native", "optuna", "optuna_motpe")
+SUPPORTED_OPTIMIZER_BACKENDS = ("native", "optuna", "optuna_motpe", "qlognehvi")
 _OPTIMIZER_BACKEND: ContextVar[str] = ContextVar("xushu_optimizer_backend", default="native")
+_QLOG_TELEMETRY: ContextVar[dict[str, Any] | None] = ContextVar(
+    "xushu_qlog_telemetry", default=None
+)
 _ORIGINAL_EVOLUTION_LOOP = core._evolution_loop
 _INSTALLED = False
 _NATIVE_ARCHIVE_PARENT_LIMIT = 5
@@ -23,6 +26,12 @@ def _load_optuna():
             "install with `pip install -e '.[optimizer]'`"
         ) from exc
     return optuna
+
+
+def _load_qlog():
+    from .qlog_mobo import load_botorch_stack
+
+    return load_botorch_stack()
 
 
 def _normalize_backend(name: str | None) -> str:
@@ -43,11 +52,17 @@ def optimizer_backend(name: str | None) -> Iterator[str]:
     if backend.startswith("optuna"):
         # Fail before spending any response-surface evaluation budget.
         _load_optuna()
-    token = _OPTIMIZER_BACKEND.set(backend)
+    elif backend == "qlognehvi":
+        # The research stack is optional and must fail before any evaluator work.
+        _load_qlog()
+    backend_token = _OPTIMIZER_BACKEND.set(backend)
+    telemetry_token = _QLOG_TELEMETRY.set(None) if backend == "qlognehvi" else None
     try:
         yield backend
     finally:
-        _OPTIMIZER_BACKEND.reset(token)
+        _OPTIMIZER_BACKEND.reset(backend_token)
+        if telemetry_token is not None:
+            _QLOG_TELEMETRY.reset(telemetry_token)
 
 
 def current_optimizer_backend() -> str:
@@ -350,6 +365,27 @@ def _optuna_motpe_evolution_loop(
     return rows, core._quality_diversity_archive(base_config, rows, dimensions)
 
 
+def _qlog_evolution_loop(**kwargs: Any):
+    from .qlog_mobo import qlognehvi_evolution_loop
+
+    evaluated = dict(kwargs.get("cache") or {})
+    evaluation_budget = _native_distinct_evaluation_budget(
+        kwargs.get("population") or [], evaluated
+    )
+    rows, archive = qlognehvi_evolution_loop(
+        **kwargs,
+        evaluation_budget=evaluation_budget,
+        stack=_load_qlog(),
+    )
+    telemetry = None
+    if rows and isinstance(rows[0], dict):
+        raw = rows[0].get("optimizer_provenance")
+        if isinstance(raw, dict):
+            telemetry = dict(raw)
+    _QLOG_TELEMETRY.set(telemetry)
+    return rows, archive
+
+
 def _routed_evolution_loop(**kwargs: Any):
     backend = current_optimizer_backend()
     if backend == "native":
@@ -358,6 +394,8 @@ def _routed_evolution_loop(**kwargs: Any):
         return _optuna_evolution_loop(**kwargs)
     if backend == "optuna_motpe":
         return _optuna_motpe_evolution_loop(**kwargs)
+    if backend == "qlognehvi":
+        return _qlog_evolution_loop(**kwargs)
     raise AssertionError(f"unsupported optimizer backend after validation: {backend}")
 
 
@@ -376,7 +414,16 @@ def annotate_optimizer_backend(result: dict[str, Any], backend: str) -> dict[str
     if backend == "native":
         return result
 
-    optuna = _load_optuna()
+    if backend == "qlognehvi":
+        stack = _load_qlog()
+        qlog_telemetry = dict(_QLOG_TELEMETRY.get() or {})
+        library_name = "botorch"
+        library_version = str(getattr(stack.botorch, "__version__", "unknown"))
+    else:
+        optuna = _load_optuna()
+        qlog_telemetry = {}
+        library_name = "optuna"
+        library_version = str(getattr(optuna, "__version__", "unknown"))
 
     def visit(node: Any) -> None:
         if isinstance(node, dict):
@@ -397,20 +444,49 @@ def annotate_optimizer_backend(result: dict[str, Any], backend: str) -> dict[str
                         "pareto_search": True,
                         "final_selection": "harness_primary_objective",
                     }
+                    new_evaluations = max(0, candidate_count - surface_count)
+                elif backend == "qlognehvi":
+                    method = "constrained_qlognehvi_with_evidence_response_surface"
+                    router = "botorch.qLogNoisyExpectedHypervolumeImprovement"
+                    contract = qlog_telemetry.get("contract") or {}
+                    extra = {
+                        "optimizer_objectives": list(contract.get("objectives") or [
+                            "primary_objective",
+                            "domain_quality",
+                        ]),
+                        "optimizer_outcome_constraints": list(
+                            contract.get("constraints") or []
+                        ),
+                        "optimizer_evidence_route": contract.get("evidence_route"),
+                        "pareto_search": True,
+                        "noisy_multiobjective": True,
+                        "mixed_space_model": qlog_telemetry.get("model"),
+                        "acquisition": qlog_telemetry.get("acquisition"),
+                        "final_selection": "harness_primary_objective",
+                        "optimizer_provenance": qlog_telemetry,
+                    }
+                    new_evaluations = int(
+                        qlog_telemetry.get(
+                            "new_evaluations",
+                            max(0, candidate_count - surface_count),
+                        )
+                        or 0
+                    )
                 else:
                     method = "optuna_tpe_with_evidence_response_surface"
                     router = "optuna.samplers.TPESampler"
                     extra = {"pareto_search": False}
+                    new_evaluations = max(0, candidate_count - surface_count)
                 updated.update(
                     {
                         "method": method,
                         "router": router,
                         "optimizer_backend": backend,
-                        "optimizer_library": "optuna",
-                        "optimizer_version": str(getattr(optuna, "__version__", "unknown")),
+                        "optimizer_library": library_name,
+                        "optimizer_version": library_version,
                         "optimizer_warm_start": "current+response_surface+trusted_memory",
                         "optimizer_budget_contract": "native_distinct_evaluator_calls",
-                        "optimizer_new_evaluations": max(0, candidate_count - surface_count),
+                        "optimizer_new_evaluations": new_evaluations,
                         **extra,
                     }
                 )

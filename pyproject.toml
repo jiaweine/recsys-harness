@@ -30,6 +30,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8", "httpx>=0.27"]
 optimizer = ["optuna==4.9.0"]
+mobo = ["botorch==0.18.1"]
 collaborative = ["implicit==0.7.3"]
 semantic = ["FlagEmbedding==1.4.2"]
 ontology = ["rdflib>=7.1,<8", "pyshacl>=0.30,<1"]
