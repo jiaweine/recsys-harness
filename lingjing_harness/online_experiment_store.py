@@ -464,12 +464,12 @@ class DurableOnlineExperimentStore:
             epoch_ids = {epoch.epoch_id for epoch in epochs}
             current_epoch_id = str(experiment["current_epoch_id"])
             status = str(experiment["status"])
-            previous_epoch_max_sequence = connection.execute(
+            existing_max_sequence = connection.execute(
                 """
                 select max(sequence) from online_experiment_observations
-                where experiment_id=? and epoch_id<>?
+                where experiment_id=?
                 """,
-                (experiment_id, current_epoch_id),
+                (experiment_id,),
             ).fetchone()[0]
             for observation in incoming:
                 self._validate_observation(observation, spec=spec, epoch_ids=epoch_ids)
@@ -493,12 +493,12 @@ class DurableOnlineExperimentStore:
                             "new randomized assignments must use the current allocation epoch"
                         )
                     if (
-                        previous_epoch_max_sequence is not None
-                        and int(observation.sequence) <= int(previous_epoch_max_sequence)
+                        existing_max_sequence is not None
+                        and int(observation.sequence) <= int(existing_max_sequence)
                     ):
                         connection.rollback()
                         raise ExperimentConflict(
-                            "current epoch assignment sequence must follow previous allocation epochs"
+                            "new assignment sequence must follow existing assignment history"
                         )
                     sequence_owner = connection.execute(
                         """
