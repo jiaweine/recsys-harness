@@ -20,6 +20,7 @@ from .optimizer_backends import (
     current_optimizer_backend,
     optimizer_backend as select_optimizer_backend,
 )
+from .optimizer_contracts import optimizer_evidence_scope
 from .production_evolution import (
     evolve_recommend as _evolve_recommend,
     evolve_search as _evolve_search,
@@ -206,20 +207,30 @@ def _run_recommend(
 
 def evolve_search(catalog: Any, current: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
     backend_request = kwargs.pop("optimizer_backend", None)
-    if backend_request is None:
-        backend = current_optimizer_backend()
-        return annotate_optimizer_backend(_run_search(catalog, current, *args, **kwargs), backend)
-    with select_optimizer_backend(str(backend_request)) as backend:
-        return annotate_optimizer_backend(_run_search(catalog, current, *args, **kwargs), backend)
+    with optimizer_evidence_scope("search"):
+        if backend_request is None:
+            backend = current_optimizer_backend()
+            return annotate_optimizer_backend(
+                _run_search(catalog, current, *args, **kwargs), backend
+            )
+        with select_optimizer_backend(str(backend_request)) as backend:
+            return annotate_optimizer_backend(
+                _run_search(catalog, current, *args, **kwargs), backend
+            )
 
 
 def evolve_recommend(catalog: Any, current: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
     backend_request = kwargs.pop("optimizer_backend", None)
-    if backend_request is None:
-        backend = current_optimizer_backend()
-        return annotate_optimizer_backend(_run_recommend(catalog, current, *args, **kwargs), backend)
-    with select_optimizer_backend(str(backend_request)) as backend:
-        return annotate_optimizer_backend(_run_recommend(catalog, current, *args, **kwargs), backend)
+    with optimizer_evidence_scope("recommend"):
+        if backend_request is None:
+            backend = current_optimizer_backend()
+            return annotate_optimizer_backend(
+                _run_recommend(catalog, current, *args, **kwargs), backend
+            )
+        with select_optimizer_backend(str(backend_request)) as backend:
+            return annotate_optimizer_backend(
+                _run_recommend(catalog, current, *args, **kwargs), backend
+            )
 
 
 __all__ = [
