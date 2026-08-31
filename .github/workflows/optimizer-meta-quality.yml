@@ -5,9 +5,12 @@ on:
     paths:
       - '.github/workflows/optimizer-meta-quality.yml'
       - 'lingjing_harness/algorithms/optimizer_meta.py'
+      - 'lingjing_harness/algorithms/optimizer_observations.py'
+      - 'lingjing_harness/runtime/__init__.py'
       - 'lingjing_harness/runtime/backend_config.py'
       - 'lingjing_harness/runtime/backend_memory.py'
       - 'lingjing_harness/runtime/optimizer_meta_memory.py'
+      - 'lingjing_harness/runtime/optimizer_observation_memory.py'
       - 'lingjing_harness/runtime/optimizer_tools.py'
       - 'scripts/optimizer_meta_benchmark.py'
       - 'tests/test_optimizer_landscape_descriptors.py'
@@ -22,9 +25,12 @@ on:
     paths:
       - '.github/workflows/optimizer-meta-quality.yml'
       - 'lingjing_harness/algorithms/optimizer_meta.py'
+      - 'lingjing_harness/algorithms/optimizer_observations.py'
+      - 'lingjing_harness/runtime/__init__.py'
       - 'lingjing_harness/runtime/backend_config.py'
       - 'lingjing_harness/runtime/backend_memory.py'
       - 'lingjing_harness/runtime/optimizer_meta_memory.py'
+      - 'lingjing_harness/runtime/optimizer_observation_memory.py'
       - 'lingjing_harness/runtime/optimizer_tools.py'
       - 'scripts/optimizer_meta_benchmark.py'
       - 'tests/test_optimizer_landscape_descriptors.py'
@@ -56,8 +62,11 @@ jobs:
         run: |
           python -m compileall -q \
             lingjing_harness/algorithms/optimizer_meta.py \
+            lingjing_harness/algorithms/optimizer_observations.py \
+            lingjing_harness/runtime/__init__.py \
             lingjing_harness/runtime/backend_config.py \
             lingjing_harness/runtime/optimizer_meta_memory.py \
+            lingjing_harness/runtime/optimizer_observation_memory.py \
             lingjing_harness/runtime/optimizer_tools.py \
             scripts/optimizer_meta_benchmark.py \
             tests/test_optimizer_landscape_descriptors.py \
@@ -89,7 +98,9 @@ jobs:
           manifest = auto.inspect_data()['optimizer_meta_router']
           assert manifest['authority'] == 'optimizer_selection_only'
           assert manifest['default_backend'] == 'native'
-          assert manifest['landscape_descriptors'] == 'durable_preobserved_rows_only'
+          assert manifest['landscape_descriptors'] == 'durable_evaluator_observations_with_strategy_fallback'
+          assert manifest['optimizer_observation_memory'] == 'evaluator_paid_discovery_rows_only'
+          assert manifest['optimizer_observation_authority'] == 'routing_descriptor_only'
           assert manifest['landscape_descriptor_evaluator_calls'] == 0
           PY
 
