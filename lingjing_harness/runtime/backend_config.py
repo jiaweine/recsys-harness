@@ -27,6 +27,7 @@ RECOMMEND_BACKEND_ENV = "LINGJING_RECOMMEND_BACKEND"
 OPTIMIZER_BACKEND_ENV = "LINGJING_OPTIMIZER_BACKEND"
 SEARCH_BACKEND_KWARGS_ENV = "LINGJING_SEARCH_BACKEND_KWARGS"
 RECOMMEND_BACKEND_KWARGS_ENV = "LINGJING_RECOMMEND_BACKEND_KWARGS"
+OPTIMIZER_SELECTIONS = (*SUPPORTED_OPTIMIZER_BACKENDS, "auto")
 _SEARCH_ADAPTER_STATE_ATTR = "_lingjing_runtime_search_adapter_state"
 
 
@@ -118,12 +119,13 @@ class RuntimeBackendConfig:
 
     Optional dependencies remain lazy. Merely installing FlagEmbedding, implicit,
     or Optuna never changes runtime behavior; a backend must be selected through
-    this config, environment variables, or CLI flags.
+    this config, environment variables, or CLI flags. ``auto`` is a runtime
+    optimizer-selection policy, not a fifth optimizer implementation.
     """
 
     SEARCH_BACKENDS: ClassVar[tuple[str, ...]] = tuple(SUPPORTED_SEARCH_BACKENDS)
     RECOMMEND_BACKENDS: ClassVar[tuple[str, ...]] = tuple(SUPPORTED_RECOMMEND_BACKENDS)
-    OPTIMIZER_BACKENDS: ClassVar[tuple[str, ...]] = tuple(SUPPORTED_OPTIMIZER_BACKENDS)
+    OPTIMIZER_BACKENDS: ClassVar[tuple[str, ...]] = tuple(OPTIMIZER_SELECTIONS)
 
     search_backend: str = "reference"
     recommend_backend: str = "reference"
