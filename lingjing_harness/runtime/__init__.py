@@ -27,6 +27,7 @@ from .mechanism_transfer import (
 from .mission_compiler import MissionCompiler
 from .network import NetworkResearch
 from .optimizer_tools import OptimizerToolRegistry
+from .optimizer_observation_memory import install_optimizer_observation_runtime
 from .perception import PerceptionEngine
 from .policy import OwnedPolicy
 from .semantic_tools import SearchBackendToolRegistry
@@ -40,6 +41,10 @@ from .backend_config import RuntimeBackendConfig, build_runtime_tools
 # priors. The original single-arm credit path remains authoritative for first-order
 # routing; the bridge appends only co-occurrence pair evidence.
 install_mechanism_transfer()
+# Keep evaluator-paid search geometry in a separate routing-only durable ledger.
+# This installs after optimizer/backend composition so one capture wrapper observes
+# native, Optuna, MOTPE, and qLog rows without changing their evaluation budgets.
+install_optimizer_observation_runtime(AgentMemory, OptimizerToolRegistry)
 
 
 class AgentHarness(_BaseAgentHarness):

@@ -1,8 +1,16 @@
+from dataclasses import asdict
+from random import Random
+
+from lingjing_harness.algorithms import evolution_core as core
 from lingjing_harness.algorithms.optimizer_meta import (
     build_routing_context,
     describe_optimizer_landscape,
     rank_optimizer_backends,
 )
+from lingjing_harness.runtime import AgentMemory
+from lingjing_harness.runtime.backend_memory import BackendScopedMemory
+from lingjing_harness.runtime.optimizer_tools import OptimizerToolRegistry
+from lingjing_harness.sample_data import build_sample_catalog
 from scripts import optimizer_equal_budget_benchmark as bench
 
 
@@ -32,6 +40,32 @@ def _benchmark_context(landscape):
         constraint_count=2,
         landscape_observations=observations,
     )
+
+
+def _durable_search_observations(registry, count=4):
+    dimensions, group_totals = core._evolution_schema(registry.search.config)
+    base = asdict(registry.search.config)
+    configs = []
+    for dimension in dimensions:
+        for _, _, config in core._neighbors(base, dimension, dimensions, group_totals):
+            configs.append(config)
+            if len(configs) >= count:
+                break
+        if len(configs) >= count:
+            break
+    assert len(configs) >= count
+    return [
+        {
+            "config": config,
+            "objective": 0.2 + 0.15 * index,
+            "feasible": index % 2 == 0,
+            "source": "test_evaluator",
+            "generation": index,
+            "feasibility_basis": "search_discovery_robustness_guardrails",
+            "constraints": {"worse_share": 0.1, "worst_delta": -0.1},
+        }
+        for index, config in enumerate(configs[:count])
+    ]
 
 
 def test_preobserved_geometry_distinguishes_same_schema_landscapes_without_new_calls():
@@ -124,3 +158,157 @@ def test_geometry_mismatch_downweights_contextual_credit_transfer():
 
     assert decision.selected_backend == "optuna"
     assert decision.scores["optuna"] > decision.scores["qlognehvi"]
+
+
+def test_optimizer_loop_capture_reuses_paid_rows_without_extra_evaluator_calls():
+    dimension = core.EvolutionDimension(
+        name="x",
+        kind="continuous",
+        group="independent",
+        low=0.0,
+        high=1.0,
+        relative_step=0.2,
+    )
+    calls = []
+
+    def evaluate(config):
+        x = float(config["x"])
+        calls.append(x)
+        bad = x < 0.4
+        report = {"queries": 3, "quality": x, "recall": x}
+        robust = {
+            "worse_share": 0.5 if bad else 0.1,
+            "worst_delta": -0.4 if bad else -0.1,
+            "mean_delta": 0.0,
+        }
+        return report, robust, x
+
+    rows, _ = core._evolution_loop(
+        base_config={"x": 0.5},
+        population=[{"x": 0.2}, {"x": 0.8}],
+        dimensions=[dimension],
+        group_totals={},
+        evaluate=evaluate,
+        rng=Random(7),
+        cache=None,
+    )
+
+    memory = AgentMemory()
+    credit = memory.record_evolution_result(
+        "catalog",
+        "search",
+        current_config={"x": 0.5},
+        result={
+            "evaluation_ready": True,
+            "safe_to_try": False,
+            "trusted": False,
+            "validation": {"holdout": {"independent": False, "samples": 0}},
+            "evolution": {"selected_signature": []},
+        },
+    )
+    summary = credit["optimizer_observations"]
+    durable = memory.optimizer_observations("catalog", "search")
+
+    assert len(calls) == len(rows)
+    assert summary["captured_rows"] == len(rows)
+    assert len(durable) == len(rows)
+    assert summary["new_evaluator_calls"] == 0
+    assert {row["feasible"] for row in durable} == {False, True}
+
+
+def test_durable_observation_upsert_preserves_mixed_feasibility_without_polluting_evolution_memory():
+    memory = AgentMemory()
+    observations = [
+        {
+            "config": {"x": value},
+            "objective": score,
+            "feasible": feasible,
+            "source": "paid_test",
+            "generation": index,
+            "feasibility_basis": "search_discovery_robustness_guardrails",
+        }
+        for index, (value, score, feasible) in enumerate(
+            [(0.1, 0.2, False), (0.3, 0.4, True), (0.6, 0.7, True), (0.9, 0.1, False)]
+        )
+    ]
+
+    first = memory.record_optimizer_observations("catalog", "search", observations)
+    second = memory.record_optimizer_observations("catalog", "search", observations)
+    durable = memory.optimizer_observations("catalog", "search")
+    dimension = core.EvolutionDimension(
+        name="x",
+        kind="continuous",
+        group="independent",
+        low=0.0,
+        high=1.0,
+    )
+    descriptors = describe_optimizer_landscape(
+        dimensions=[dimension],
+        observations=durable,
+    )
+
+    assert first["inserted_rows"] == 4
+    assert second["inserted_rows"] == 0
+    assert second["updated_rows"] == 4
+    assert len(durable) == 4
+    assert {row["seen_count"] for row in durable} == {2}
+    assert descriptors.feasible_density == 0.5
+    assert memory.evolution_memory("catalog", "search") == []
+
+
+def test_durable_observation_geometry_changes_router_context_without_becoming_warm_start():
+    registry = OptimizerToolRegistry(build_sample_catalog(), optimizer_backend="auto")
+    before = registry._routing_context("search")
+    observations = _durable_search_observations(registry, 4)
+
+    registry.memory.record_optimizer_observations(
+        registry.catalog_key,
+        "search",
+        observations,
+    )
+    after = registry._routing_context("search")
+    manifest = registry.inspect_data()["optimizer_meta_router"]
+
+    assert after.landscape.informative is True
+    assert after.landscape.feasible_density == 0.5
+    assert after.landscape.to_dict()["new_evaluator_calls"] == 0
+    assert after.warm_start_rows == before.warm_start_rows
+    assert after.context_key != before.context_key
+    assert manifest["optimizer_observation_authority"] == "routing_descriptor_only"
+    assert manifest["optimizer_observation_memory"] == "evaluator_paid_discovery_rows_only"
+
+
+def test_sparse_durable_observation_memory_preserves_previous_context_identity():
+    registry = OptimizerToolRegistry(build_sample_catalog(), optimizer_backend="auto")
+    before = registry._routing_context("search")
+    registry.memory.record_optimizer_observations(
+        registry.catalog_key,
+        "search",
+        _durable_search_observations(registry, 3),
+    )
+    after = registry._routing_context("search")
+
+    assert after.context_key == before.context_key
+    assert after.landscape.feasible_density is None
+
+
+def test_backend_scoped_optimizer_observations_do_not_cross_serving_namespaces():
+    base = AgentMemory()
+    scoped = BackendScopedMemory(base, search_scope="semantic-a")
+    observations = [
+        {
+            "config": {"x": 0.2},
+            "objective": 0.3,
+            "feasible": False,
+            "source": "paid_test",
+            "generation": 0,
+            "feasibility_basis": "search_discovery_robustness_guardrails",
+        }
+    ]
+
+    scoped.record_optimizer_observations("catalog", "search", observations)
+    scoped_rows = scoped.optimizer_observations("catalog", "search")
+    unscoped_rows = base.optimizer_observations("catalog", "search")
+
+    assert len(scoped_rows) == 1
+    assert unscoped_rows == []
