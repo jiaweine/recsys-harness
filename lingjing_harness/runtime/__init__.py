@@ -42,6 +42,12 @@ from .backend_config import RuntimeBackendConfig, build_runtime_tools
 # priors. The original single-arm credit path remains authoritative for first-order
 # routing; the bridge appends only co-occurrence pair evidence.
 install_mechanism_transfer()
+# Preserve the pre-observation router so later confidence gates can reject weak
+# durable geometry all the way back to trusted-strategy / legacy routing instead
+# of silently falling through to the unweighted observation wrapper.
+OptimizerToolRegistry._routing_context_without_optimizer_observations = (
+    OptimizerToolRegistry._routing_context
+)
 # Keep evaluator-paid search geometry in a separate routing-only durable ledger.
 # This installs after optimizer/backend composition so one capture wrapper observes
 # native, Optuna, MOTPE, and qLog rows without changing their evaluation budgets.
