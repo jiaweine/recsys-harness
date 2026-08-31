@@ -13,7 +13,10 @@ from lingjing_harness.algorithms.optimizer_observation_weighting import (
 
 OPTIMIZER_OBSERVATION_RECENCY_HALF_LIFE_DAYS = 14.0
 OPTIMIZER_OBSERVATION_RECENCY_FLOOR = 0.125
+OPTIMIZER_OBSERVATION_RECENCY_GRACE_SECONDS = 300.0
 OPTIMIZER_OBSERVATION_EVIDENCE_WEIGHT_CAP = 2.0
+OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS = 4.0
+OPTIMIZER_OBSERVATION_MAX_WEIGHT_SHARE = 0.50
 _INSTALLED = False
 
 
@@ -37,8 +40,9 @@ def optimizer_observation_routing_weight(
         now = time.time()
     updated_at = _finite_float(observation.get("updated_at"))
     age_seconds = max(0.0, now - updated_at) if updated_at is not None else 0.0
+    decay_age_seconds = max(0.0, age_seconds - OPTIMIZER_OBSERVATION_RECENCY_GRACE_SECONDS)
     half_life_seconds = OPTIMIZER_OBSERVATION_RECENCY_HALF_LIFE_DAYS * 24.0 * 60.0 * 60.0
-    recency = 0.5 ** (age_seconds / half_life_seconds)
+    recency = 0.5 ** (decay_age_seconds / half_life_seconds)
     recency = max(OPTIMIZER_OBSERVATION_RECENCY_FLOOR, min(1.0, recency))
 
     try:
@@ -53,6 +57,7 @@ def optimizer_observation_routing_weight(
         "routing_recency_weight": recency,
         "routing_evidence_weight": evidence,
         "routing_age_seconds": age_seconds,
+        "routing_decay_age_seconds": decay_age_seconds,
     }
 
 
@@ -80,6 +85,57 @@ def weight_optimizer_observations(
     return weighted
 
 
+def optimizer_observation_weight_diagnostics(
+    observations: Iterable[dict[str, Any]],
+) -> dict[str, Any]:
+    """Measure effective fresh evidence and concentration without evaluator work."""
+
+    rows = [row for row in observations if isinstance(row, dict)]
+    weights: list[float] = []
+    for row in rows:
+        weight = _finite_float(row.get("routing_weight"))
+        if weight is None or weight <= 0.0:
+            continue
+        weights.append(weight)
+
+    if not weights:
+        return {
+            "raw_rows": len(rows),
+            "weighted_rows": 0,
+            "total_weight": 0.0,
+            "kish_effective_rows": 0.0,
+            "effective_rows": 0.0,
+            "max_weight_share": 1.0,
+            "confident": False,
+            "new_evaluator_calls": 0,
+        }
+
+    total_weight = sum(weights)
+    squared_weight = sum(weight * weight for weight in weights)
+    kish_effective_rows = (
+        total_weight * total_weight / squared_weight
+        if squared_weight > 0.0
+        else 0.0
+    )
+    effective_rows = min(kish_effective_rows, total_weight)
+    max_weight_share = max(weights) / total_weight
+    confident = (
+        len(weights) >= int(OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS)
+        and effective_rows + 1e-12 >= OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS
+        and max_weight_share <= OPTIMIZER_OBSERVATION_MAX_WEIGHT_SHARE + 1e-12
+    )
+    return {
+        "raw_rows": len(rows),
+        "weighted_rows": len(weights),
+        "total_weight": total_weight,
+        "kish_effective_rows": kish_effective_rows,
+        "effective_rows": effective_rows,
+        "max_weight_share": max_weight_share,
+        "confident": confident,
+        "new_evaluator_calls": 0,
+    }
+
+
 def install_optimizer_observation_weighting(optimizer_registry_cls: type) -> None:
     """Apply transient recency/evidence weighting to durable router geometry."""
 
@@ -97,17 +153,38 @@ def install_optimizer_observation_weighting(optimizer_registry_cls: type) -> Non
         observations = reader(self.catalog_key, surface)
         if len(observations) < 4:
             return context
+
+        weighted = weight_optimizer_observations(observations)
+        diagnostics = optimizer_observation_weight_diagnostics(weighted)
+        if not diagnostics["confident"]:
+            fallback = getattr(
+                self,
+                "_routing_context_without_optimizer_observations",
+                None,
+            )
+            return fallback(surface) if callable(fallback) else context
+
         engine = self.search if surface == "search" else self.recommend
         try:
             dimensions, _ = core._evolution_schema(engine.config)
             landscape = describe_weighted_optimizer_landscape(
                 dimensions=dimensions,
-                observations=weight_optimizer_observations(observations),
+                observations=weighted,
             )
         except (TypeError, ValueError, KeyError):
-            return context
+            fallback = getattr(
+                self,
+                "_routing_context_without_optimizer_observations",
+                None,
+            )
+            return fallback(surface) if callable(fallback) else context
         if not landscape.informative:
-            return context
+            fallback = getattr(
+                self,
+                "_routing_context_without_optimizer_observations",
+                None,
+            )
+            return fallback(surface) if callable(fallback) else context
         return replace(context, landscape=landscape)
 
     optimizer_registry_cls._routing_context = routing_context_with_weighted_durable_geometry
@@ -122,7 +199,13 @@ def install_optimizer_observation_weighting(optimizer_registry_cls: type) -> Non
                 "optimizer_observation_weighting": "recency_half_life_and_log_evidence",
                 "optimizer_observation_recency_half_life_days": OPTIMIZER_OBSERVATION_RECENCY_HALF_LIFE_DAYS,
                 "optimizer_observation_recency_floor": OPTIMIZER_OBSERVATION_RECENCY_FLOOR,
+                "optimizer_observation_recency_grace_seconds": OPTIMIZER_OBSERVATION_RECENCY_GRACE_SECONDS,
                 "optimizer_observation_evidence_weight_cap": OPTIMIZER_OBSERVATION_EVIDENCE_WEIGHT_CAP,
+                "optimizer_observation_confidence": "effective_fresh_rows_and_weight_concentration",
+                "optimizer_observation_effective_rows_method": "min_kish_ess_and_total_routing_weight",
+                "optimizer_observation_min_effective_rows": OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS,
+                "optimizer_observation_max_weight_share": OPTIMIZER_OBSERVATION_MAX_WEIGHT_SHARE,
+                "optimizer_observation_confidence_fallback": "pre_observation_router",
                 "optimizer_observation_weighting_authority": "routing_descriptor_only",
                 "optimizer_observation_weighting_evaluator_calls": 0,
             }
@@ -136,9 +219,13 @@ def install_optimizer_observation_weighting(optimizer_registry_cls: type) -> Non
 
 __all__ = [
     "OPTIMIZER_OBSERVATION_EVIDENCE_WEIGHT_CAP",
+    "OPTIMIZER_OBSERVATION_MAX_WEIGHT_SHARE",
+    "OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS",
     "OPTIMIZER_OBSERVATION_RECENCY_FLOOR",
+    "OPTIMIZER_OBSERVATION_RECENCY_GRACE_SECONDS",
     "OPTIMIZER_OBSERVATION_RECENCY_HALF_LIFE_DAYS",
     "install_optimizer_observation_weighting",
     "optimizer_observation_routing_weight",
+    "optimizer_observation_weight_diagnostics",
     "weight_optimizer_observations",
 ]
