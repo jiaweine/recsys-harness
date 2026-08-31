@@ -61,7 +61,7 @@ def _durable_search_observations(registry, count=4):
             "feasible": index % 2 == 0,
             "source": "test_evaluator",
             "generation": index,
-            "feasibility_basis": "search_discovery_robustness_guardrails_v1",
+            "feasibility_basis": "search_discovery_robustness_guardrails",
             "constraints": {"worse_share": 0.1, "worst_delta": -0.1},
         }
         for index, config in enumerate(configs[:count])
@@ -225,7 +225,7 @@ def test_durable_observation_upsert_preserves_mixed_feasibility_without_pollutin
             "feasible": feasible,
             "source": "paid_test",
             "generation": index,
-            "feasibility_basis": "search_discovery_robustness_guardrails_v1",
+            "feasibility_basis": "search_discovery_robustness_guardrails",
         }
         for index, (value, score, feasible) in enumerate(
             [(0.1, 0.2, False), (0.3, 0.4, True), (0.6, 0.7, True), (0.9, 0.1, False)]
@@ -302,7 +302,7 @@ def test_backend_scoped_optimizer_observations_do_not_cross_serving_namespaces()
             "feasible": False,
             "source": "paid_test",
             "generation": 0,
-            "feasibility_basis": "search_discovery_robustness_guardrails_v1",
+            "feasibility_basis": "search_discovery_robustness_guardrails",
         }
     ]
 
