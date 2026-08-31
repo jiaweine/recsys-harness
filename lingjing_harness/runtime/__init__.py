@@ -28,6 +28,7 @@ from .mission_compiler import MissionCompiler
 from .network import NetworkResearch
 from .optimizer_tools import OptimizerToolRegistry
 from .optimizer_observation_memory import install_optimizer_observation_runtime
+from .optimizer_observation_weighting import install_optimizer_observation_weighting
 from .perception import PerceptionEngine
 from .policy import OwnedPolicy
 from .semantic_tools import SearchBackendToolRegistry
@@ -45,6 +46,10 @@ install_mechanism_transfer()
 # This installs after optimizer/backend composition so one capture wrapper observes
 # native, Optuna, MOTPE, and qLog rows without changing their evaluation budgets.
 install_optimizer_observation_runtime(AgentMemory, OptimizerToolRegistry)
+# Weight only the durable routing geometry. Weights are transient, bounded, and
+# derived from recency plus repeated evidence; they never affect warm starts or
+# downstream holdout/promotion authority.
+install_optimizer_observation_weighting(OptimizerToolRegistry)
 
 
 class AgentHarness(_BaseAgentHarness):

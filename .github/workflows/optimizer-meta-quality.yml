@@ -6,14 +6,17 @@ on:
       - '.github/workflows/optimizer-meta-quality.yml'
       - 'lingjing_harness/algorithms/optimizer_meta.py'
       - 'lingjing_harness/algorithms/optimizer_observations.py'
+      - 'lingjing_harness/algorithms/optimizer_observation_weighting.py'
       - 'lingjing_harness/runtime/__init__.py'
       - 'lingjing_harness/runtime/backend_config.py'
       - 'lingjing_harness/runtime/backend_memory.py'
       - 'lingjing_harness/runtime/optimizer_meta_memory.py'
       - 'lingjing_harness/runtime/optimizer_observation_memory.py'
+      - 'lingjing_harness/runtime/optimizer_observation_weighting.py'
       - 'lingjing_harness/runtime/optimizer_tools.py'
       - 'scripts/optimizer_meta_benchmark.py'
       - 'tests/test_optimizer_landscape_descriptors.py'
+      - 'tests/test_optimizer_observation_weighting.py'
       - 'tests/test_optimizer_meta_router.py'
       - 'tests/test_optimizer_meta_memory.py'
       - 'tests/test_optimizer_meta_registry.py'
@@ -26,14 +29,17 @@ on:
       - '.github/workflows/optimizer-meta-quality.yml'
       - 'lingjing_harness/algorithms/optimizer_meta.py'
       - 'lingjing_harness/algorithms/optimizer_observations.py'
+      - 'lingjing_harness/algorithms/optimizer_observation_weighting.py'
       - 'lingjing_harness/runtime/__init__.py'
       - 'lingjing_harness/runtime/backend_config.py'
       - 'lingjing_harness/runtime/backend_memory.py'
       - 'lingjing_harness/runtime/optimizer_meta_memory.py'
       - 'lingjing_harness/runtime/optimizer_observation_memory.py'
+      - 'lingjing_harness/runtime/optimizer_observation_weighting.py'
       - 'lingjing_harness/runtime/optimizer_tools.py'
       - 'scripts/optimizer_meta_benchmark.py'
       - 'tests/test_optimizer_landscape_descriptors.py'
+      - 'tests/test_optimizer_observation_weighting.py'
       - 'tests/test_optimizer_meta_router.py'
       - 'tests/test_optimizer_meta_memory.py'
       - 'tests/test_optimizer_meta_registry.py'
@@ -63,13 +69,16 @@ jobs:
           python -m compileall -q \
             lingjing_harness/algorithms/optimizer_meta.py \
             lingjing_harness/algorithms/optimizer_observations.py \
+            lingjing_harness/algorithms/optimizer_observation_weighting.py \
             lingjing_harness/runtime/__init__.py \
             lingjing_harness/runtime/backend_config.py \
             lingjing_harness/runtime/optimizer_meta_memory.py \
             lingjing_harness/runtime/optimizer_observation_memory.py \
+            lingjing_harness/runtime/optimizer_observation_weighting.py \
             lingjing_harness/runtime/optimizer_tools.py \
             scripts/optimizer_meta_benchmark.py \
             tests/test_optimizer_landscape_descriptors.py \
+            tests/test_optimizer_observation_weighting.py \
             tests/test_optimizer_meta_router.py \
             tests/test_optimizer_meta_memory.py \
             tests/test_optimizer_meta_registry.py \
@@ -79,6 +88,7 @@ jobs:
         run: |
           pytest -q \
             tests/test_optimizer_landscape_descriptors.py \
+            tests/test_optimizer_observation_weighting.py \
             tests/test_optimizer_meta_router.py \
             tests/test_optimizer_meta_memory.py \
             tests/test_optimizer_meta_registry.py \
@@ -101,7 +111,10 @@ jobs:
           assert manifest['landscape_descriptors'] == 'durable_evaluator_observations_with_strategy_fallback'
           assert manifest['optimizer_observation_memory'] == 'evaluator_paid_discovery_rows_only'
           assert manifest['optimizer_observation_authority'] == 'routing_descriptor_only'
+          assert manifest['optimizer_observation_weighting'] == 'recency_half_life_and_log_evidence'
+          assert manifest['optimizer_observation_weighting_authority'] == 'routing_descriptor_only'
           assert manifest['landscape_descriptor_evaluator_calls'] == 0
+          assert manifest['optimizer_observation_weighting_evaluator_calls'] == 0
           PY
 
   optional-stack:
