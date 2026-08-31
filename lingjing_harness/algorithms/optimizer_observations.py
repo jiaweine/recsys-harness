@@ -47,7 +47,7 @@ def _discovery_feasibility(row: dict[str, Any]) -> tuple[bool, str] | None:
             evidence >= core.MIN_SEARCH_EVIDENCE
             and worse_share <= 0.34
             and worst_delta >= -0.35,
-            "search_discovery_robustness_guardrails_v1",
+            "search_discovery_robustness_guardrails",
         )
 
     if "users" in report:
@@ -59,7 +59,7 @@ def _discovery_feasibility(row: dict[str, Any]) -> tuple[bool, str] | None:
             evidence >= core.MIN_RECOMMEND_EVIDENCE
             and worse_share <= 0.40
             and worst_delta >= -0.30,
-            "recommend_discovery_robustness_guardrails_v1",
+            "recommend_discovery_robustness_guardrails",
         )
     return None
 
