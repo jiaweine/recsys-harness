@@ -9,10 +9,13 @@ on:
       - 'lingjing_harness/runtime/backend_memory.py'
       - 'lingjing_harness/runtime/optimizer_meta_memory.py'
       - 'lingjing_harness/runtime/optimizer_tools.py'
+      - 'scripts/optimizer_meta_benchmark.py'
+      - 'tests/test_optimizer_landscape_descriptors.py'
       - 'tests/test_optimizer_meta_router.py'
       - 'tests/test_optimizer_meta_memory.py'
       - 'tests/test_optimizer_meta_registry.py'
       - 'tests/test_optimizer_meta_backend_scope.py'
+      - 'tests/test_optimizer_meta_benchmark.py'
       - 'tests/test_optimizer_backends.py'
       - 'pyproject.toml'
   pull_request:
@@ -23,10 +26,13 @@ on:
       - 'lingjing_harness/runtime/backend_memory.py'
       - 'lingjing_harness/runtime/optimizer_meta_memory.py'
       - 'lingjing_harness/runtime/optimizer_tools.py'
+      - 'scripts/optimizer_meta_benchmark.py'
+      - 'tests/test_optimizer_landscape_descriptors.py'
       - 'tests/test_optimizer_meta_router.py'
       - 'tests/test_optimizer_meta_memory.py'
       - 'tests/test_optimizer_meta_registry.py'
       - 'tests/test_optimizer_meta_backend_scope.py'
+      - 'tests/test_optimizer_meta_benchmark.py'
       - 'tests/test_optimizer_backends.py'
       - 'pyproject.toml'
   workflow_dispatch:
@@ -53,17 +59,22 @@ jobs:
             lingjing_harness/runtime/backend_config.py \
             lingjing_harness/runtime/optimizer_meta_memory.py \
             lingjing_harness/runtime/optimizer_tools.py \
-            tests/test_optimizer_meta_router.py \
-            tests/test_optimizer_meta_memory.py \
-            tests/test_optimizer_meta_registry.py \
-            tests/test_optimizer_meta_backend_scope.py
-      - name: Run dependency-light routing, ledger, registry, and backend-scope contracts
-        run: |
-          pytest -q \
+            scripts/optimizer_meta_benchmark.py \
+            tests/test_optimizer_landscape_descriptors.py \
             tests/test_optimizer_meta_router.py \
             tests/test_optimizer_meta_memory.py \
             tests/test_optimizer_meta_registry.py \
             tests/test_optimizer_meta_backend_scope.py \
+            tests/test_optimizer_meta_benchmark.py
+      - name: Run dependency-light routing, ledger, registry, and backend-scope contracts
+        run: |
+          pytest -q \
+            tests/test_optimizer_landscape_descriptors.py \
+            tests/test_optimizer_meta_router.py \
+            tests/test_optimizer_meta_memory.py \
+            tests/test_optimizer_meta_registry.py \
+            tests/test_optimizer_meta_backend_scope.py \
+            tests/test_optimizer_meta_benchmark.py \
             tests/test_optimizer_backends.py
       - name: Verify default remains native and auto exposes no activation authority
         run: |
@@ -78,6 +89,8 @@ jobs:
           manifest = auto.inspect_data()['optimizer_meta_router']
           assert manifest['authority'] == 'optimizer_selection_only'
           assert manifest['default_backend'] == 'native'
+          assert manifest['landscape_descriptors'] == 'durable_preobserved_rows_only'
+          assert manifest['landscape_descriptor_evaluator_calls'] == 0
           PY
 
   optional-stack:
@@ -107,6 +120,7 @@ jobs:
           selected, decision, failures = registry._select_auto_backend('search')
           assert selected in {'native', 'optuna', 'optuna_motpe', 'qlognehvi'}
           assert decision.context.evaluation_budget > 0
+          assert decision.context.landscape.to_dict()['new_evaluator_calls'] == 0
           assert failures == {}
           assert decision.to_dict()['authority'] == 'optimizer_selection_only'
           PY
