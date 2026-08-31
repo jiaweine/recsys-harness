@@ -13,6 +13,7 @@ from lingjing_harness.algorithms.optimizer_observation_weighting import (
 
 OPTIMIZER_OBSERVATION_RECENCY_HALF_LIFE_DAYS = 14.0
 OPTIMIZER_OBSERVATION_RECENCY_FLOOR = 0.125
+OPTIMIZER_OBSERVATION_RECENCY_GRACE_SECONDS = 300.0
 OPTIMIZER_OBSERVATION_EVIDENCE_WEIGHT_CAP = 2.0
 OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS = 4.0
 OPTIMIZER_OBSERVATION_MAX_WEIGHT_SHARE = 0.50
@@ -39,8 +40,9 @@ def optimizer_observation_routing_weight(
         now = time.time()
     updated_at = _finite_float(observation.get("updated_at"))
     age_seconds = max(0.0, now - updated_at) if updated_at is not None else 0.0
+    decay_age_seconds = max(0.0, age_seconds - OPTIMIZER_OBSERVATION_RECENCY_GRACE_SECONDS)
     half_life_seconds = OPTIMIZER_OBSERVATION_RECENCY_HALF_LIFE_DAYS * 24.0 * 60.0 * 60.0
-    recency = 0.5 ** (age_seconds / half_life_seconds)
+    recency = 0.5 ** (decay_age_seconds / half_life_seconds)
     recency = max(OPTIMIZER_OBSERVATION_RECENCY_FLOOR, min(1.0, recency))
 
     try:
@@ -55,6 +57,7 @@ def optimizer_observation_routing_weight(
         "routing_recency_weight": recency,
         "routing_evidence_weight": evidence,
         "routing_age_seconds": age_seconds,
+        "routing_decay_age_seconds": decay_age_seconds,
     }
 
 
@@ -196,6 +199,7 @@ def install_optimizer_observation_weighting(optimizer_registry_cls: type) -> Non
                 "optimizer_observation_weighting": "recency_half_life_and_log_evidence",
                 "optimizer_observation_recency_half_life_days": OPTIMIZER_OBSERVATION_RECENCY_HALF_LIFE_DAYS,
                 "optimizer_observation_recency_floor": OPTIMIZER_OBSERVATION_RECENCY_FLOOR,
+                "optimizer_observation_recency_grace_seconds": OPTIMIZER_OBSERVATION_RECENCY_GRACE_SECONDS,
                 "optimizer_observation_evidence_weight_cap": OPTIMIZER_OBSERVATION_EVIDENCE_WEIGHT_CAP,
                 "optimizer_observation_confidence": "effective_fresh_rows_and_weight_concentration",
                 "optimizer_observation_effective_rows_method": "min_kish_ess_and_total_routing_weight",
@@ -218,6 +222,7 @@ __all__ = [
     "OPTIMIZER_OBSERVATION_MAX_WEIGHT_SHARE",
     "OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS",
     "OPTIMIZER_OBSERVATION_RECENCY_FLOOR",
+    "OPTIMIZER_OBSERVATION_RECENCY_GRACE_SECONDS",
     "OPTIMIZER_OBSERVATION_RECENCY_HALF_LIFE_DAYS",
     "install_optimizer_observation_weighting",
     "optimizer_observation_routing_weight",
