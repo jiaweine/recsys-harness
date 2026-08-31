@@ -6,13 +6,17 @@ on:
       - '.github/workflows/optimizer-benchmark.yml'
       - 'scripts/optimizer_equal_budget_benchmark.py'
       - 'scripts/correct_optimizer_benchmark_metrics.py'
+      - 'scripts/optimizer_meta_benchmark.py'
       - 'tests/test_optimizer_equal_budget_benchmark.py'
       - 'tests/test_optimizer_benchmark_metric_correction.py'
+      - 'tests/test_optimizer_meta_benchmark.py'
+      - 'tests/test_optimizer_meta_router.py'
       - 'tests/test_qlog_mobo_tuning.py'
       - 'tests/test_qlog_mobo_tuning_botorch.py'
       - 'lingjing_harness/algorithms/evolution_core.py'
       - 'lingjing_harness/algorithms/optimizer_backends.py'
       - 'lingjing_harness/algorithms/optimizer_contracts.py'
+      - 'lingjing_harness/algorithms/optimizer_meta.py'
       - 'lingjing_harness/algorithms/qlog_mobo.py'
       - 'pyproject.toml'
   pull_request:
@@ -20,13 +24,17 @@ on:
       - '.github/workflows/optimizer-benchmark.yml'
       - 'scripts/optimizer_equal_budget_benchmark.py'
       - 'scripts/correct_optimizer_benchmark_metrics.py'
+      - 'scripts/optimizer_meta_benchmark.py'
       - 'tests/test_optimizer_equal_budget_benchmark.py'
       - 'tests/test_optimizer_benchmark_metric_correction.py'
+      - 'tests/test_optimizer_meta_benchmark.py'
+      - 'tests/test_optimizer_meta_router.py'
       - 'tests/test_qlog_mobo_tuning.py'
       - 'tests/test_qlog_mobo_tuning_botorch.py'
       - 'lingjing_harness/algorithms/evolution_core.py'
       - 'lingjing_harness/algorithms/optimizer_backends.py'
       - 'lingjing_harness/algorithms/optimizer_contracts.py'
+      - 'lingjing_harness/algorithms/optimizer_meta.py'
       - 'lingjing_harness/algorithms/qlog_mobo.py'
       - 'pyproject.toml'
   workflow_dispatch:
@@ -61,16 +69,22 @@ jobs:
           python -m compileall -q \
             scripts/optimizer_equal_budget_benchmark.py \
             scripts/correct_optimizer_benchmark_metrics.py \
+            scripts/optimizer_meta_benchmark.py \
             tests/test_optimizer_equal_budget_benchmark.py \
             tests/test_optimizer_benchmark_metric_correction.py \
+            tests/test_optimizer_meta_benchmark.py \
+            tests/test_optimizer_meta_router.py \
             tests/test_qlog_mobo_tuning.py \
             tests/test_qlog_mobo_tuning_botorch.py \
+            lingjing_harness/algorithms/optimizer_meta.py \
             lingjing_harness/algorithms/qlog_mobo.py
       - name: Run benchmark and qLog tuning contract tests
         run: |
           pytest -q \
             tests/test_optimizer_equal_budget_benchmark.py \
             tests/test_optimizer_benchmark_metric_correction.py \
+            tests/test_optimizer_meta_benchmark.py \
+            tests/test_optimizer_meta_router.py \
             tests/test_qlog_mobo_tuning.py \
             tests/test_qlog_mobo_tuning_botorch.py
       - name: Run equal-budget benchmark
@@ -84,27 +98,43 @@ jobs:
         run: |
           python scripts/correct_optimizer_benchmark_metrics.py \
             benchmark-artifacts/optimizer-equal-budget.json
+      - name: Evaluate cost-aware meta-router on the same evidence
+        run: |
+          python scripts/optimizer_meta_benchmark.py \
+            benchmark-artifacts/optimizer-equal-budget.json \
+            --output benchmark-artifacts/optimizer-meta-router.json \
+            > /tmp/optimizer-meta-router.json
       - name: Print compact benchmark summary and verify accounting
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          path = Path('benchmark-artifacts/optimizer-equal-budget.json')
-          report = json.loads(path.read_text())
-          print(json.dumps(report['summary'], indent=2, sort_keys=True))
-          assert report['efficiency_metric_semantics'].startswith('(best_feasible_primary')
-          budgets = {(r['landscape'], r['seed']): r['evaluation_budget'] for r in report['runs']}
-          for row in report['runs']:
+          fixed_path = Path('benchmark-artifacts/optimizer-equal-budget.json')
+          fixed = json.loads(fixed_path.read_text())
+          meta_path = Path('benchmark-artifacts/optimizer-meta-router.json')
+          meta = json.loads(meta_path.read_text())
+          print('fixed backends:')
+          print(json.dumps(fixed['summary'], indent=2, sort_keys=True))
+          print('meta router:')
+          print(json.dumps(meta['summary'], indent=2, sort_keys=True))
+          assert fixed['efficiency_metric_semantics'].startswith('(best_feasible_primary')
+          budgets = {(r['landscape'], r['seed']): r['evaluation_budget'] for r in fixed['runs']}
+          for row in fixed['runs']:
               key = (row['landscape'], row['seed'])
               assert row['evaluation_budget'] == budgets[key]
               assert row['evaluator_calls'] <= row['evaluation_budget']
               assert row['feasible_found'], row
               assert row['initial_best_feasible_primary'] is not None
               assert row['primary_gain_per_evaluator_call'] is not None
+          assert meta['cases']
+          for row in meta['cases']:
+              assert row['selected_backend'] in {'native', 'optuna', 'optuna_motpe', 'qlognehvi'}
+              assert row['routing_regret'] >= 0.0
+              assert row['selected_utility'] <= row['oracle_utility'] + 1e-12
           PY
       - name: Upload equal-budget benchmark evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: optimizer-equal-budget
-          path: benchmark-artifacts/optimizer-equal-budget.json
+          path: benchmark-artifacts/*.json
           retention-days: 14

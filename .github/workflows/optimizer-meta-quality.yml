@@ -1,0 +1,112 @@
+name: Optimizer Meta Quality
+
+on:
+  push:
+    paths:
+      - '.github/workflows/optimizer-meta-quality.yml'
+      - 'lingjing_harness/algorithms/optimizer_meta.py'
+      - 'lingjing_harness/runtime/backend_config.py'
+      - 'lingjing_harness/runtime/backend_memory.py'
+      - 'lingjing_harness/runtime/optimizer_meta_memory.py'
+      - 'lingjing_harness/runtime/optimizer_tools.py'
+      - 'tests/test_optimizer_meta_router.py'
+      - 'tests/test_optimizer_meta_memory.py'
+      - 'tests/test_optimizer_meta_registry.py'
+      - 'tests/test_optimizer_meta_backend_scope.py'
+      - 'tests/test_optimizer_backends.py'
+      - 'pyproject.toml'
+  pull_request:
+    paths:
+      - '.github/workflows/optimizer-meta-quality.yml'
+      - 'lingjing_harness/algorithms/optimizer_meta.py'
+      - 'lingjing_harness/runtime/backend_config.py'
+      - 'lingjing_harness/runtime/backend_memory.py'
+      - 'lingjing_harness/runtime/optimizer_meta_memory.py'
+      - 'lingjing_harness/runtime/optimizer_tools.py'
+      - 'tests/test_optimizer_meta_router.py'
+      - 'tests/test_optimizer_meta_memory.py'
+      - 'tests/test_optimizer_meta_registry.py'
+      - 'tests/test_optimizer_meta_backend_scope.py'
+      - 'tests/test_optimizer_backends.py'
+      - 'pyproject.toml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Compile meta-router runtime
+        run: |
+          python -m compileall -q \
+            lingjing_harness/algorithms/optimizer_meta.py \
+            lingjing_harness/runtime/backend_config.py \
+            lingjing_harness/runtime/optimizer_meta_memory.py \
+            lingjing_harness/runtime/optimizer_tools.py \
+            tests/test_optimizer_meta_router.py \
+            tests/test_optimizer_meta_memory.py \
+            tests/test_optimizer_meta_registry.py \
+            tests/test_optimizer_meta_backend_scope.py
+      - name: Run dependency-light routing, ledger, registry, and backend-scope contracts
+        run: |
+          pytest -q \
+            tests/test_optimizer_meta_router.py \
+            tests/test_optimizer_meta_memory.py \
+            tests/test_optimizer_meta_registry.py \
+            tests/test_optimizer_meta_backend_scope.py \
+            tests/test_optimizer_backends.py
+      - name: Verify default remains native and auto exposes no activation authority
+        run: |
+          python - <<'PY'
+          from lingjing_harness.runtime.optimizer_tools import OptimizerToolRegistry
+          from lingjing_harness.sample_data import build_sample_catalog
+
+          default = OptimizerToolRegistry(build_sample_catalog())
+          auto = OptimizerToolRegistry(build_sample_catalog(), optimizer_backend='auto')
+          assert default.optimizer_backend == 'native'
+          assert auto.optimizer_backend == 'auto'
+          manifest = auto.inspect_data()['optimizer_meta_router']
+          assert manifest['authority'] == 'optimizer_selection_only'
+          assert manifest['default_backend'] == 'native'
+          PY
+
+  optional-stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Install pinned optional optimizer stack
+        run: pip install 'optuna==4.9.0' 'botorch==0.18.1'
+      - name: Verify optional stack versions and meta preflight
+        run: |
+          python - <<'PY'
+          import botorch
+          import optuna
+          from lingjing_harness.runtime.optimizer_tools import OptimizerToolRegistry
+          from lingjing_harness.sample_data import build_sample_catalog
+
+          assert botorch.__version__ == '0.18.1'
+          assert optuna.__version__ == '4.9.0'
+          registry = OptimizerToolRegistry(build_sample_catalog(), optimizer_backend='auto')
+          selected, decision, failures = registry._select_auto_backend('search')
+          assert selected in {'native', 'optuna', 'optuna_motpe', 'qlognehvi'}
+          assert decision.context.evaluation_budget > 0
+          assert failures == {}
+          assert decision.to_dict()['authority'] == 'optimizer_selection_only'
+          PY
