@@ -9,8 +9,11 @@ from lingjing_harness.algorithms.optimizer_observation_weighting import (
 )
 from lingjing_harness.runtime.optimizer_observation_weighting import (
     OPTIMIZER_OBSERVATION_EVIDENCE_WEIGHT_CAP,
+    OPTIMIZER_OBSERVATION_MAX_WEIGHT_SHARE,
+    OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS,
     OPTIMIZER_OBSERVATION_RECENCY_FLOOR,
     optimizer_observation_routing_weight,
+    optimizer_observation_weight_diagnostics,
     weight_optimizer_observations,
 )
 from lingjing_harness.runtime.optimizer_tools import OptimizerToolRegistry
@@ -87,15 +90,19 @@ def test_recent_boundary_observations_dominate_stale_equal_count_history():
     unweighted = describe_optimizer_landscape(
         dimensions=[_dimension()], observations=observations
     )
+    weighted_rows = weight_optimizer_observations(observations, reference_time=now)
     weighted = describe_weighted_optimizer_landscape(
         dimensions=[_dimension()],
-        observations=weight_optimizer_observations(observations, reference_time=now),
+        observations=weighted_rows,
     )
+    diagnostics = optimizer_observation_weight_diagnostics(weighted_rows)
 
     assert unweighted.feasible_density == 0.5
     assert weighted.feasible_density == pytest.approx(8.0 / 9.0)
     assert weighted.feasible_density_bucket == "dense"
     assert weighted.to_dict()["new_evaluator_calls"] == 0
+    assert diagnostics["confident"] is True
+    assert diagnostics["effective_rows"] >= OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS
 
 
 def test_repeated_evidence_has_bounded_logarithmic_influence():
@@ -137,6 +144,60 @@ def test_weighting_is_transient_and_does_not_mutate_durable_rows():
     assert "routing_weight" not in observations[0]
     assert weighted[0]["routing_weight"] == 1.0
     assert weighted[0] is not observations[0]
+
+
+def test_four_fresh_balanced_rows_meet_effective_evidence_gate():
+    now = 4_100_000_000.0
+    observations = [
+        _row(0.1, 0.1, False, updated_at=now),
+        _row(0.3, 0.3, True, updated_at=now),
+        _row(0.6, 0.6, True, updated_at=now),
+        _row(0.9, 0.9, False, updated_at=now),
+    ]
+    diagnostics = optimizer_observation_weight_diagnostics(
+        weight_optimizer_observations(observations, reference_time=now)
+    )
+
+    assert diagnostics["kish_effective_rows"] == pytest.approx(4.0)
+    assert diagnostics["effective_rows"] == pytest.approx(4.0)
+    assert diagnostics["max_weight_share"] == pytest.approx(0.25)
+    assert diagnostics["confident"] is True
+
+
+def test_equal_but_stale_rows_do_not_pass_on_raw_count_or_kish_ess_alone():
+    now = 4_200_000_000.0
+    observations = [
+        _row(0.1, 0.1, False, updated_at=now - 365 * DAY),
+        _row(0.3, 0.3, True, updated_at=now - 365 * DAY),
+        _row(0.6, 0.6, True, updated_at=now - 365 * DAY),
+        _row(0.9, 0.9, False, updated_at=now - 365 * DAY),
+    ]
+    diagnostics = optimizer_observation_weight_diagnostics(
+        weight_optimizer_observations(observations, reference_time=now)
+    )
+
+    assert diagnostics["raw_rows"] == 4
+    assert diagnostics["kish_effective_rows"] == pytest.approx(4.0)
+    assert diagnostics["total_weight"] == pytest.approx(0.5)
+    assert diagnostics["effective_rows"] == pytest.approx(0.5)
+    assert diagnostics["confident"] is False
+
+
+def test_dominant_single_observation_fails_weight_concentration_gate():
+    now = 4_300_000_000.0
+    observations = [
+        _row(0.1, 0.1, False, updated_at=now, seen_count=16),
+        _row(0.3, 0.3, True, updated_at=now - 365 * DAY),
+        _row(0.6, 0.6, True, updated_at=now - 365 * DAY),
+        _row(0.9, 0.9, True, updated_at=now - 365 * DAY),
+    ]
+    diagnostics = optimizer_observation_weight_diagnostics(
+        weight_optimizer_observations(observations, reference_time=now)
+    )
+
+    assert diagnostics["max_weight_share"] > OPTIMIZER_OBSERVATION_MAX_WEIGHT_SHARE
+    assert diagnostics["effective_rows"] < OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS
+    assert diagnostics["confident"] is False
 
 
 def test_runtime_router_uses_weighted_durable_geometry_without_warm_start_pollution():
@@ -185,5 +246,54 @@ def test_runtime_router_uses_weighted_durable_geometry_without_warm_start_pollut
     assert after.warm_start_rows == before.warm_start_rows
     assert after.landscape.to_dict()["new_evaluator_calls"] == 0
     assert manifest["optimizer_observation_weighting"] == "recency_half_life_and_log_evidence"
+    assert manifest["optimizer_observation_confidence"] == "effective_fresh_rows_and_weight_concentration"
+    assert manifest["optimizer_observation_confidence_fallback"] == "pre_observation_router"
     assert manifest["optimizer_observation_weighting_authority"] == "routing_descriptor_only"
     assert manifest["optimizer_observation_weighting_evaluator_calls"] == 0
+
+
+def test_runtime_confidence_failure_falls_back_before_unweighted_durable_geometry():
+    registry = OptimizerToolRegistry(build_sample_catalog(), optimizer_backend="auto")
+    before = registry._routing_context("search")
+    observations = _durable_search_observations(registry, 4)
+    registry.memory.record_optimizer_observations(
+        registry.catalog_key,
+        "search",
+        observations,
+    )
+
+    now = 6_000_000_000.0
+    with registry.memory._lock:
+        conn = registry.memory._connect()
+        try:
+            conn.execute(
+                "update agent_optimizer_observations set updated_at=? where catalog_key=? and domain='search'",
+                (now - 365 * DAY, registry.catalog_key),
+            )
+            conn.commit()
+        finally:
+            registry.memory._close(conn)
+
+    import lingjing_harness.runtime.optimizer_observation_weighting as runtime_weighting
+
+    original_time = runtime_weighting.time.time
+    runtime_weighting.time.time = lambda: now
+    try:
+        raw = registry.memory.optimizer_observations(registry.catalog_key, "search")
+        unweighted = describe_optimizer_landscape(
+            dimensions=core._evolution_schema(registry.search.config)[0],
+            observations=raw,
+        )
+        diagnostics = optimizer_observation_weight_diagnostics(
+            weight_optimizer_observations(raw, reference_time=now)
+        )
+        after = registry._routing_context("search")
+        fallback = registry._routing_context_without_optimizer_observations("search")
+    finally:
+        runtime_weighting.time.time = original_time
+
+    assert unweighted.informative is True
+    assert diagnostics["confident"] is False
+    assert after.context_key == before.context_key == fallback.context_key
+    assert after.landscape.to_dict() == fallback.landscape.to_dict()
+    assert after.warm_start_rows == before.warm_start_rows
