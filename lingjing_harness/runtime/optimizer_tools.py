@@ -108,17 +108,43 @@ class OptimizerToolRegistry(_ToolRegistry):
                 "enabled": self.optimizer_backend == AUTO_OPTIMIZER_BACKEND,
                 "policies": [AUTO_OPTIMIZER_BACKEND],
                 "default_backend": "native",
+                "landscape_descriptors": "durable_preobserved_rows_only",
+                "landscape_descriptor_evaluator_calls": 0,
                 "authority": "optimizer_selection_only",
             },
         }
+
+    @staticmethod
+    def _landscape_observations(memory_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        observations: list[dict[str, Any]] = []
+        for row in memory_rows:
+            if not isinstance(row, dict) or not isinstance(row.get("config"), dict):
+                continue
+            try:
+                score = float(row.get("score"))
+            except (TypeError, ValueError):
+                continue
+            observations.append(
+                {
+                    "config": dict(row["config"]),
+                    "score": score,
+                    "source": "durable_strategy_memory",
+                }
+            )
+        return observations
 
     def _routing_context(self, surface: str):
         engine = self.search if surface == "search" else self.recommend
         dimensions, _ = core._evolution_schema(engine.config)
         evidence_route = "production" if self._business_ready(surface) else "proxy"
-        trusted_memory = self._evolution_memory(surface)
+        evolution_memory = self._evolution_memory(surface)
+        landscape_observations = self._landscape_observations(evolution_memory)
         response_surface_rows = _response_surface_capacity(dimensions)
-        warm_rows = response_surface_rows + min(len(trusted_memory), core.POPULATION_SIZE)
+        # Strategy-credit rows guide mutation routing but are not evaluated configs.
+        # Only concrete durable configs may contribute warm-start capacity/geometry.
+        warm_rows = response_surface_rows + min(
+            len(landscape_observations), core.POPULATION_SIZE
+        )
         return build_routing_context(
             surface=surface,
             evidence_route=evidence_route,
@@ -127,6 +153,7 @@ class OptimizerToolRegistry(_ToolRegistry):
             cache={index: None for index in range(warm_rows)},
             objective_count=2,
             constraint_count=2,
+            landscape_observations=landscape_observations,
         )
 
     def _select_auto_backend(self, surface: str):

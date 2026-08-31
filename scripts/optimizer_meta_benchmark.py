@@ -40,6 +40,24 @@ def _row_utility(row: dict[str, Any]) -> float:
     return float(value)
 
 
+def _shared_initial_observations(landscape: Any, seed: int):
+    """Reconstruct the benchmark's already-shared initial design only.
+
+    This calls the deterministic synthetic landscape directly, not CountingEvaluator,
+    and therefore spends zero distinct optimizer evaluator calls. The fixed backends
+    all received the exact same cache rows before their equal-budget search began.
+    """
+
+    _, cache_configs = bench._initial_design(landscape, seed)
+    cache = bench._build_cache(landscape, cache_configs)
+    observations: list[dict[str, Any]] = []
+    for row in cache.values():
+        observation = dict(row)
+        observation["feasible"] = bool(bench._is_feasible(row))
+        observations.append(observation)
+    return cache, observations
+
+
 def evaluate_meta_router(report: dict[str, Any]) -> dict[str, Any]:
     landscape_map = {row.name: row for row in bench.landscapes()}
     by_case: dict[tuple[str, int], dict[str, dict[str, Any]]] = {}
@@ -67,14 +85,18 @@ def evaluate_meta_router(report: dict[str, Any]) -> dict[str, Any]:
         if len(budgets) != 1:
             raise ValueError("fixed backends do not share one evaluator budget")
         budget = budgets.pop()
+        cache, observations = _shared_initial_observations(landscape, seed)
+        if len(cache) != int(report.get("initial_design_size", 0)):
+            raise ValueError("meta benchmark initial-design reconstruction drifted")
         context = build_routing_context(
             surface="search",
             evidence_route="proxy",
             evaluation_budget=budget,
             dimensions=landscape.dimensions,
-            cache={index: None for index in range(int(report.get("initial_design_size", 0)))},
+            cache=cache,
             objective_count=2,
             constraint_count=len(bench.CONTRACT.constraints),
+            landscape_observations=observations,
         )
         decision = rank_optimizer_backends(
             context,
@@ -100,6 +122,8 @@ def evaluate_meta_router(report: dict[str, Any]) -> dict[str, Any]:
                 "evaluation_budget": budget,
                 "context": context.to_dict(),
                 "context_key": context.context_key,
+                "preobserved_landscape": context.landscape.to_dict(),
+                "descriptor_evaluator_calls": 0,
                 "selected_backend": selected_backend,
                 "oracle_backend_by_cost_aware_utility": oracle_backend,
                 "selected_utility": selected_utility,
@@ -131,6 +155,10 @@ def evaluate_meta_router(report: dict[str, Any]) -> dict[str, Any]:
         "cases": cases,
         "summary": {
             "cases": len(cases),
+            "descriptor_informed_cases": sum(
+                bool(row["preobserved_landscape"].get("informative")) for row in cases
+            ),
+            "distinct_context_keys": len({row["context_key"] for row in cases}),
             "mean_routing_regret": mean(regrets),
             "max_routing_regret": max(regrets),
             "mean_selected_utility": mean(selected_utilities),
@@ -145,8 +173,9 @@ def evaluate_meta_router(report: dict[str, Any]) -> dict[str, Any]:
             "oracle_backend_counts": dict(sorted(oracle_counts.items())),
         },
         "hard_gate_semantics": (
-            "accounting_and_finite_evidence_only; routing ranking is benchmark evidence, "
-            "not a per-landscape must-win assertion"
+            "accounting_and_finite_evidence_only; descriptors reuse shared initial-design "
+            "evidence with zero new evaluator calls; routing ranking remains benchmark "
+            "evidence, not a per-landscape must-win assertion"
         ),
     }
 
