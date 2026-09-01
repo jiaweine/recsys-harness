@@ -9,9 +9,11 @@ from lingjing_harness.algorithms.optimizer_observation_weighting import (
 )
 from lingjing_harness.runtime.optimizer_observation_weighting import (
     OPTIMIZER_OBSERVATION_EVIDENCE_WEIGHT_CAP,
+    OPTIMIZER_OBSERVATION_EXIT_MIN_EFFECTIVE_ROWS,
     OPTIMIZER_OBSERVATION_MAX_WEIGHT_SHARE,
     OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS,
     OPTIMIZER_OBSERVATION_RECENCY_FLOOR,
+    optimizer_observation_hysteresis_regime,
     optimizer_observation_routing_weight,
     optimizer_observation_weight_diagnostics,
     weight_optimizer_observations,
@@ -161,7 +163,30 @@ def test_four_fresh_balanced_rows_meet_effective_evidence_gate():
     assert diagnostics["kish_effective_rows"] == pytest.approx(4.0)
     assert diagnostics["effective_rows"] == pytest.approx(4.0)
     assert diagnostics["max_weight_share"] == pytest.approx(0.25)
+    assert diagnostics["enter_confident"] is True
+    assert diagnostics["stay_confident"] is True
     assert diagnostics["confident"] is True
+
+
+def test_hysteresis_band_allows_stay_but_not_fresh_entry():
+    diagnostics = optimizer_observation_weight_diagnostics(
+        [{"routing_weight": 0.9} for _ in range(4)]
+    )
+
+    assert diagnostics["effective_rows"] == pytest.approx(3.6)
+    assert diagnostics["effective_rows"] >= OPTIMIZER_OBSERVATION_EXIT_MIN_EFFECTIVE_ROWS
+    assert diagnostics["effective_rows"] < OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS
+    assert diagnostics["enter_confident"] is False
+    assert diagnostics["stay_confident"] is True
+    assert optimizer_observation_hysteresis_regime(diagnostics, "fallback") == "fallback"
+    assert optimizer_observation_hysteresis_regime(diagnostics, "weighted") == "weighted"
+
+    degraded = optimizer_observation_weight_diagnostics(
+        [{"routing_weight": 0.8} for _ in range(4)]
+    )
+    assert degraded["effective_rows"] == pytest.approx(3.2)
+    assert degraded["stay_confident"] is False
+    assert optimizer_observation_hysteresis_regime(degraded, "weighted") == "fallback"
 
 
 def test_equal_but_stale_rows_do_not_pass_on_raw_count_or_kish_ess_alone():
@@ -180,6 +205,8 @@ def test_equal_but_stale_rows_do_not_pass_on_raw_count_or_kish_ess_alone():
     assert diagnostics["kish_effective_rows"] == pytest.approx(4.0)
     assert diagnostics["total_weight"] == pytest.approx(0.5)
     assert diagnostics["effective_rows"] == pytest.approx(0.5)
+    assert diagnostics["enter_confident"] is False
+    assert diagnostics["stay_confident"] is False
     assert diagnostics["confident"] is False
 
 
@@ -248,8 +275,95 @@ def test_runtime_router_uses_weighted_durable_geometry_without_warm_start_pollut
     assert manifest["optimizer_observation_weighting"] == "recency_half_life_and_log_evidence"
     assert manifest["optimizer_observation_confidence"] == "effective_fresh_rows_and_weight_concentration"
     assert manifest["optimizer_observation_confidence_fallback"] == "pre_observation_router"
+    assert manifest["optimizer_observation_hysteresis"] == "per_registry_routing_regime"
+    assert manifest["optimizer_observation_routing_regimes"]["search"] == "weighted"
     assert manifest["optimizer_observation_weighting_authority"] == "routing_descriptor_only"
     assert manifest["optimizer_observation_weighting_evaluator_calls"] == 0
+
+
+def test_runtime_hysteresis_prevents_threshold_flapping_and_fork_copies_regime():
+    registry = OptimizerToolRegistry(build_sample_catalog(), optimizer_backend="auto")
+    before = registry._routing_context("search")
+    registry.memory.record_optimizer_observations(
+        registry.catalog_key,
+        "search",
+        _durable_search_observations(registry, 4),
+    )
+
+    now = 7_000_000_000.0
+    import lingjing_harness.runtime.optimizer_observation_weighting as runtime_weighting
+
+    original_time = runtime_weighting.time.time
+    runtime_weighting.time.time = lambda: now
+    try:
+        with registry.memory._lock:
+            conn = registry.memory._connect()
+            try:
+                conn.execute(
+                    "update agent_optimizer_observations set updated_at=? where catalog_key=? and domain='search'",
+                    (now, registry.catalog_key),
+                )
+                conn.commit()
+            finally:
+                registry.memory._close(conn)
+
+        fresh = registry._routing_context("search")
+        fresh_manifest = registry.inspect_data()["optimizer_meta_router"]
+        assert fresh.landscape.informative is True
+        assert fresh_manifest["optimizer_observation_routing_regimes"]["search"] == "weighted"
+
+        clone = registry.fork()
+        clone_manifest = clone.inspect_data()["optimizer_meta_router"]
+        assert clone_manifest["optimizer_observation_routing_regimes"]["search"] == "weighted"
+        assert clone._optimizer_observation_routing_regimes is not registry._optimizer_observation_routing_regimes
+
+        with registry.memory._lock:
+            conn = registry.memory._connect()
+            try:
+                conn.execute(
+                    "update agent_optimizer_observations set updated_at=? where catalog_key=? and domain='search'",
+                    (now - 2 * DAY, registry.catalog_key),
+                )
+                conn.commit()
+            finally:
+                registry.memory._close(conn)
+
+        mid_raw = registry.memory.optimizer_observations(registry.catalog_key, "search")
+        mid_diagnostics = optimizer_observation_weight_diagnostics(
+            weight_optimizer_observations(mid_raw, reference_time=now)
+        )
+        mid = registry._routing_context("search")
+        mid_manifest = registry.inspect_data()["optimizer_meta_router"]
+        assert mid_diagnostics["enter_confident"] is False
+        assert mid_diagnostics["stay_confident"] is True
+        assert mid.landscape.informative is True
+        assert mid_manifest["optimizer_observation_routing_regimes"]["search"] == "weighted"
+
+        with registry.memory._lock:
+            conn = registry.memory._connect()
+            try:
+                conn.execute(
+                    "update agent_optimizer_observations set updated_at=? where catalog_key=? and domain='search'",
+                    (now - 4 * DAY, registry.catalog_key),
+                )
+                conn.commit()
+            finally:
+                registry.memory._close(conn)
+
+        exit_raw = registry.memory.optimizer_observations(registry.catalog_key, "search")
+        exit_diagnostics = optimizer_observation_weight_diagnostics(
+            weight_optimizer_observations(exit_raw, reference_time=now)
+        )
+        after = registry._routing_context("search")
+        fallback = registry._routing_context_without_optimizer_observations("search")
+        after_manifest = registry.inspect_data()["optimizer_meta_router"]
+    finally:
+        runtime_weighting.time.time = original_time
+
+    assert exit_diagnostics["stay_confident"] is False
+    assert after.context_key == before.context_key == fallback.context_key
+    assert after.landscape.to_dict() == fallback.landscape.to_dict()
+    assert after_manifest["optimizer_observation_routing_regimes"]["search"] == "fallback"
 
 
 def test_runtime_confidence_failure_falls_back_before_unweighted_durable_geometry():

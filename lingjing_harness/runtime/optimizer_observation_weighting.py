@@ -17,6 +17,11 @@ OPTIMIZER_OBSERVATION_RECENCY_GRACE_SECONDS = 300.0
 OPTIMIZER_OBSERVATION_EVIDENCE_WEIGHT_CAP = 2.0
 OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS = 4.0
 OPTIMIZER_OBSERVATION_MAX_WEIGHT_SHARE = 0.50
+OPTIMIZER_OBSERVATION_EXIT_MIN_EFFECTIVE_ROWS = 3.5
+OPTIMIZER_OBSERVATION_EXIT_MAX_WEIGHT_SHARE = 0.55
+_ROUTING_REGIME_ATTR = "_optimizer_observation_routing_regimes"
+_ROUTING_REGIME_WEIGHTED = "weighted"
+_ROUTING_REGIME_FALLBACK = "fallback"
 _INSTALLED = False
 
 
@@ -106,6 +111,8 @@ def optimizer_observation_weight_diagnostics(
             "kish_effective_rows": 0.0,
             "effective_rows": 0.0,
             "max_weight_share": 1.0,
+            "enter_confident": False,
+            "stay_confident": False,
             "confident": False,
             "new_evaluator_calls": 0,
         }
@@ -119,10 +126,16 @@ def optimizer_observation_weight_diagnostics(
     )
     effective_rows = min(kish_effective_rows, total_weight)
     max_weight_share = max(weights) / total_weight
-    confident = (
-        len(weights) >= int(OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS)
+    enough_rows = len(weights) >= int(OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS)
+    enter_confident = (
+        enough_rows
         and effective_rows + 1e-12 >= OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS
         and max_weight_share <= OPTIMIZER_OBSERVATION_MAX_WEIGHT_SHARE + 1e-12
+    )
+    stay_confident = (
+        enough_rows
+        and effective_rows + 1e-12 >= OPTIMIZER_OBSERVATION_EXIT_MIN_EFFECTIVE_ROWS
+        and max_weight_share <= OPTIMIZER_OBSERVATION_EXIT_MAX_WEIGHT_SHARE + 1e-12
     )
     return {
         "raw_rows": len(rows),
@@ -131,13 +144,51 @@ def optimizer_observation_weight_diagnostics(
         "kish_effective_rows": kish_effective_rows,
         "effective_rows": effective_rows,
         "max_weight_share": max_weight_share,
-        "confident": confident,
+        "enter_confident": enter_confident,
+        "stay_confident": stay_confident,
+        "confident": enter_confident,
         "new_evaluator_calls": 0,
     }
 
 
+def optimizer_observation_hysteresis_regime(
+    diagnostics: dict[str, Any],
+    current_regime: str | None,
+) -> str:
+    """Choose a routing regime with looser exit than entry confidence."""
+
+    if current_regime == _ROUTING_REGIME_WEIGHTED:
+        return (
+            _ROUTING_REGIME_WEIGHTED
+            if bool(diagnostics.get("stay_confident"))
+            else _ROUTING_REGIME_FALLBACK
+        )
+    return (
+        _ROUTING_REGIME_WEIGHTED
+        if bool(diagnostics.get("enter_confident", diagnostics.get("confident")))
+        else _ROUTING_REGIME_FALLBACK
+    )
+
+
+def _routing_regimes(registry: Any) -> dict[str, str]:
+    regimes = getattr(registry, _ROUTING_REGIME_ATTR, None)
+    if not isinstance(regimes, dict):
+        regimes = {}
+        setattr(registry, _ROUTING_REGIME_ATTR, regimes)
+    return regimes
+
+
+def _pre_observation_context(registry: Any, surface: str, context: Any):
+    fallback = getattr(
+        registry,
+        "_routing_context_without_optimizer_observations",
+        None,
+    )
+    return fallback(surface) if callable(fallback) else context
+
+
 def install_optimizer_observation_weighting(optimizer_registry_cls: type) -> None:
-    """Apply transient recency/evidence weighting to durable router geometry."""
+    """Apply transient weighted geometry with per-registry routing hysteresis."""
 
     global _INSTALLED
     if _INSTALLED:
@@ -147,22 +198,25 @@ def install_optimizer_observation_weighting(optimizer_registry_cls: type) -> Non
 
     def routing_context_with_weighted_durable_geometry(self: Any, surface: str):
         context = original_routing_context(self, surface)
+        regimes = _routing_regimes(self)
         reader = getattr(self.memory, "optimizer_observations", None)
         if not callable(reader):
+            regimes[surface] = _ROUTING_REGIME_FALLBACK
             return context
         observations = reader(self.catalog_key, surface)
-        if len(observations) < 4:
-            return context
+        if len(observations) < int(OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS):
+            regimes[surface] = _ROUTING_REGIME_FALLBACK
+            return _pre_observation_context(self, surface, context)
 
         weighted = weight_optimizer_observations(observations)
         diagnostics = optimizer_observation_weight_diagnostics(weighted)
-        if not diagnostics["confident"]:
-            fallback = getattr(
-                self,
-                "_routing_context_without_optimizer_observations",
-                None,
-            )
-            return fallback(surface) if callable(fallback) else context
+        next_regime = optimizer_observation_hysteresis_regime(
+            diagnostics,
+            regimes.get(surface),
+        )
+        regimes[surface] = next_regime
+        if next_regime != _ROUTING_REGIME_WEIGHTED:
+            return _pre_observation_context(self, surface, context)
 
         engine = self.search if surface == "search" else self.recommend
         try:
@@ -172,28 +226,32 @@ def install_optimizer_observation_weighting(optimizer_registry_cls: type) -> Non
                 observations=weighted,
             )
         except (TypeError, ValueError, KeyError):
-            fallback = getattr(
-                self,
-                "_routing_context_without_optimizer_observations",
-                None,
-            )
-            return fallback(surface) if callable(fallback) else context
+            regimes[surface] = _ROUTING_REGIME_FALLBACK
+            return _pre_observation_context(self, surface, context)
         if not landscape.informative:
-            fallback = getattr(
-                self,
-                "_routing_context_without_optimizer_observations",
-                None,
-            )
-            return fallback(surface) if callable(fallback) else context
+            regimes[surface] = _ROUTING_REGIME_FALLBACK
+            return _pre_observation_context(self, surface, context)
         return replace(context, landscape=landscape)
 
     optimizer_registry_cls._routing_context = routing_context_with_weighted_durable_geometry
+
+    original_fork = optimizer_registry_cls.fork
+
+    def fork_with_optimizer_observation_regime(self: Any):
+        clone = original_fork(self)
+        regimes = getattr(self, _ROUTING_REGIME_ATTR, None)
+        if isinstance(regimes, dict):
+            setattr(clone, _ROUTING_REGIME_ATTR, dict(regimes))
+        return clone
+
+    optimizer_registry_cls.fork = fork_with_optimizer_observation_regime
 
     original_inspect = optimizer_registry_cls.inspect_data
 
     def inspect_data_with_observation_weighting(self: Any) -> dict[str, Any]:
         result = original_inspect(self)
         router = dict(result.get("optimizer_meta_router") or {})
+        regimes = getattr(self, _ROUTING_REGIME_ATTR, None)
         router.update(
             {
                 "optimizer_observation_weighting": "recency_half_life_and_log_evidence",
@@ -206,6 +264,10 @@ def install_optimizer_observation_weighting(optimizer_registry_cls: type) -> Non
                 "optimizer_observation_min_effective_rows": OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS,
                 "optimizer_observation_max_weight_share": OPTIMIZER_OBSERVATION_MAX_WEIGHT_SHARE,
                 "optimizer_observation_confidence_fallback": "pre_observation_router",
+                "optimizer_observation_hysteresis": "per_registry_routing_regime",
+                "optimizer_observation_exit_min_effective_rows": OPTIMIZER_OBSERVATION_EXIT_MIN_EFFECTIVE_ROWS,
+                "optimizer_observation_exit_max_weight_share": OPTIMIZER_OBSERVATION_EXIT_MAX_WEIGHT_SHARE,
+                "optimizer_observation_routing_regimes": dict(regimes) if isinstance(regimes, dict) else {},
                 "optimizer_observation_weighting_authority": "routing_descriptor_only",
                 "optimizer_observation_weighting_evaluator_calls": 0,
             }
@@ -219,12 +281,15 @@ def install_optimizer_observation_weighting(optimizer_registry_cls: type) -> Non
 
 __all__ = [
     "OPTIMIZER_OBSERVATION_EVIDENCE_WEIGHT_CAP",
+    "OPTIMIZER_OBSERVATION_EXIT_MAX_WEIGHT_SHARE",
+    "OPTIMIZER_OBSERVATION_EXIT_MIN_EFFECTIVE_ROWS",
     "OPTIMIZER_OBSERVATION_MAX_WEIGHT_SHARE",
     "OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS",
     "OPTIMIZER_OBSERVATION_RECENCY_FLOOR",
     "OPTIMIZER_OBSERVATION_RECENCY_GRACE_SECONDS",
     "OPTIMIZER_OBSERVATION_RECENCY_HALF_LIFE_DAYS",
     "install_optimizer_observation_weighting",
+    "optimizer_observation_hysteresis_regime",
     "optimizer_observation_routing_weight",
     "optimizer_observation_weight_diagnostics",
     "weight_optimizer_observations",
