@@ -29,6 +29,7 @@ from .network import NetworkResearch
 from .optimizer_tools import OptimizerToolRegistry
 from .optimizer_observation_memory import install_optimizer_observation_runtime
 from .optimizer_observation_weighting import install_optimizer_observation_weighting
+from .optimizer_routing_checkpoint import install_optimizer_routing_checkpoint
 from .perception import PerceptionEngine
 from .policy import OwnedPolicy
 from .semantic_tools import SearchBackendToolRegistry
@@ -56,6 +57,10 @@ install_optimizer_observation_runtime(AgentMemory, OptimizerToolRegistry)
 # derived from recency plus repeated evidence; they never affect warm starts or
 # downstream holdout/promotion authority.
 install_optimizer_observation_weighting(OptimizerToolRegistry)
+# Preserve only the prior hysteresis regime across restarts. The checkpoint wraps
+# the already-installed weighted router, revalidates current evidence on restore,
+# and carries no optimizer credit, warm-start, activation, or promotion authority.
+install_optimizer_routing_checkpoint(OptimizerToolRegistry)
 
 
 class AgentHarness(_BaseAgentHarness):
