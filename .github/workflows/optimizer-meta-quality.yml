@@ -19,6 +19,7 @@ on:
       - 'scripts/optimizer_meta_benchmark.py'
       - 'tests/test_optimizer_landscape_descriptors.py'
       - 'tests/test_optimizer_observation_drift.py'
+      - 'tests/test_optimizer_observation_drift_recency.py'
       - 'tests/test_optimizer_observation_drift_surfaces.py'
       - 'tests/test_optimizer_observation_feasibility_history.py'
       - 'tests/test_optimizer_observation_weighting.py'
@@ -47,6 +48,7 @@ on:
       - 'scripts/optimizer_meta_benchmark.py'
       - 'tests/test_optimizer_landscape_descriptors.py'
       - 'tests/test_optimizer_observation_drift.py'
+      - 'tests/test_optimizer_observation_drift_recency.py'
       - 'tests/test_optimizer_observation_drift_surfaces.py'
       - 'tests/test_optimizer_observation_feasibility_history.py'
       - 'tests/test_optimizer_observation_weighting.py'
@@ -91,6 +93,7 @@ jobs:
             scripts/optimizer_meta_benchmark.py \
             tests/test_optimizer_landscape_descriptors.py \
             tests/test_optimizer_observation_drift.py \
+            tests/test_optimizer_observation_drift_recency.py \
             tests/test_optimizer_observation_drift_surfaces.py \
             tests/test_optimizer_observation_feasibility_history.py \
             tests/test_optimizer_observation_weighting.py \
@@ -104,6 +107,7 @@ jobs:
           pytest -q \
             tests/test_optimizer_landscape_descriptors.py \
             tests/test_optimizer_observation_drift.py \
+            tests/test_optimizer_observation_drift_recency.py \
             tests/test_optimizer_observation_drift_surfaces.py \
             tests/test_optimizer_observation_feasibility_history.py \
             tests/test_optimizer_observation_weighting.py \

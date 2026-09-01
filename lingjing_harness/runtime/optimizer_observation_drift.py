@@ -471,11 +471,14 @@ def detect_optimizer_observation_drift(
                 for row in recent
             ],
         }
+        # A structural threshold has already decided whether a split is eligible.
+        # Among eligible breaks, isolate the newest regime first; severity is only
+        # a tie-break so an older, stronger drift cannot mask a later change.
         rank = (
             1 if candidate["change_detected"] else 0,
+            float(candidate["recent_oldest_at"]),
             float(candidate["severity"]),
             -len(recent),
-            float(candidate["recent_oldest_at"]),
         )
         if best is None or rank > best["_rank"]:
             best = {**candidate, "_rank": rank}
