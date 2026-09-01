@@ -9,10 +9,13 @@ def test_drift_calibration_preserves_structural_invariants_without_evaluator_cal
     report = run_calibration(seeds=24)
 
     assert report["new_evaluator_calls"] == 0
-    assert report["case_count"] == 8
+    assert report["case_count"] == 9
 
     assert _case(report, "stationary_low_noise")["detection_rate"] == 0.0
     assert _case(report, "pure_level_shift")["detection_rate"] == 0.0
+    noisy_level_shift = _case(report, "level_shift_low_noise")
+    assert noisy_level_shift["expected_change"] is False
+    assert noisy_level_shift["new_evaluator_calls"] == 0
     assert _case(report, "exploration_region_shift")["detection_rate"] == 0.0
 
     for name in ("order_inversion", "contrast_shift", "sequential_latest_break"):
