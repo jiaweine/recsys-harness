@@ -205,11 +205,24 @@ def install_optimizer_observation_weighting(optimizer_registry_cls: type) -> Non
         if not callable(reader):
             regimes[surface] = _ROUTING_REGIME_FALLBACK
             return context
+        epoch_started_at = routing_epoch.routing_epoch_boundary(self, surface)
         observations = routing_epoch.filter_routing_epoch_rows(
             reader(self.catalog_key, surface),
             timestamp_key="updated_at",
-            epoch_started_at=routing_epoch.routing_epoch_boundary(self, surface),
+            epoch_started_at=epoch_started_at,
         )
+        if epoch_started_at > 0.0:
+            history_reader = getattr(self.memory, "optimizer_observation_history", None)
+            observation_history = (
+                history_reader(self.catalog_key, surface)
+                if callable(history_reader)
+                else []
+            )
+            observations = routing_epoch.localize_routing_epoch_seen_counts(
+                observations,
+                observation_history,
+                epoch_started_at=epoch_started_at,
+            )
         if len(observations) < int(OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS):
             regimes[surface] = _ROUTING_REGIME_FALLBACK
             return _pre_observation_context(self, surface, context)
