@@ -17,7 +17,9 @@ on:
       - 'lingjing_harness/runtime/optimizer_routing_checkpoint.py'
       - 'lingjing_harness/runtime/optimizer_routing_epoch.py'
       - 'lingjing_harness/runtime/optimizer_tools.py'
+      - 'scripts/optimizer_drift_calibration.py'
       - 'scripts/optimizer_meta_benchmark.py'
+      - 'tests/test_optimizer_drift_calibration.py'
       - 'tests/test_optimizer_landscape_descriptors.py'
       - 'tests/test_optimizer_observation_drift.py'
       - 'tests/test_optimizer_observation_drift_recency.py'
@@ -48,7 +50,9 @@ on:
       - 'lingjing_harness/runtime/optimizer_routing_checkpoint.py'
       - 'lingjing_harness/runtime/optimizer_routing_epoch.py'
       - 'lingjing_harness/runtime/optimizer_tools.py'
+      - 'scripts/optimizer_drift_calibration.py'
       - 'scripts/optimizer_meta_benchmark.py'
+      - 'tests/test_optimizer_drift_calibration.py'
       - 'tests/test_optimizer_landscape_descriptors.py'
       - 'tests/test_optimizer_observation_drift.py'
       - 'tests/test_optimizer_observation_drift_recency.py'
@@ -95,7 +99,9 @@ jobs:
             lingjing_harness/runtime/optimizer_routing_checkpoint.py \
             lingjing_harness/runtime/optimizer_routing_epoch.py \
             lingjing_harness/runtime/optimizer_tools.py \
+            scripts/optimizer_drift_calibration.py \
             scripts/optimizer_meta_benchmark.py \
+            tests/test_optimizer_drift_calibration.py \
             tests/test_optimizer_landscape_descriptors.py \
             tests/test_optimizer_observation_drift.py \
             tests/test_optimizer_observation_drift_recency.py \
@@ -111,6 +117,7 @@ jobs:
       - name: Run dependency-light routing, ledger, registry, and backend-scope contracts
         run: |
           pytest -q \
+            tests/test_optimizer_drift_calibration.py \
             tests/test_optimizer_landscape_descriptors.py \
             tests/test_optimizer_observation_drift.py \
             tests/test_optimizer_observation_drift_recency.py \
@@ -124,6 +131,8 @@ jobs:
             tests/test_optimizer_meta_backend_scope.py \
             tests/test_optimizer_meta_benchmark.py \
             tests/test_optimizer_backends.py
+      - name: Run deterministic drift calibration
+        run: python scripts/optimizer_drift_calibration.py --seeds 128
       - name: Verify default remains native and auto exposes no activation authority
         run: |
           python - <<'PY'
