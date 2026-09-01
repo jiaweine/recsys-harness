@@ -68,8 +68,8 @@ def install_optimizer_observation_drift_confidence(
         dimensions: Sequence[Any],
     ) -> dict[str, Any]:
         # A candidate split is a boundary, not a license to mix every newer cohort
-        # into one matching pool. Compare the observations immediately on each side
-        # so an older split cannot manufacture geometry by pairing rows from several
+        # into one matching pool. Evaluate observations immediately on each side so
+        # an older split cannot manufacture geometry by pairing rows from several
         # routing regimes.
         local_recent = list(recent[-OPTIMIZER_OBSERVATION_DRIFT_LOCAL_WINDOW_ROWS:])
         local_history = list(history[:OPTIMIZER_OBSERVATION_DRIFT_LOCAL_WINDOW_ROWS])
