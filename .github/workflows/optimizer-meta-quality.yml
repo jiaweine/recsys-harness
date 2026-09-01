@@ -115,6 +115,9 @@ jobs:
           assert manifest['optimizer_observation_confidence'] == 'effective_fresh_rows_and_weight_concentration'
           assert manifest['optimizer_observation_effective_rows_method'] == 'min_kish_ess_and_total_routing_weight'
           assert manifest['optimizer_observation_confidence_fallback'] == 'pre_observation_router'
+          assert manifest['optimizer_observation_hysteresis'] == 'per_registry_routing_regime'
+          assert manifest['optimizer_observation_exit_min_effective_rows'] == 3.5
+          assert manifest['optimizer_observation_exit_max_weight_share'] == 0.55
           assert manifest['optimizer_observation_weighting_authority'] == 'routing_descriptor_only'
           assert manifest['landscape_descriptor_evaluator_calls'] == 0
           assert manifest['optimizer_observation_weighting_evaluator_calls'] == 0
