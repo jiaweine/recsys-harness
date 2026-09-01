@@ -31,6 +31,7 @@ from .optimizer_observation_drift import install_optimizer_observation_drift_gua
 from .optimizer_observation_memory import install_optimizer_observation_runtime
 from .optimizer_observation_weighting import install_optimizer_observation_weighting
 from .optimizer_routing_checkpoint import install_optimizer_routing_checkpoint
+from .optimizer_routing_epoch import install_optimizer_routing_epoch_counts
 from .perception import PerceptionEngine
 from .policy import OwnedPolicy
 from .semantic_tools import SearchBackendToolRegistry
@@ -67,6 +68,10 @@ install_optimizer_observation_drift_guard(OptimizerToolRegistry)
 # weighting plus drift handling, revalidates current evidence on restore, and
 # carries no optimizer credit, warm-start, activation, or promotion authority.
 install_optimizer_routing_checkpoint(OptimizerToolRegistry)
+# Repeated-evidence counts are lifetime values in the durable latest-row ledger.
+# Scope only the routing-time view to the active/pending change-point epoch so old
+# regimes cannot inflate weighting, drift entry confidence, or checkpoint fencing.
+install_optimizer_routing_epoch_counts(AgentMemory, OptimizerToolRegistry)
 
 
 class AgentHarness(_BaseAgentHarness):
