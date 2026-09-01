@@ -12,13 +12,16 @@ on:
       - 'lingjing_harness/runtime/backend_memory.py'
       - 'lingjing_harness/runtime/optimizer_meta_memory.py'
       - 'lingjing_harness/runtime/optimizer_observation_drift.py'
+      - 'lingjing_harness/runtime/optimizer_observation_drift_confidence.py'
       - 'lingjing_harness/runtime/optimizer_observation_memory.py'
       - 'lingjing_harness/runtime/optimizer_observation_weighting.py'
       - 'lingjing_harness/runtime/optimizer_routing_checkpoint.py'
       - 'lingjing_harness/runtime/optimizer_routing_epoch.py'
       - 'lingjing_harness/runtime/optimizer_routing_epoch_fence.py'
       - 'lingjing_harness/runtime/optimizer_tools.py'
+      - 'scripts/optimizer_drift_calibration.py'
       - 'scripts/optimizer_meta_benchmark.py'
+      - 'tests/test_optimizer_drift_calibration.py'
       - 'tests/test_optimizer_landscape_descriptors.py'
       - 'tests/test_optimizer_observation_drift.py'
       - 'tests/test_optimizer_observation_drift_recency.py'
@@ -45,13 +48,16 @@ on:
       - 'lingjing_harness/runtime/backend_memory.py'
       - 'lingjing_harness/runtime/optimizer_meta_memory.py'
       - 'lingjing_harness/runtime/optimizer_observation_drift.py'
+      - 'lingjing_harness/runtime/optimizer_observation_drift_confidence.py'
       - 'lingjing_harness/runtime/optimizer_observation_memory.py'
       - 'lingjing_harness/runtime/optimizer_observation_weighting.py'
       - 'lingjing_harness/runtime/optimizer_routing_checkpoint.py'
       - 'lingjing_harness/runtime/optimizer_routing_epoch.py'
       - 'lingjing_harness/runtime/optimizer_routing_epoch_fence.py'
       - 'lingjing_harness/runtime/optimizer_tools.py'
+      - 'scripts/optimizer_drift_calibration.py'
       - 'scripts/optimizer_meta_benchmark.py'
+      - 'tests/test_optimizer_drift_calibration.py'
       - 'tests/test_optimizer_landscape_descriptors.py'
       - 'tests/test_optimizer_observation_drift.py'
       - 'tests/test_optimizer_observation_drift_recency.py'
@@ -94,13 +100,16 @@ jobs:
             lingjing_harness/runtime/backend_config.py \
             lingjing_harness/runtime/optimizer_meta_memory.py \
             lingjing_harness/runtime/optimizer_observation_drift.py \
+            lingjing_harness/runtime/optimizer_observation_drift_confidence.py \
             lingjing_harness/runtime/optimizer_observation_memory.py \
             lingjing_harness/runtime/optimizer_observation_weighting.py \
             lingjing_harness/runtime/optimizer_routing_checkpoint.py \
             lingjing_harness/runtime/optimizer_routing_epoch.py \
             lingjing_harness/runtime/optimizer_routing_epoch_fence.py \
             lingjing_harness/runtime/optimizer_tools.py \
+            scripts/optimizer_drift_calibration.py \
             scripts/optimizer_meta_benchmark.py \
+            tests/test_optimizer_drift_calibration.py \
             tests/test_optimizer_landscape_descriptors.py \
             tests/test_optimizer_observation_drift.py \
             tests/test_optimizer_observation_drift_recency.py \
@@ -117,6 +126,7 @@ jobs:
       - name: Run dependency-light routing, ledger, registry, and backend-scope contracts
         run: |
           pytest -q \
+            tests/test_optimizer_drift_calibration.py \
             tests/test_optimizer_landscape_descriptors.py \
             tests/test_optimizer_observation_drift.py \
             tests/test_optimizer_observation_drift_recency.py \
@@ -131,6 +141,8 @@ jobs:
             tests/test_optimizer_meta_backend_scope.py \
             tests/test_optimizer_meta_benchmark.py \
             tests/test_optimizer_backends.py
+      - name: Run deterministic drift calibration
+        run: python scripts/optimizer_drift_calibration.py --seeds 128
       - name: Verify default remains native and auto exposes no activation authority
         run: |
           python - <<'PY'
@@ -166,6 +178,11 @@ jobs:
           assert manifest['optimizer_observation_drift_action'] == 'recent_only_if_entry_confident_else_pre_observation_fallback'
           assert manifest['optimizer_observation_drift_authority'] == 'routing_descriptor_only'
           assert manifest['optimizer_observation_drift_evaluator_calls'] == 0
+          assert manifest['optimizer_observation_drift_window_scope'] == 'candidate_boundary_local'
+          assert manifest['optimizer_observation_drift_local_window_rows'] == 4
+          assert manifest['optimizer_observation_drift_contrast_confidence'] == 'leave_one_match_out_unanimous'
+          assert manifest['optimizer_observation_drift_contrast_confidence_authority'] == 'routing_descriptor_only'
+          assert manifest['optimizer_observation_drift_contrast_confidence_evaluator_calls'] == 0
           assert manifest['optimizer_observation_regime_checkpoint'] == 'optimizer_meta_memory_evidence_fenced_ttl'
           assert manifest['optimizer_observation_regime_checkpoint_ttl_seconds'] == 259200.0
           assert manifest['optimizer_observation_regime_checkpoint_refresh_seconds'] == 129600.0

@@ -28,6 +28,9 @@ from .mission_compiler import MissionCompiler
 from .network import NetworkResearch
 from .optimizer_tools import OptimizerToolRegistry
 from .optimizer_observation_drift import install_optimizer_observation_drift_guard
+from .optimizer_observation_drift_confidence import (
+    install_optimizer_observation_drift_confidence,
+)
 from .optimizer_observation_memory import install_optimizer_observation_runtime
 from .optimizer_observation_weighting import install_optimizer_observation_weighting
 from .optimizer_routing_checkpoint import install_optimizer_routing_checkpoint
@@ -65,6 +68,11 @@ install_optimizer_observation_weighting(OptimizerToolRegistry)
 # geometry is quarantined instead of forcing legacy fallback; otherwise fallback
 # remains authoritative until enough fresh evidence exists.
 install_optimizer_observation_drift_guard(OptimizerToolRegistry)
+# Keep each candidate change-point geometry local to its boundary and require a
+# leave-one-match-out stability check before contrast geometry can change routing.
+# Order inversion keeps its existing authority; this layer still spends no new
+# evaluator budget and never supplies warm-start or promotion evidence.
+install_optimizer_observation_drift_confidence(OptimizerToolRegistry)
 # Preserve only the final hysteresis regime across restarts. The checkpoint wraps
 # weighting plus drift handling, revalidates current evidence on restore, and
 # carries no optimizer credit, warm-start, activation, or promotion authority.
