@@ -32,6 +32,7 @@ from .optimizer_observation_drift_confidence import (
     install_optimizer_observation_drift_confidence,
 )
 from .optimizer_observation_memory import install_optimizer_observation_runtime
+from .optimizer_observation_snapshot import install_optimizer_observation_snapshot
 from .optimizer_observation_weighting import install_optimizer_observation_weighting
 from .optimizer_routing_checkpoint import install_optimizer_routing_checkpoint
 from .optimizer_routing_epoch import install_optimizer_routing_epoch_counts
@@ -77,6 +78,10 @@ install_optimizer_observation_drift_confidence(OptimizerToolRegistry)
 # weighting plus drift handling, revalidates current evidence on restore, and
 # carries no optimizer credit, warm-start, activation, or promotion authority.
 install_optimizer_routing_checkpoint(OptimizerToolRegistry)
+# Materialize latest routing rows and bounded paid history from one SQLite read
+# transaction per routing decision. Drift confidence, weighting, epoch-count and
+# checkpoint layers then reuse one evaluator-paid evidence cohort.
+install_optimizer_observation_snapshot(AgentMemory, OptimizerToolRegistry)
 # Repeated-evidence counts are lifetime values in the durable latest-row ledger.
 # Scope only the routing-time view to the active/pending change-point epoch so old
 # regimes cannot inflate weighting, drift entry confidence, or checkpoint fencing.
