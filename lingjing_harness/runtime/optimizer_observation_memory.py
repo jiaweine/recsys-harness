@@ -19,6 +19,8 @@ from . import backend_memory
 
 OPTIMIZER_OBSERVATION_READ_BUDGET = 48
 OPTIMIZER_OBSERVATION_RETENTION = 96
+OPTIMIZER_OBSERVATION_HISTORY_RETENTION = 2 * OPTIMIZER_OBSERVATION_RETENTION
+OPTIMIZER_OBSERVATION_HISTORY_READ_BUDGET = OPTIMIZER_OBSERVATION_HISTORY_RETENTION
 _INSTALLED = False
 
 
@@ -61,6 +63,24 @@ def _ensure_optimizer_observation_table(memory: Any) -> None:
     );
     create index if not exists idx_agent_optimizer_observations_lookup
       on agent_optimizer_observations(catalog_key,domain,updated_at desc);
+    create table if not exists agent_optimizer_observation_history(
+      id integer primary key autoincrement,
+      catalog_key text not null,
+      domain text not null,
+      config_key text not null,
+      config text not null,
+      score real not null,
+      feasible integer not null,
+      source text not null,
+      generation integer not null,
+      feasibility_basis text not null,
+      constraints text not null,
+      observed_at real not null
+    );
+    create index if not exists idx_agent_optimizer_observation_history_lookup
+      on agent_optimizer_observation_history(catalog_key,domain,observed_at desc,id desc);
+    create index if not exists idx_agent_optimizer_observation_history_config
+      on agent_optimizer_observation_history(catalog_key,domain,config_key,observed_at desc,id desc);
     """
     with memory._lock:
         conn = memory._connect()
@@ -114,6 +134,7 @@ def _record_optimizer_observations(
             "captured_rows": 0,
             "inserted_rows": 0,
             "updated_rows": 0,
+            "history_rows": 0,
             "feasible_rows": 0,
             "infeasible_rows": 0,
             "new_evaluator_calls": 0,
@@ -126,6 +147,8 @@ def _record_optimizer_observations(
     with memory._lock:
         conn = memory._connect()
         try:
+            conn.execute("pragma busy_timeout=10000")
+            conn.execute("begin immediate")
             for row in rows:
                 exists = conn.execute(
                     "select 1 from agent_optimizer_observations where catalog_key=? and domain=? and config_key=?",
@@ -135,6 +158,39 @@ def _record_optimizer_observations(
                     updated += 1
                 else:
                     inserted += 1
+                config_json = json.dumps(
+                    row["config"],
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    allow_nan=False,
+                )
+                constraints_json = json.dumps(
+                    row["constraints"],
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    allow_nan=False,
+                )
+                conn.execute(
+                    """
+                    insert into agent_optimizer_observation_history(
+                      catalog_key,domain,config_key,config,score,feasible,source,generation,
+                      feasibility_basis,constraints,observed_at
+                    ) values(?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        catalog_key,
+                        domain,
+                        row["config_key"],
+                        config_json,
+                        row["score"],
+                        1 if row["feasible"] else 0,
+                        row["source"],
+                        row["generation"],
+                        row["feasibility_basis"],
+                        constraints_json,
+                        now,
+                    ),
+                )
                 conn.execute(
                     """
                     insert into agent_optimizer_observations(
@@ -156,13 +212,13 @@ def _record_optimizer_observations(
                         catalog_key,
                         domain,
                         row["config_key"],
-                        json.dumps(row["config"], ensure_ascii=False, sort_keys=True, allow_nan=False),
+                        config_json,
                         row["score"],
                         1 if row["feasible"] else 0,
                         row["source"],
                         row["generation"],
                         row["feasibility_basis"],
-                        json.dumps(row["constraints"], ensure_ascii=False, sort_keys=True, allow_nan=False),
+                        constraints_json,
                         now,
                         now,
                     ),
@@ -184,7 +240,27 @@ def _record_optimizer_observations(
                     OPTIMIZER_OBSERVATION_RETENTION,
                 ),
             )
+            conn.execute(
+                """
+                delete from agent_optimizer_observation_history
+                where catalog_key=? and domain=? and id not in (
+                  select id from agent_optimizer_observation_history
+                  where catalog_key=? and domain=?
+                  order by observed_at desc, id desc limit ?
+                )
+                """,
+                (
+                    catalog_key,
+                    domain,
+                    catalog_key,
+                    domain,
+                    OPTIMIZER_OBSERVATION_HISTORY_RETENTION,
+                ),
+            )
             conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             memory._close(conn)
 
@@ -193,6 +269,7 @@ def _record_optimizer_observations(
         "captured_rows": len(rows),
         "inserted_rows": inserted,
         "updated_rows": updated,
+        "history_rows": len(rows),
         "feasible_rows": sum(1 for row in rows if row["feasible"]),
         "infeasible_rows": sum(1 for row in rows if not row["feasible"]),
         "new_evaluator_calls": 0,
@@ -254,6 +331,60 @@ def _optimizer_observations(
     return observations
 
 
+def _optimizer_observation_history(
+    memory: Any,
+    catalog_key: str,
+    domain: str,
+    *,
+    limit: int = OPTIMIZER_OBSERVATION_HISTORY_READ_BUDGET,
+) -> list[dict[str, Any]]:
+    domain = str(domain or "").strip()
+    if domain not in {"search", "recommend"}:
+        return []
+    _ensure_optimizer_observation_table(memory)
+    limit = max(1, min(OPTIMIZER_OBSERVATION_HISTORY_RETENTION, int(limit)))
+    with memory._lock:
+        conn = memory._connect()
+        try:
+            rows = conn.execute(
+                """
+                select config_key,config,score,feasible,source,generation,feasibility_basis,
+                       constraints,observed_at
+                from agent_optimizer_observation_history
+                where catalog_key=? and domain=?
+                order by observed_at desc, id desc limit ?
+                """,
+                (catalog_key, domain, limit),
+            ).fetchall()
+        finally:
+            memory._close(conn)
+
+    observations: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            config = json.loads(row["config"] or "{}")
+            constraints = json.loads(row["constraints"] or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(config, dict):
+            continue
+        observations.append(
+            {
+                "status": "optimizer_observation_history",
+                "config_key": str(row["config_key"]),
+                "config": config,
+                "objective": float(row["score"]),
+                "feasible": bool(row["feasible"]),
+                "source": row["source"],
+                "generation": int(row["generation"]),
+                "feasibility_basis": row["feasibility_basis"],
+                "constraints": constraints if isinstance(constraints, dict) else {},
+                "observed_at": float(row["observed_at"]),
+            }
+        )
+    return observations
+
+
 def install_optimizer_observation_runtime(agent_memory_cls: type, optimizer_registry_cls: type) -> None:
     """Install a durable, routing-only observation path on the public runtime."""
 
@@ -265,10 +396,15 @@ def install_optimizer_observation_runtime(agent_memory_cls: type, optimizer_regi
 
     setattr(agent_memory_cls, "record_optimizer_observations", _record_optimizer_observations)
     setattr(agent_memory_cls, "optimizer_observations", _optimizer_observations)
+    setattr(agent_memory_cls, "optimizer_observation_history", _optimizer_observation_history)
 
     backend_memory._SCOPED_CATALOG_METHODS = frozenset(
         set(backend_memory._SCOPED_CATALOG_METHODS)
-        | {"record_optimizer_observations", "optimizer_observations"}
+        | {
+            "record_optimizer_observations",
+            "optimizer_observations",
+            "optimizer_observation_history",
+        }
     )
 
     original_record = agent_memory_cls.record_evolution_result
@@ -295,6 +431,7 @@ def install_optimizer_observation_runtime(agent_memory_cls: type, optimizer_regi
                 "captured_rows": 0,
                 "inserted_rows": 0,
                 "updated_rows": 0,
+                "history_rows": 0,
                 "feasible_rows": 0,
                 "infeasible_rows": 0,
                 "new_evaluator_calls": 0,
@@ -349,6 +486,8 @@ def install_optimizer_observation_runtime(agent_memory_cls: type, optimizer_regi
             {
                 "landscape_descriptors": "durable_evaluator_observations_with_strategy_fallback",
                 "optimizer_observation_memory": "evaluator_paid_discovery_rows_only",
+                "optimizer_observation_history": "bounded_same_config_evaluator_history",
+                "optimizer_observation_history_retention": OPTIMIZER_OBSERVATION_HISTORY_RETENTION,
                 "optimizer_observation_feasibility": "discovery_robustness_guardrails",
                 "optimizer_observation_authority": "routing_descriptor_only",
                 "optimizer_observation_read_budget": OPTIMIZER_OBSERVATION_READ_BUDGET,
@@ -363,6 +502,8 @@ def install_optimizer_observation_runtime(agent_memory_cls: type, optimizer_regi
 
 
 __all__ = [
+    "OPTIMIZER_OBSERVATION_HISTORY_READ_BUDGET",
+    "OPTIMIZER_OBSERVATION_HISTORY_RETENTION",
     "OPTIMIZER_OBSERVATION_READ_BUDGET",
     "OPTIMIZER_OBSERVATION_RETENTION",
     "install_optimizer_observation_runtime",

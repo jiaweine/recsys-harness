@@ -20,6 +20,7 @@ on:
       - 'tests/test_optimizer_landscape_descriptors.py'
       - 'tests/test_optimizer_observation_drift.py'
       - 'tests/test_optimizer_observation_drift_surfaces.py'
+      - 'tests/test_optimizer_observation_feasibility_history.py'
       - 'tests/test_optimizer_observation_weighting.py'
       - 'tests/test_optimizer_meta_router.py'
       - 'tests/test_optimizer_meta_memory.py'
@@ -47,6 +48,7 @@ on:
       - 'tests/test_optimizer_landscape_descriptors.py'
       - 'tests/test_optimizer_observation_drift.py'
       - 'tests/test_optimizer_observation_drift_surfaces.py'
+      - 'tests/test_optimizer_observation_feasibility_history.py'
       - 'tests/test_optimizer_observation_weighting.py'
       - 'tests/test_optimizer_meta_router.py'
       - 'tests/test_optimizer_meta_memory.py'
@@ -90,6 +92,7 @@ jobs:
             tests/test_optimizer_landscape_descriptors.py \
             tests/test_optimizer_observation_drift.py \
             tests/test_optimizer_observation_drift_surfaces.py \
+            tests/test_optimizer_observation_feasibility_history.py \
             tests/test_optimizer_observation_weighting.py \
             tests/test_optimizer_meta_router.py \
             tests/test_optimizer_meta_memory.py \
@@ -102,6 +105,7 @@ jobs:
             tests/test_optimizer_landscape_descriptors.py \
             tests/test_optimizer_observation_drift.py \
             tests/test_optimizer_observation_drift_surfaces.py \
+            tests/test_optimizer_observation_feasibility_history.py \
             tests/test_optimizer_observation_weighting.py \
             tests/test_optimizer_meta_router.py \
             tests/test_optimizer_meta_memory.py \
@@ -124,6 +128,8 @@ jobs:
           assert manifest['default_backend'] == 'native'
           assert manifest['landscape_descriptors'] == 'durable_evaluator_observations_with_strategy_fallback'
           assert manifest['optimizer_observation_memory'] == 'evaluator_paid_discovery_rows_only'
+          assert manifest['optimizer_observation_history'] == 'bounded_same_config_evaluator_history'
+          assert manifest['optimizer_observation_history_retention'] == 192
           assert manifest['optimizer_observation_authority'] == 'routing_descriptor_only'
           assert manifest['optimizer_observation_weighting'] == 'recency_half_life_and_log_evidence'
           assert manifest['optimizer_observation_confidence'] == 'effective_fresh_rows_and_weight_concentration'
@@ -137,6 +143,8 @@ jobs:
           assert manifest['optimizer_observation_drift_max_window_rows'] == 24
           assert manifest['optimizer_observation_drift_primary_signals'] == 'local_order_or_contrast'
           assert manifest['optimizer_observation_drift_feasibility_role'] == 'supporting_only_without_same_config_history'
+          assert manifest['optimizer_observation_drift_same_config_feasibility'] == 'primary_with_basis_matched_history'
+          assert manifest['optimizer_observation_drift_same_config_min_pairs'] == 4
           assert manifest['optimizer_observation_drift_action'] == 'recent_only_if_entry_confident_else_pre_observation_fallback'
           assert manifest['optimizer_observation_drift_authority'] == 'routing_descriptor_only'
           assert manifest['optimizer_observation_drift_evaluator_calls'] == 0
