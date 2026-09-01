@@ -11,6 +11,9 @@ from lingjing_harness.runtime.optimizer_routing_checkpoint import (
     OPTIMIZER_OBSERVATION_REGIME_CHECKPOINT_TTL_SECONDS,
     OptimizerRoutingCheckpointStore,
 )
+from lingjing_harness.runtime.optimizer_routing_epoch import (
+    localize_routing_epoch_seen_counts,
+)
 from lingjing_harness.runtime.optimizer_tools import OptimizerToolRegistry
 from lingjing_harness.sample_data import build_sample_catalog
 
@@ -147,6 +150,32 @@ def test_routing_epoch_checkpoint_remains_backend_scoped():
     assert base_store.read("catalog", "search", now=2_100.0) is None
 
 
+def test_epoch_local_seen_count_uses_only_paid_history_after_boundary():
+    observation = {
+        "config": {"x": 0.25},
+        "objective": 0.5,
+        "feasible": True,
+        "seen_count": 9,
+        "updated_at": 2_100.0,
+    }
+    history = [
+        {"config": {"x": 0.25}, "observed_at": 1_000.0},
+        {"config": {"x": 0.25}, "observed_at": 1_100.0},
+        {"config": {"x": 0.25}, "observed_at": 2_000.0},
+        {"config": {"x": 0.25}, "observed_at": 2_100.0},
+    ]
+
+    localized = localize_routing_epoch_seen_counts(
+        [observation],
+        history,
+        epoch_started_at=2_000.0,
+    )
+
+    assert observation["seen_count"] == 9
+    assert localized[0]["seen_count"] == 2
+    assert localized[0]["routing_epoch_seen_count"] == 2
+
+
 def test_confirmed_drift_fences_weighting_and_history_across_restart_and_next_epoch(
     tmp_path,
     monkeypatch,
@@ -196,12 +225,20 @@ def test_confirmed_drift_fences_weighting_and_history_across_restart_and_next_ep
     first_state = registry.inspect_data()["optimizer_meta_router"][
         "optimizer_observation_drift_states"
     ]["search"]
+    lifetime_latest = registry.memory.optimizer_observations(
+        registry.catalog_key,
+        "search",
+    )
 
     assert first_state["change_detected"] is True
     assert "same_config_feasibility_shift" in first_state["primary_signals"]
     assert first_state["routing_epoch_advance_requested_at"] == 2_000.0
+    assert first_state["routing_epoch_recent_seen_count"] == 4
+    assert first_state["recent_confidence"]["total_weight"] == pytest.approx(4.0)
     assert checkpoint["evidence_epoch"] == 1
     assert checkpoint["epoch_started_at"] == 2_000.0
+    assert checkpoint["evidence_seen_count"] == 4
+    assert {row["seen_count"] for row in lifetime_latest[:4]} == {2}
     assert first.landscape.feasible_density == pytest.approx(1.0)
 
     second = registry._routing_context("search")
@@ -222,6 +259,16 @@ def test_confirmed_drift_fences_weighting_and_history_across_restart_and_next_ep
         "evidence_epoch": 1,
         "epoch_started_at": 2_000.0,
     }
+    assert manifest["optimizer_observation_routing_epoch_seen_count"] == (
+        "bounded_paid_history_since_epoch_boundary"
+    )
+    assert manifest["optimizer_observation_routing_epoch_seen_count_scope"] == (
+        "routing_context_only"
+    )
+    assert manifest["optimizer_observation_routing_epoch_seen_count_authority"] == (
+        "routing_descriptor_only"
+    )
+    assert manifest["optimizer_observation_routing_epoch_seen_count_evaluator_calls"] == 0
     assert manifest["optimizer_observation_routing_epoch_authority"] == "routing_descriptor_only"
     assert manifest["optimizer_observation_routing_epoch_evaluator_calls"] == 0
 
@@ -234,9 +281,15 @@ def test_confirmed_drift_fences_weighting_and_history_across_restart_and_next_ep
     restarted_state = restarted.inspect_data()["optimizer_meta_router"][
         "optimizer_observation_drift_states"
     ]["search"]
+    restarted_checkpoint = restarted._optimizer_routing_checkpoint_store.read(
+        restarted.catalog_key,
+        "search",
+        now=clock["now"],
+    )
     assert restarted_state["change_detected"] is False
     assert restarted_state["evidence_epoch"] == 1
     assert restarted_state["epoch_filtered_observation_rows"] == 4
+    assert restarted_checkpoint["evidence_seen_count"] == 4
     assert restarted_context.landscape.feasible_density == pytest.approx(1.0)
 
     clock["now"] = 3_000.0
@@ -254,10 +307,18 @@ def test_confirmed_drift_fences_weighting_and_history_across_restart_and_next_ep
     third_state = restarted.inspect_data()["optimizer_meta_router"][
         "optimizer_observation_drift_states"
     ]["search"]
+    lifetime_latest = restarted.memory.optimizer_observations(
+        restarted.catalog_key,
+        "search",
+    )
 
     assert third_state["change_detected"] is True
     assert "same_config_feasibility_shift" in third_state["primary_signals"]
     assert third_state["routing_epoch_advance_requested_at"] == 3_000.0
+    assert third_state["routing_epoch_recent_seen_count"] == 4
+    assert third_state["recent_confidence"]["total_weight"] == pytest.approx(4.0)
     assert checkpoint["evidence_epoch"] == 2
     assert checkpoint["epoch_started_at"] == 3_000.0
+    assert checkpoint["evidence_seen_count"] == 4
+    assert {row["seen_count"] for row in lifetime_latest[:4]} == {3}
     assert third.landscape.feasible_density == pytest.approx(0.5)
