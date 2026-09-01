@@ -219,10 +219,9 @@ def _candidate_diagnostics(
     if feasibility_shift:
         signals.append("local_feasibility_shift")
 
-    # The durable ledger stores only the latest feasibility for each config, not a
-    # same-config feasibility history. A shift across nearby different configs is
-    # useful diagnostics but cannot independently identify a changed constraint
-    # boundary. Keep it supporting-only until that historical evidence exists.
+    # Nearby different configs cannot prove that one constraint boundary changed.
+    # Keep that evidence supporting-only. Direct feasibility authority is handled
+    # separately from the bounded same-config evaluator history.
     severity = max(
         inversion_rate if order_shift else 0.0,
         min(1.0, contrast_shift) if contrast_shifted else 0.0,
@@ -248,25 +247,184 @@ def _candidate_diagnostics(
     }
 
 
+def _same_config_feasibility_history_diagnostics(
+    observation_history: Iterable[Mapping[str, Any]] | None,
+) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    for order, observation in enumerate(observation_history or []):
+        if not isinstance(observation, Mapping):
+            continue
+        config_key = str(observation.get("config_key") or "").strip()
+        feasible = observation.get("feasible")
+        observed_at = _finite_float(observation.get("observed_at"))
+        basis = str(observation.get("feasibility_basis") or "").strip()
+        if not config_key or not isinstance(feasible, bool) or observed_at is None or not basis:
+            continue
+        rows.append(
+            {
+                "config_key": config_key,
+                "feasible": feasible,
+                "feasibility_basis": basis,
+                "observed_at": observed_at,
+                "_order": order,
+            }
+        )
+    rows.sort(key=lambda row: (-float(row["observed_at"]), int(row["_order"])))
+
+    recent: dict[str, dict[str, Any]] = {}
+    cutoff: float | None = None
+    index = 0
+    while index < len(rows):
+        cohort_at = float(rows[index]["observed_at"])
+        cohort: list[dict[str, Any]] = []
+        while index < len(rows) and float(rows[index]["observed_at"]) == cohort_at:
+            cohort.append(rows[index])
+            index += 1
+        for row in cohort:
+            recent.setdefault(str(row["config_key"]), row)
+        if len(recent) >= OPTIMIZER_OBSERVATION_DRIFT_MIN_WINDOW_ROWS:
+            cutoff = cohort_at
+            break
+
+    if cutoff is None:
+        return {
+            "change_detected": False,
+            "same_config_feasibility_history_available": False,
+            "same_config_feasibility_recent_configs": len(recent),
+            "same_config_feasibility_pairs": 0,
+            "same_config_feasibility_flips": 0,
+            "same_config_feasibility_flip_rate": 0.0,
+            "same_config_feasibility_basis_mismatches": 0,
+            "new_evaluator_calls": 0,
+        }
+
+    prior: dict[str, dict[str, Any]] = {}
+    basis_mismatches = 0
+    for row in rows:
+        if float(row["observed_at"]) >= cutoff:
+            continue
+        config_key = str(row["config_key"])
+        recent_row = recent.get(config_key)
+        if recent_row is None or config_key in prior:
+            continue
+        if str(row["feasibility_basis"]) != str(recent_row["feasibility_basis"]):
+            basis_mismatches += 1
+            continue
+        prior[config_key] = row
+
+    pair_keys = sorted(set(recent) & set(prior))
+    flips = sum(
+        1
+        for config_key in pair_keys
+        if bool(recent[config_key]["feasible"]) != bool(prior[config_key]["feasible"])
+    )
+    flip_rate = flips / len(pair_keys) if pair_keys else 0.0
+    change_detected = bool(
+        len(pair_keys) >= OPTIMIZER_OBSERVATION_DRIFT_MIN_WINDOW_ROWS
+        and flip_rate + 1e-12 >= OPTIMIZER_OBSERVATION_DRIFT_FEASIBILITY_FLIP_THRESHOLD
+    )
+    return {
+        "change_detected": change_detected,
+        "same_config_feasibility_history_available": bool(
+            len(pair_keys) >= OPTIMIZER_OBSERVATION_DRIFT_MIN_WINDOW_ROWS
+        ),
+        "same_config_feasibility_recent_configs": len(recent),
+        "same_config_feasibility_pairs": len(pair_keys),
+        "same_config_feasibility_flips": flips,
+        "same_config_feasibility_flip_rate": flip_rate,
+        "same_config_feasibility_basis_mismatches": basis_mismatches,
+        "same_config_feasibility_recent_oldest_at": cutoff,
+        "_recent_cutoff_at": cutoff,
+        "new_evaluator_calls": 0,
+    }
+
+
+def _merge_same_config_feasibility_history(
+    base: Mapping[str, Any],
+    rows: Sequence[Mapping[str, Any]],
+    history_diagnostics: Mapping[str, Any],
+) -> dict[str, Any]:
+    result = dict(base)
+    for key, value in history_diagnostics.items():
+        if str(key).startswith("same_config_"):
+            result[key] = value
+
+    if not history_diagnostics.get("change_detected"):
+        return result
+
+    geometry_changed = bool(result.get("change_detected"))
+    primary_signals = list(result.get("primary_signals") or [])
+    signal = "same_config_feasibility_shift"
+    if signal not in primary_signals:
+        primary_signals.append(signal)
+    supporting_signals = list(result.get("supporting_signals") or [])
+    result["primary_signals"] = primary_signals
+    result["supporting_signals"] = supporting_signals
+    result["signals"] = list(dict.fromkeys([*primary_signals, *supporting_signals]))
+    result["available"] = True
+    result["change_detected"] = True
+    result["reason"] = "change_detected"
+    result["severity"] = max(
+        float(result.get("severity", 0.0) or 0.0),
+        float(history_diagnostics.get("same_config_feasibility_flip_rate", 0.0) or 0.0),
+    )
+    result["new_evaluator_calls"] = 0
+
+    cutoff = _finite_float(history_diagnostics.get("_recent_cutoff_at"))
+    geometry_cutoff = _finite_float(result.get("recent_oldest_at")) if geometry_changed else None
+    if cutoff is not None and geometry_cutoff is not None:
+        cutoff = max(cutoff, geometry_cutoff)
+    elif cutoff is None:
+        cutoff = geometry_cutoff
+
+    recent_rows = [
+        row
+        for row in rows
+        if cutoff is None or float(row["_drift_updated_at"]) >= cutoff
+    ]
+    result["recent_rows"] = len(recent_rows)
+    result["history_rows"] = max(0, len(rows) - len(recent_rows))
+    if recent_rows:
+        result["recent_newest_at"] = float(recent_rows[0]["_drift_updated_at"])
+        result["recent_oldest_at"] = float(recent_rows[-1]["_drift_updated_at"])
+    result["_recent_observations"] = [
+        {
+            key: value
+            for key, value in row.items()
+            if not str(key).startswith("_drift_")
+        }
+        for row in recent_rows
+    ]
+    return result
+
+
 def detect_optimizer_observation_drift(
     *,
     dimensions: Sequence[Any],
     observations: Iterable[Mapping[str, Any]],
+    observation_history: Iterable[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Find a latest-vs-history structural change point with local config matching."""
+    """Find structural change using local score geometry and same-config history."""
 
     rows = _usable_rows(observations, dimensions)
+    same_config_history = _same_config_feasibility_history_diagnostics(
+        observation_history
+    )
     minimum = 2 * OPTIMIZER_OBSERVATION_DRIFT_MIN_WINDOW_ROWS
     if len(rows) < minimum:
-        return {
-            "available": False,
-            "change_detected": False,
-            "action": "none",
-            "reason": "insufficient_rows",
-            "usable_rows": len(rows),
-            "candidate_splits": 0,
-            "new_evaluator_calls": 0,
-        }
+        return _merge_same_config_feasibility_history(
+            {
+                "available": False,
+                "change_detected": False,
+                "action": "none",
+                "reason": "insufficient_rows",
+                "usable_rows": len(rows),
+                "candidate_splits": 0,
+                "new_evaluator_calls": 0,
+            },
+            rows,
+            same_config_history,
+        )
 
     best: dict[str, Any] | None = None
     candidate_count = 0
@@ -323,19 +481,23 @@ def detect_optimizer_observation_drift(
             best = {**candidate, "_rank": rank}
 
     if best is None:
-        return {
-            "available": False,
-            "change_detected": False,
-            "action": "none",
-            "reason": "single_update_cohort",
-            "usable_rows": len(rows),
-            "candidate_splits": 0,
-            "new_evaluator_calls": 0,
-        }
+        return _merge_same_config_feasibility_history(
+            {
+                "available": False,
+                "change_detected": False,
+                "action": "none",
+                "reason": "single_update_cohort",
+                "usable_rows": len(rows),
+                "candidate_splits": 0,
+                "new_evaluator_calls": 0,
+            },
+            rows,
+            same_config_history,
+        )
     best["candidate_splits"] = candidate_count
     best["usable_rows"] = len(rows)
     best.pop("_rank", None)
-    return best
+    return _merge_same_config_feasibility_history(best, rows, same_config_history)
 
 
 def _drift_states(registry: Any) -> dict[str, dict[str, Any]]:
@@ -378,12 +540,19 @@ def install_optimizer_observation_drift_guard(optimizer_registry_cls: type) -> N
             return context
 
         observations = reader(self.catalog_key, surface)
+        history_reader = getattr(self.memory, "optimizer_observation_history", None)
+        observation_history = (
+            history_reader(self.catalog_key, surface)
+            if callable(history_reader)
+            else []
+        )
         engine = self.search if surface == "search" else self.recommend
         try:
             dimensions, _ = core._evolution_schema(engine.config)
             diagnostics = detect_optimizer_observation_drift(
                 dimensions=dimensions,
                 observations=observations,
+                observation_history=observation_history,
             )
         except (TypeError, ValueError, KeyError):
             states[surface] = {
@@ -454,6 +623,8 @@ def install_optimizer_observation_drift_guard(optimizer_registry_cls: type) -> N
                 "optimizer_observation_drift_feasibility_density_delta": OPTIMIZER_OBSERVATION_DRIFT_FEASIBILITY_DENSITY_DELTA,
                 "optimizer_observation_drift_primary_signals": "local_order_or_contrast",
                 "optimizer_observation_drift_feasibility_role": "supporting_only_without_same_config_history",
+                "optimizer_observation_drift_same_config_feasibility": "primary_with_basis_matched_history",
+                "optimizer_observation_drift_same_config_min_pairs": OPTIMIZER_OBSERVATION_DRIFT_MIN_WINDOW_ROWS,
                 "optimizer_observation_drift_action": "recent_only_if_entry_confident_else_pre_observation_fallback",
                 "optimizer_observation_drift_states": (
                     dict(states) if isinstance(states, dict) else {}
