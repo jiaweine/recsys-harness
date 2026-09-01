@@ -32,6 +32,7 @@ from .optimizer_observation_memory import install_optimizer_observation_runtime
 from .optimizer_observation_weighting import install_optimizer_observation_weighting
 from .optimizer_routing_checkpoint import install_optimizer_routing_checkpoint
 from .optimizer_routing_epoch import install_optimizer_routing_epoch_counts
+from .optimizer_routing_epoch_fence import install_optimizer_routing_epoch_fence
 from .perception import PerceptionEngine
 from .policy import OwnedPolicy
 from .semantic_tools import SearchBackendToolRegistry
@@ -72,6 +73,10 @@ install_optimizer_routing_checkpoint(OptimizerToolRegistry)
 # Scope only the routing-time view to the active/pending change-point epoch so old
 # regimes cannot inflate weighting, drift entry confidence, or checkpoint fencing.
 install_optimizer_routing_epoch_counts(AgentMemory, OptimizerToolRegistry)
+# Fence one routing call to the durable epoch token it observed at entry. A stale
+# process cannot overwrite a newer epoch checkpoint, and a concurrent epoch advance
+# observed before return fails closed to the pre-observation router for that call.
+install_optimizer_routing_epoch_fence(OptimizerToolRegistry)
 
 
 class AgentHarness(_BaseAgentHarness):
