@@ -148,6 +148,42 @@ def localize_routing_epoch_seen_counts(
     return localized
 
 
+def _history_covers_configs(
+    observations: Iterable[Mapping[str, Any]],
+    observation_history: Iterable[Mapping[str, Any]],
+    *,
+    epoch_started_at: float,
+) -> bool:
+    boundary = max(0.0, _finite_float(epoch_started_at) or 0.0)
+    needed: set[str] = set()
+    for row in observations:
+        if not isinstance(row, Mapping):
+            continue
+        config = row.get("config")
+        if isinstance(config, Mapping):
+            config_key = _config_key(config)
+            if config_key:
+                needed.add(config_key)
+    if not needed:
+        return False
+
+    covered: set[str] = set()
+    for row in observation_history:
+        if not isinstance(row, Mapping):
+            continue
+        observed_at = _finite_float(row.get("observed_at"))
+        if observed_at is None or observed_at + 1e-12 < boundary:
+            continue
+        config_key = str(row.get("config_key") or "").strip()
+        if not config_key:
+            config = row.get("config")
+            if isinstance(config, Mapping):
+                config_key = _config_key(config) or ""
+        if config_key in needed:
+            covered.add(config_key)
+    return needed <= covered
+
+
 def _pending_advances(registry: Any) -> dict[str, float]:
     pending = getattr(registry, _ROUTING_EPOCH_PENDING_ATTR, None)
     if not isinstance(pending, dict):
@@ -196,7 +232,9 @@ def install_optimizer_routing_epoch_counts(
     a transient reader view to the current (or pending) epoch, so weighting and the
     durable checkpoint version both consume only paid evidence from that regime.
     A detected change point also re-localizes the detector's recent cohort to the
-    candidate boundary before entry confidence is evaluated.
+    candidate boundary before entry confidence is evaluated when paid history fully
+    covers that cohort; synthetic or incomplete-history inputs preserve their prior
+    concentration semantics instead of manufacturing evidence.
     """
 
     global _COUNTS_INSTALLED
@@ -256,12 +294,18 @@ def install_optimizer_routing_epoch_counts(
             return result
         boundary = _finite_float(result.get("recent_oldest_at"))
         recent = result.get("_recent_observations")
-        history = kwargs.get("observation_history")
+        history = kwargs.get("observation_history") or []
         if boundary is None or boundary <= 0.0 or not isinstance(recent, list):
+            return result
+        if not _history_covers_configs(
+            recent,
+            history,
+            epoch_started_at=boundary,
+        ):
             return result
         localized = localize_routing_epoch_seen_counts(
             recent,
-            history or [],
+            history,
             epoch_started_at=boundary,
         )
         enriched = dict(result)
