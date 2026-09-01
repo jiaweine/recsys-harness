@@ -75,13 +75,13 @@ def _stationary_case(rng: random.Random, noise: float) -> list[dict[str, Any]]:
     return observations
 
 
-def _level_shift_case(rng: random.Random) -> list[dict[str, Any]]:
+def _level_shift_case(rng: random.Random, noise: float = 0.0) -> list[dict[str, Any]]:
     observations = _cohort(
         xs=BASE_X,
         scores=tuple(score + 0.75 for score in BASE_SCORES),
         updated_at=4_000.0,
         rng=rng,
-        score_noise=0.01,
+        score_noise=noise,
     )
     for cohort_index in range(1, 4):
         observations.extend(
@@ -90,7 +90,7 @@ def _level_shift_case(rng: random.Random) -> list[dict[str, Any]]:
                 scores=BASE_SCORES,
                 updated_at=float(4_000 - 1_000 * cohort_index),
                 rng=rng,
-                score_noise=0.01,
+                score_noise=noise,
             )
         )
     return observations
@@ -270,7 +270,13 @@ def run_calibration(*, seeds: int = 128) -> dict[str, Any]:
         _evaluate_case(
             name="pure_level_shift",
             seeds=seeds,
-            generator=_level_shift_case,
+            generator=lambda rng: _level_shift_case(rng, 0.0),
+            expected_change=False,
+        ),
+        _evaluate_case(
+            name="level_shift_low_noise",
+            seeds=seeds,
+            generator=lambda rng: _level_shift_case(rng, 0.01),
             expected_change=False,
         ),
         _evaluate_case(
