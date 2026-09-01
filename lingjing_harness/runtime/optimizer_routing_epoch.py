@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from hashlib import blake2b
+import json
 from math import isfinite
 from typing import Any, Iterable, Mapping
 
@@ -14,6 +16,20 @@ def _finite_float(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if isfinite(number) else None
+
+
+def _config_key(config: Mapping[str, Any]) -> str | None:
+    try:
+        raw = json.dumps(
+            dict(config),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError):
+        return None
+    return blake2b(raw.encode("utf-8"), digest_size=16).hexdigest()
 
 
 def routing_epoch_states(registry: Any) -> dict[str, dict[str, Any]]:
@@ -79,6 +95,53 @@ def filter_routing_epoch_rows(
     return filtered
 
 
+def localize_routing_epoch_seen_counts(
+    observations: Iterable[Mapping[str, Any]],
+    observation_history: Iterable[Mapping[str, Any]],
+    *,
+    epoch_started_at: float,
+) -> list[dict[str, Any]]:
+    """Replace cumulative seen_count with bounded epoch-local paid evidence counts.
+
+    Before the first confirmed epoch boundary the durable latest-row seen_count keeps
+    its existing lifetime semantics. After a boundary, routing must not inherit
+    repeated-evidence credit from a prior regime, so counts are reconstructed only
+    from evaluator-paid history rows inside the current epoch. History retention can
+    only make this count conservative; it cannot create extra routing authority.
+    """
+
+    rows = [dict(row) for row in observations if isinstance(row, Mapping)]
+    boundary = max(0.0, _finite_float(epoch_started_at) or 0.0)
+    if boundary <= 0.0:
+        return rows
+
+    counts: dict[str, int] = {}
+    for row in observation_history:
+        if not isinstance(row, Mapping):
+            continue
+        observed_at = _finite_float(row.get("observed_at"))
+        if observed_at is None or observed_at + 1e-12 < boundary:
+            continue
+        config_key = str(row.get("config_key") or "").strip()
+        if not config_key:
+            config = row.get("config")
+            if not isinstance(config, Mapping):
+                continue
+            config_key = _config_key(config) or ""
+        if config_key:
+            counts[config_key] = counts.get(config_key, 0) + 1
+
+    localized: list[dict[str, Any]] = []
+    for row in rows:
+        enriched = dict(row)
+        config = row.get("config")
+        config_key = _config_key(config) if isinstance(config, Mapping) else None
+        enriched["seen_count"] = max(1, counts.get(config_key or "", 0))
+        enriched["routing_epoch_seen_count"] = enriched["seen_count"]
+        localized.append(enriched)
+    return localized
+
+
 def _pending_advances(registry: Any) -> dict[str, float]:
     pending = getattr(registry, _ROUTING_EPOCH_PENDING_ATTR, None)
     if not isinstance(pending, dict):
@@ -112,6 +175,7 @@ def clear_pending_routing_epoch_advance(registry: Any, surface: str) -> None:
 __all__ = [
     "clear_pending_routing_epoch_advance",
     "filter_routing_epoch_rows",
+    "localize_routing_epoch_seen_counts",
     "pending_routing_epoch_advance",
     "request_routing_epoch_advance",
     "routing_epoch_boundary",
