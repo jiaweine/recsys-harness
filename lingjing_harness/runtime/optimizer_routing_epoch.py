@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextvars import ContextVar
 from hashlib import blake2b
 import json
 from math import isfinite
@@ -8,6 +9,11 @@ from typing import Any, Iterable, Mapping
 
 _ROUTING_EPOCH_STATE_ATTR = "_optimizer_observation_routing_epoch_states"
 _ROUTING_EPOCH_PENDING_ATTR = "_optimizer_observation_routing_epoch_pending"
+_ROUTING_EPOCH_CONTEXT: ContextVar[dict[str, Any] | None] = ContextVar(
+    "optimizer_routing_epoch_context",
+    default=None,
+)
+_COUNTS_INSTALLED = False
 
 
 def _finite_float(value: Any) -> float | None:
@@ -172,9 +178,143 @@ def clear_pending_routing_epoch_advance(registry: Any, surface: str) -> None:
     _pending_advances(registry).pop(str(surface), None)
 
 
+def _effective_epoch_boundary(registry: Any, surface: str) -> float:
+    pending = pending_routing_epoch_advance(registry, surface)
+    if pending is not None:
+        return max(routing_epoch_boundary(registry, surface), float(pending))
+    return routing_epoch_boundary(registry, surface)
+
+
+def install_optimizer_routing_epoch_counts(
+    agent_memory_cls: type,
+    optimizer_registry_cls: type,
+) -> None:
+    """Localize routing-only repeated evidence without changing durable ledger rows.
+
+    The public latest-observation reader keeps lifetime ``seen_count`` semantics for
+    callers outside routing. During one registry routing decision a ContextVar scopes
+    a transient reader view to the current (or pending) epoch, so weighting and the
+    durable checkpoint version both consume only paid evidence from that regime.
+    A detected change point also re-localizes the detector's recent cohort to the
+    candidate boundary before entry confidence is evaluated.
+    """
+
+    global _COUNTS_INSTALLED
+    if _COUNTS_INSTALLED:
+        return
+
+    from . import optimizer_observation_drift as drift
+
+    original_observations = agent_memory_cls.optimizer_observations
+    original_history = agent_memory_cls.optimizer_observation_history
+
+    def optimizer_observations_with_epoch_counts(
+        self: Any,
+        catalog_key: str,
+        domain: str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        observations = original_observations(
+            self,
+            catalog_key,
+            domain,
+            *args,
+            **kwargs,
+        )
+        context = _ROUTING_EPOCH_CONTEXT.get()
+        if not isinstance(context, dict):
+            return observations
+        registry = context.get("registry")
+        surface = str(context.get("surface") or "")
+        if registry is None or str(domain) != surface:
+            return observations
+        boundary = _effective_epoch_boundary(registry, surface)
+        if boundary <= 0.0:
+            return observations
+
+        cache = context.setdefault("history_cache", {})
+        cache_key = (str(catalog_key), str(domain), float(boundary))
+        history = cache.get(cache_key)
+        if history is None:
+            history = original_history(self, catalog_key, domain)
+            cache[cache_key] = history
+        return localize_routing_epoch_seen_counts(
+            observations,
+            history,
+            epoch_started_at=boundary,
+        )
+
+    agent_memory_cls.optimizer_observations = optimizer_observations_with_epoch_counts
+
+    original_detect = drift.detect_optimizer_observation_drift
+
+    def detect_with_epoch_local_recent(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        result = original_detect(*args, **kwargs)
+        context = _ROUTING_EPOCH_CONTEXT.get()
+        if not isinstance(context, dict) or not result.get("change_detected"):
+            return result
+        boundary = _finite_float(result.get("recent_oldest_at"))
+        recent = result.get("_recent_observations")
+        history = kwargs.get("observation_history")
+        if boundary is None or boundary <= 0.0 or not isinstance(recent, list):
+            return result
+        localized = localize_routing_epoch_seen_counts(
+            recent,
+            history or [],
+            epoch_started_at=boundary,
+        )
+        enriched = dict(result)
+        enriched["_recent_observations"] = localized
+        enriched["routing_epoch_recent_seen_count"] = sum(
+            max(1, int(row.get("seen_count", 1) or 1))
+            for row in localized
+        )
+        return enriched
+
+    drift.detect_optimizer_observation_drift = detect_with_epoch_local_recent
+
+    original_routing_context = optimizer_registry_cls._routing_context
+
+    def routing_context_with_epoch_count_scope(self: Any, surface: str):
+        token = _ROUTING_EPOCH_CONTEXT.set(
+            {
+                "registry": self,
+                "surface": str(surface),
+                "history_cache": {},
+            }
+        )
+        try:
+            return original_routing_context(self, surface)
+        finally:
+            _ROUTING_EPOCH_CONTEXT.reset(token)
+
+    optimizer_registry_cls._routing_context = routing_context_with_epoch_count_scope
+
+    original_inspect = optimizer_registry_cls.inspect_data
+
+    def inspect_data_with_epoch_counts(self: Any) -> dict[str, Any]:
+        result = original_inspect(self)
+        router = dict(result.get("optimizer_meta_router") or {})
+        router.update(
+            {
+                "optimizer_observation_routing_epoch_seen_count": "bounded_paid_history_since_epoch_boundary",
+                "optimizer_observation_routing_epoch_seen_count_scope": "routing_context_only",
+                "optimizer_observation_routing_epoch_seen_count_authority": "routing_descriptor_only",
+                "optimizer_observation_routing_epoch_seen_count_evaluator_calls": 0,
+            }
+        )
+        result["optimizer_meta_router"] = router
+        return result
+
+    optimizer_registry_cls.inspect_data = inspect_data_with_epoch_counts
+    _COUNTS_INSTALLED = True
+
+
 __all__ = [
     "clear_pending_routing_epoch_advance",
     "filter_routing_epoch_rows",
+    "install_optimizer_routing_epoch_counts",
     "localize_routing_epoch_seen_counts",
     "pending_routing_epoch_advance",
     "request_routing_epoch_advance",
