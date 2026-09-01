@@ -15,12 +15,14 @@ on:
       - 'lingjing_harness/runtime/optimizer_observation_memory.py'
       - 'lingjing_harness/runtime/optimizer_observation_weighting.py'
       - 'lingjing_harness/runtime/optimizer_routing_checkpoint.py'
+      - 'lingjing_harness/runtime/optimizer_routing_epoch.py'
       - 'lingjing_harness/runtime/optimizer_tools.py'
       - 'scripts/optimizer_meta_benchmark.py'
       - 'tests/test_optimizer_landscape_descriptors.py'
       - 'tests/test_optimizer_observation_drift.py'
       - 'tests/test_optimizer_observation_drift_surfaces.py'
       - 'tests/test_optimizer_observation_feasibility_history.py'
+      - 'tests/test_optimizer_routing_epoch.py'
       - 'tests/test_optimizer_observation_weighting.py'
       - 'tests/test_optimizer_meta_router.py'
       - 'tests/test_optimizer_meta_memory.py'
@@ -43,12 +45,14 @@ on:
       - 'lingjing_harness/runtime/optimizer_observation_memory.py'
       - 'lingjing_harness/runtime/optimizer_observation_weighting.py'
       - 'lingjing_harness/runtime/optimizer_routing_checkpoint.py'
+      - 'lingjing_harness/runtime/optimizer_routing_epoch.py'
       - 'lingjing_harness/runtime/optimizer_tools.py'
       - 'scripts/optimizer_meta_benchmark.py'
       - 'tests/test_optimizer_landscape_descriptors.py'
       - 'tests/test_optimizer_observation_drift.py'
       - 'tests/test_optimizer_observation_drift_surfaces.py'
       - 'tests/test_optimizer_observation_feasibility_history.py'
+      - 'tests/test_optimizer_routing_epoch.py'
       - 'tests/test_optimizer_observation_weighting.py'
       - 'tests/test_optimizer_meta_router.py'
       - 'tests/test_optimizer_meta_memory.py'
@@ -87,12 +91,14 @@ jobs:
             lingjing_harness/runtime/optimizer_observation_memory.py \
             lingjing_harness/runtime/optimizer_observation_weighting.py \
             lingjing_harness/runtime/optimizer_routing_checkpoint.py \
+            lingjing_harness/runtime/optimizer_routing_epoch.py \
             lingjing_harness/runtime/optimizer_tools.py \
             scripts/optimizer_meta_benchmark.py \
             tests/test_optimizer_landscape_descriptors.py \
             tests/test_optimizer_observation_drift.py \
             tests/test_optimizer_observation_drift_surfaces.py \
             tests/test_optimizer_observation_feasibility_history.py \
+            tests/test_optimizer_routing_epoch.py \
             tests/test_optimizer_observation_weighting.py \
             tests/test_optimizer_meta_router.py \
             tests/test_optimizer_meta_memory.py \
@@ -106,6 +112,7 @@ jobs:
             tests/test_optimizer_observation_drift.py \
             tests/test_optimizer_observation_drift_surfaces.py \
             tests/test_optimizer_observation_feasibility_history.py \
+            tests/test_optimizer_routing_epoch.py \
             tests/test_optimizer_observation_weighting.py \
             tests/test_optimizer_meta_router.py \
             tests/test_optimizer_meta_memory.py \
@@ -153,6 +160,10 @@ jobs:
           assert manifest['optimizer_observation_regime_checkpoint_refresh_seconds'] == 129600.0
           assert manifest['optimizer_observation_regime_checkpoint_authority'] == 'routing_hysteresis_only'
           assert manifest['optimizer_observation_regime_checkpoint_evaluator_calls'] == 0
+          assert manifest['optimizer_observation_routing_epoch'] == 'durable_checkpoint_change_point_fence'
+          assert manifest['optimizer_observation_routing_epoch_boundary'] == 'confirmed_recent_oldest_at'
+          assert manifest['optimizer_observation_routing_epoch_authority'] == 'routing_descriptor_only'
+          assert manifest['optimizer_observation_routing_epoch_evaluator_calls'] == 0
           assert manifest['optimizer_observation_weighting_authority'] == 'routing_descriptor_only'
           assert manifest['landscape_descriptor_evaluator_calls'] == 0
           assert manifest['optimizer_observation_weighting_evaluator_calls'] == 0

@@ -10,6 +10,8 @@ from lingjing_harness.algorithms.optimizer_observation_weighting import (
     describe_weighted_optimizer_landscape,
 )
 
+from . import optimizer_routing_epoch as routing_epoch
+
 
 OPTIMIZER_OBSERVATION_RECENCY_HALF_LIFE_DAYS = 14.0
 OPTIMIZER_OBSERVATION_RECENCY_FLOOR = 0.125
@@ -203,7 +205,11 @@ def install_optimizer_observation_weighting(optimizer_registry_cls: type) -> Non
         if not callable(reader):
             regimes[surface] = _ROUTING_REGIME_FALLBACK
             return context
-        observations = reader(self.catalog_key, surface)
+        observations = routing_epoch.filter_routing_epoch_rows(
+            reader(self.catalog_key, surface),
+            timestamp_key="updated_at",
+            epoch_started_at=routing_epoch.routing_epoch_boundary(self, surface),
+        )
         if len(observations) < int(OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS):
             regimes[surface] = _ROUTING_REGIME_FALLBACK
             return _pre_observation_context(self, surface, context)
