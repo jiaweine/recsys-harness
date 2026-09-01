@@ -13,6 +13,7 @@ on:
       - 'lingjing_harness/runtime/optimizer_meta_memory.py'
       - 'lingjing_harness/runtime/optimizer_observation_memory.py'
       - 'lingjing_harness/runtime/optimizer_observation_weighting.py'
+      - 'lingjing_harness/runtime/optimizer_routing_checkpoint.py'
       - 'lingjing_harness/runtime/optimizer_tools.py'
       - 'scripts/optimizer_meta_benchmark.py'
       - 'tests/test_optimizer_landscape_descriptors.py'
@@ -36,6 +37,7 @@ on:
       - 'lingjing_harness/runtime/optimizer_meta_memory.py'
       - 'lingjing_harness/runtime/optimizer_observation_memory.py'
       - 'lingjing_harness/runtime/optimizer_observation_weighting.py'
+      - 'lingjing_harness/runtime/optimizer_routing_checkpoint.py'
       - 'lingjing_harness/runtime/optimizer_tools.py'
       - 'scripts/optimizer_meta_benchmark.py'
       - 'tests/test_optimizer_landscape_descriptors.py'
@@ -75,6 +77,7 @@ jobs:
             lingjing_harness/runtime/optimizer_meta_memory.py \
             lingjing_harness/runtime/optimizer_observation_memory.py \
             lingjing_harness/runtime/optimizer_observation_weighting.py \
+            lingjing_harness/runtime/optimizer_routing_checkpoint.py \
             lingjing_harness/runtime/optimizer_tools.py \
             scripts/optimizer_meta_benchmark.py \
             tests/test_optimizer_landscape_descriptors.py \
@@ -118,6 +121,11 @@ jobs:
           assert manifest['optimizer_observation_hysteresis'] == 'per_registry_routing_regime'
           assert manifest['optimizer_observation_exit_min_effective_rows'] == 3.5
           assert manifest['optimizer_observation_exit_max_weight_share'] == 0.55
+          assert manifest['optimizer_observation_regime_checkpoint'] == 'optimizer_meta_memory_evidence_fenced_ttl'
+          assert manifest['optimizer_observation_regime_checkpoint_ttl_seconds'] == 259200.0
+          assert manifest['optimizer_observation_regime_checkpoint_refresh_seconds'] == 129600.0
+          assert manifest['optimizer_observation_regime_checkpoint_authority'] == 'routing_hysteresis_only'
+          assert manifest['optimizer_observation_regime_checkpoint_evaluator_calls'] == 0
           assert manifest['optimizer_observation_weighting_authority'] == 'routing_descriptor_only'
           assert manifest['landscape_descriptor_evaluator_calls'] == 0
           assert manifest['optimizer_observation_weighting_evaluator_calls'] == 0
