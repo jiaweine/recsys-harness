@@ -11,7 +11,9 @@ class OptimizerRoutingCheckpointStore:
     The checkpoint never carries optimizer credit, candidate quality, warm-start
     rows, or promotion authority. Its only purpose is to preserve the prior
     weighted/fallback regime across process restarts while evidence is revalidated
-    by the existing observation confidence gates.
+    by the existing observation confidence gates. Confirmed change points also
+    advance a monotone routing-evidence epoch in this same checkpoint row so future
+    drift comparisons never cross an already-accepted regime boundary.
     """
 
     def __init__(self, optimizer_meta_memory: Any) -> None:
@@ -28,6 +30,8 @@ class OptimizerRoutingCheckpointStore:
           evidence_updated_at real not null check(evidence_updated_at >= 0),
           evidence_seen_count integer not null check(evidence_seen_count >= 0),
           evidence_rows integer not null check(evidence_rows >= 0),
+          evidence_epoch integer not null default 0 check(evidence_epoch >= 0),
+          epoch_started_at real not null default 0 check(epoch_started_at >= 0),
           decision_at real not null,
           expires_at real not null,
           primary key(catalog_key,domain)
@@ -38,6 +42,24 @@ class OptimizerRoutingCheckpointStore:
             try:
                 connection.execute("pragma busy_timeout=10000")
                 connection.execute(sql)
+                columns = {
+                    str(row[1])
+                    for row in connection.execute(
+                        "pragma table_info(agent_optimizer_routing_checkpoint)"
+                    ).fetchall()
+                }
+                if "evidence_epoch" not in columns:
+                    connection.execute(
+                        "alter table agent_optimizer_routing_checkpoint "
+                        "add column evidence_epoch integer not null default 0 "
+                        "check(evidence_epoch >= 0)"
+                    )
+                if "epoch_started_at" not in columns:
+                    connection.execute(
+                        "alter table agent_optimizer_routing_checkpoint "
+                        "add column epoch_started_at real not null default 0 "
+                        "check(epoch_started_at >= 0)"
+                    )
                 connection.commit()
             finally:
                 self.memory._close(connection)
@@ -78,7 +100,8 @@ class OptimizerRoutingCheckpointStore:
                 row = connection.execute(
                     """
                     select catalog_key,domain,regime,evidence_updated_at,
-                           evidence_seen_count,evidence_rows,decision_at,expires_at
+                           evidence_seen_count,evidence_rows,evidence_epoch,
+                           epoch_started_at,decision_at,expires_at
                     from agent_optimizer_routing_checkpoint
                     where catalog_key=? and domain=?
                     """,
@@ -104,10 +127,11 @@ class OptimizerRoutingCheckpointStore:
         evidence_updated_at: float,
         evidence_seen_count: int,
         evidence_rows: int,
+        epoch_started_at: float = 0.0,
         decision_at: float | None = None,
         ttl_seconds: float,
     ) -> dict[str, Any]:
-        """Persist one decision unless a newer evidence/decision version already won."""
+        """Persist one routing decision and any monotone change-point epoch advance."""
 
         domain = str(domain or "").strip()
         regime = str(regime or "").strip().lower()
@@ -128,6 +152,11 @@ class OptimizerRoutingCheckpointStore:
             evidence_rows,
             name="optimizer routing evidence_rows",
         )
+        epoch_started_at = float(epoch_started_at)
+        if not isfinite(epoch_started_at) or epoch_started_at < 0.0:
+            raise ValueError("optimizer routing epoch_started_at must be finite and >= 0")
+        if epoch_started_at > evidence_updated_at + 1e-12:
+            raise ValueError("optimizer routing epoch cannot start after current evidence")
 
         if decision_at is None:
             decision_at = time.time()
@@ -144,21 +173,43 @@ class OptimizerRoutingCheckpointStore:
             try:
                 connection.execute("pragma busy_timeout=10000")
                 connection.execute("begin immediate")
+                existing = connection.execute(
+                    """
+                    select evidence_epoch,epoch_started_at
+                    from agent_optimizer_routing_checkpoint
+                    where catalog_key=? and domain=?
+                    """,
+                    (catalog_key, domain),
+                ).fetchone()
+                current_epoch = int(existing["evidence_epoch"]) if existing is not None else 0
+                current_epoch_started_at = (
+                    float(existing["epoch_started_at"]) if existing is not None else 0.0
+                )
+                effective_epoch_started_at = max(
+                    current_epoch_started_at,
+                    epoch_started_at,
+                )
+                effective_epoch = current_epoch + (
+                    1 if epoch_started_at > current_epoch_started_at + 1e-12 else 0
+                )
                 cursor = connection.execute(
                     """
                     insert into agent_optimizer_routing_checkpoint(
                       catalog_key,domain,regime,evidence_updated_at,evidence_seen_count,
-                      evidence_rows,decision_at,expires_at
-                    ) values(?,?,?,?,?,?,?,?)
+                      evidence_rows,evidence_epoch,epoch_started_at,decision_at,expires_at
+                    ) values(?,?,?,?,?,?,?,?,?,?)
                     on conflict(catalog_key,domain) do update set
                       regime=excluded.regime,
                       evidence_updated_at=excluded.evidence_updated_at,
                       evidence_seen_count=excluded.evidence_seen_count,
                       evidence_rows=excluded.evidence_rows,
+                      evidence_epoch=excluded.evidence_epoch,
+                      epoch_started_at=excluded.epoch_started_at,
                       decision_at=excluded.decision_at,
                       expires_at=excluded.expires_at
                     where
-                      excluded.evidence_updated_at > agent_optimizer_routing_checkpoint.evidence_updated_at
+                      excluded.epoch_started_at > agent_optimizer_routing_checkpoint.epoch_started_at
+                      or excluded.evidence_updated_at > agent_optimizer_routing_checkpoint.evidence_updated_at
                       or (
                         excluded.evidence_updated_at = agent_optimizer_routing_checkpoint.evidence_updated_at
                         and excluded.evidence_seen_count > agent_optimizer_routing_checkpoint.evidence_seen_count
@@ -182,6 +233,8 @@ class OptimizerRoutingCheckpointStore:
                         evidence_updated_at,
                         evidence_seen_count,
                         evidence_rows,
+                        effective_epoch,
+                        effective_epoch_started_at,
                         decision_at,
                         expires_at,
                     ),
@@ -189,7 +242,8 @@ class OptimizerRoutingCheckpointStore:
                 row = connection.execute(
                     """
                     select catalog_key,domain,regime,evidence_updated_at,
-                           evidence_seen_count,evidence_rows,decision_at,expires_at
+                           evidence_seen_count,evidence_rows,evidence_epoch,
+                           epoch_started_at,decision_at,expires_at
                     from agent_optimizer_routing_checkpoint
                     where catalog_key=? and domain=?
                     """,
@@ -285,13 +339,14 @@ def _checkpoint_not_ahead(
 
 
 def install_optimizer_routing_checkpoint(optimizer_registry_cls: type) -> None:
-    """Persist only routing hysteresis state around the existing weighted router."""
+    """Persist routing hysteresis plus monotone evidence epochs in one checkpoint."""
 
     global _INSTALLED
     if _INSTALLED:
         return
 
     from . import optimizer_observation_weighting as weighting
+    from . import optimizer_routing_epoch as routing_epoch
 
     original_routing_context = optimizer_registry_cls._routing_context
 
@@ -303,11 +358,34 @@ def install_optimizer_routing_checkpoint(optimizer_registry_cls: type) -> None:
         now = time.time()
         previous_regime = regimes.get(surface)
         cold_observations: list[dict[str, Any]] | None = None
+        checkpoint = (
+            store.read(self.catalog_key, surface, now=now)
+            if store is not None
+            else None
+        )
+        if isinstance(checkpoint, dict):
+            routing_epoch.set_routing_epoch_state(
+                self,
+                surface,
+                evidence_epoch=int(checkpoint.get("evidence_epoch", 0) or 0),
+                epoch_started_at=float(checkpoint.get("epoch_started_at", 0.0) or 0.0),
+            )
+        else:
+            routing_epoch.set_routing_epoch_state(
+                self,
+                surface,
+                evidence_epoch=0,
+                epoch_started_at=0.0,
+            )
+        epoch_boundary = routing_epoch.routing_epoch_boundary(self, surface)
 
-        if previous_regime is None and store is not None and callable(reader):
-            checkpoint = store.read(self.catalog_key, surface, now=now)
-            if isinstance(checkpoint, dict) and checkpoint.get("active_weighted"):
-                cold_observations = reader(self.catalog_key, surface)
+        if previous_regime is None and isinstance(checkpoint, dict) and callable(reader):
+            if checkpoint.get("active_weighted"):
+                cold_observations = routing_epoch.filter_routing_epoch_rows(
+                    reader(self.catalog_key, surface),
+                    timestamp_key="updated_at",
+                    epoch_started_at=epoch_boundary,
+                )
                 clock = optimizer_observation_evidence_clock(cold_observations)
                 if (
                     len(cold_observations) >= int(weighting.OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS)
@@ -319,6 +397,7 @@ def install_optimizer_routing_checkpoint(optimizer_registry_cls: type) -> None:
 
         result = original_routing_context(self, surface)
         final_regime = regimes.get(surface)
+        pending_epoch_started_at = routing_epoch.pending_routing_epoch_advance(self, surface)
         if (
             store is None
             or not callable(reader)
@@ -342,25 +421,54 @@ def install_optimizer_routing_checkpoint(optimizer_registry_cls: type) -> None:
             final_regime == weighting._ROUTING_REGIME_WEIGHTED
             and now - last_refresh >= OPTIMIZER_OBSERVATION_REGIME_CHECKPOINT_REFRESH_SECONDS
         )
-        if not entered_weighted and not exited_weighted and not refresh_due:
+        epoch_advance_due = pending_epoch_started_at is not None
+        if not entered_weighted and not exited_weighted and not refresh_due and not epoch_advance_due:
             return result
 
-        observations = (
-            cold_observations
-            if cold_observations is not None
-            else reader(self.catalog_key, surface)
+        evidence_epoch_boundary = (
+            float(pending_epoch_started_at)
+            if pending_epoch_started_at is not None
+            else epoch_boundary
+        )
+        observations = routing_epoch.filter_routing_epoch_rows(
+            (
+                cold_observations
+                if cold_observations is not None
+                else reader(self.catalog_key, surface)
+            ),
+            timestamp_key="updated_at",
+            epoch_started_at=evidence_epoch_boundary,
         )
         if len(observations) < int(weighting.OPTIMIZER_OBSERVATION_MIN_EFFECTIVE_ROWS):
             return result
 
+        epoch_state = routing_epoch.routing_epoch_state(self, surface)
         checkpoint = store.record(
             self.catalog_key,
             surface,
             regime=final_regime,
+            epoch_started_at=(
+                float(pending_epoch_started_at)
+                if pending_epoch_started_at is not None
+                else float(epoch_state.get("epoch_started_at", 0.0) or 0.0)
+            ),
             decision_at=now,
             ttl_seconds=OPTIMIZER_OBSERVATION_REGIME_CHECKPOINT_TTL_SECONDS,
             **optimizer_observation_evidence_clock(observations),
         )
+        routing_epoch.set_routing_epoch_state(
+            self,
+            surface,
+            evidence_epoch=int(checkpoint.get("evidence_epoch", 0) or 0),
+            epoch_started_at=float(checkpoint.get("epoch_started_at", 0.0) or 0.0),
+        )
+        if (
+            pending_epoch_started_at is not None
+            and float(checkpoint.get("epoch_started_at", 0.0) or 0.0)
+            + 1e-12
+            >= float(pending_epoch_started_at)
+        ):
+            routing_epoch.clear_pending_routing_epoch_advance(self, surface)
         if checkpoint.get("recorded"):
             refreshes[surface] = now
         else:
@@ -385,6 +493,7 @@ def install_optimizer_routing_checkpoint(optimizer_registry_cls: type) -> None:
     def inspect_data_with_checkpoint(self: Any) -> dict[str, Any]:
         result = original_inspect(self)
         router = dict(result.get("optimizer_meta_router") or {})
+        epoch_states = routing_epoch.routing_epoch_states(self)
         router.update(
             {
                 "optimizer_observation_regime_checkpoint": "optimizer_meta_memory_evidence_fenced_ttl",
@@ -396,6 +505,11 @@ def install_optimizer_routing_checkpoint(optimizer_registry_cls: type) -> None:
                 ),
                 "optimizer_observation_regime_checkpoint_authority": "routing_hysteresis_only",
                 "optimizer_observation_regime_checkpoint_evaluator_calls": 0,
+                "optimizer_observation_routing_epoch": "durable_checkpoint_change_point_fence",
+                "optimizer_observation_routing_epoch_boundary": "confirmed_recent_oldest_at",
+                "optimizer_observation_routing_epoch_states": dict(epoch_states),
+                "optimizer_observation_routing_epoch_authority": "routing_descriptor_only",
+                "optimizer_observation_routing_epoch_evaluator_calls": 0,
             }
         )
         result["optimizer_meta_router"] = router

@@ -16,6 +16,7 @@ from lingjing_harness.algorithms.optimizer_observation_weighting import (
 )
 
 from . import optimizer_observation_weighting as weighting
+from . import optimizer_routing_epoch as routing_epoch
 
 
 OPTIMIZER_OBSERVATION_DRIFT_MIN_WINDOW_ROWS = 4
@@ -539,12 +540,24 @@ def install_optimizer_observation_drift_guard(optimizer_registry_cls: type) -> N
             }
             return context
 
-        observations = reader(self.catalog_key, surface)
+        epoch_state = routing_epoch.routing_epoch_state(self, surface)
+        epoch_started_at = routing_epoch.routing_epoch_boundary(self, surface)
+        raw_observations = reader(self.catalog_key, surface)
+        observations = routing_epoch.filter_routing_epoch_rows(
+            raw_observations,
+            timestamp_key="updated_at",
+            epoch_started_at=epoch_started_at,
+        )
         history_reader = getattr(self.memory, "optimizer_observation_history", None)
-        observation_history = (
+        raw_observation_history = (
             history_reader(self.catalog_key, surface)
             if callable(history_reader)
             else []
+        )
+        observation_history = routing_epoch.filter_routing_epoch_rows(
+            raw_observation_history,
+            timestamp_key="observed_at",
+            epoch_started_at=epoch_started_at,
         )
         engine = self.search if surface == "search" else self.recommend
         try:
@@ -560,14 +573,37 @@ def install_optimizer_observation_drift_guard(optimizer_registry_cls: type) -> N
                 "change_detected": False,
                 "action": "none",
                 "reason": "drift_diagnostics_unavailable",
+                "evidence_epoch": int(epoch_state.get("evidence_epoch", 0) or 0),
+                "epoch_started_at": epoch_started_at,
                 "new_evaluator_calls": 0,
             }
             return context
+
+        diagnostics["evidence_epoch"] = int(epoch_state.get("evidence_epoch", 0) or 0)
+        diagnostics["epoch_started_at"] = epoch_started_at
+        diagnostics["epoch_observation_rows"] = len(observations)
+        diagnostics["epoch_history_rows"] = len(observation_history)
+        diagnostics["epoch_filtered_observation_rows"] = max(
+            0,
+            len(raw_observations) - len(observations),
+        )
+        diagnostics["epoch_filtered_history_rows"] = max(
+            0,
+            len(raw_observation_history) - len(observation_history),
+        )
 
         if not diagnostics.get("change_detected"):
             diagnostics["action"] = "none"
             states[surface] = _public_diagnostics(diagnostics)
             return context
+
+        requested_epoch_started_at = routing_epoch.request_routing_epoch_advance(
+            self,
+            surface,
+            float(diagnostics.get("recent_oldest_at", 0.0) or 0.0),
+        )
+        if requested_epoch_started_at is not None:
+            diagnostics["routing_epoch_advance_requested_at"] = requested_epoch_started_at
 
         recent = list(diagnostics.get("_recent_observations") or [])
         recent_weighted = weighting.weight_optimizer_observations(
