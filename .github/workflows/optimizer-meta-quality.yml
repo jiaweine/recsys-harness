@@ -11,12 +11,15 @@ on:
       - 'lingjing_harness/runtime/backend_config.py'
       - 'lingjing_harness/runtime/backend_memory.py'
       - 'lingjing_harness/runtime/optimizer_meta_memory.py'
+      - 'lingjing_harness/runtime/optimizer_observation_drift.py'
       - 'lingjing_harness/runtime/optimizer_observation_memory.py'
       - 'lingjing_harness/runtime/optimizer_observation_weighting.py'
       - 'lingjing_harness/runtime/optimizer_routing_checkpoint.py'
       - 'lingjing_harness/runtime/optimizer_tools.py'
       - 'scripts/optimizer_meta_benchmark.py'
       - 'tests/test_optimizer_landscape_descriptors.py'
+      - 'tests/test_optimizer_observation_drift.py'
+      - 'tests/test_optimizer_observation_drift_surfaces.py'
       - 'tests/test_optimizer_observation_weighting.py'
       - 'tests/test_optimizer_meta_router.py'
       - 'tests/test_optimizer_meta_memory.py'
@@ -35,12 +38,15 @@ on:
       - 'lingjing_harness/runtime/backend_config.py'
       - 'lingjing_harness/runtime/backend_memory.py'
       - 'lingjing_harness/runtime/optimizer_meta_memory.py'
+      - 'lingjing_harness/runtime/optimizer_observation_drift.py'
       - 'lingjing_harness/runtime/optimizer_observation_memory.py'
       - 'lingjing_harness/runtime/optimizer_observation_weighting.py'
       - 'lingjing_harness/runtime/optimizer_routing_checkpoint.py'
       - 'lingjing_harness/runtime/optimizer_tools.py'
       - 'scripts/optimizer_meta_benchmark.py'
       - 'tests/test_optimizer_landscape_descriptors.py'
+      - 'tests/test_optimizer_observation_drift.py'
+      - 'tests/test_optimizer_observation_drift_surfaces.py'
       - 'tests/test_optimizer_observation_weighting.py'
       - 'tests/test_optimizer_meta_router.py'
       - 'tests/test_optimizer_meta_memory.py'
@@ -75,12 +81,15 @@ jobs:
             lingjing_harness/runtime/__init__.py \
             lingjing_harness/runtime/backend_config.py \
             lingjing_harness/runtime/optimizer_meta_memory.py \
+            lingjing_harness/runtime/optimizer_observation_drift.py \
             lingjing_harness/runtime/optimizer_observation_memory.py \
             lingjing_harness/runtime/optimizer_observation_weighting.py \
             lingjing_harness/runtime/optimizer_routing_checkpoint.py \
             lingjing_harness/runtime/optimizer_tools.py \
             scripts/optimizer_meta_benchmark.py \
             tests/test_optimizer_landscape_descriptors.py \
+            tests/test_optimizer_observation_drift.py \
+            tests/test_optimizer_observation_drift_surfaces.py \
             tests/test_optimizer_observation_weighting.py \
             tests/test_optimizer_meta_router.py \
             tests/test_optimizer_meta_memory.py \
@@ -91,6 +100,8 @@ jobs:
         run: |
           pytest -q \
             tests/test_optimizer_landscape_descriptors.py \
+            tests/test_optimizer_observation_drift.py \
+            tests/test_optimizer_observation_drift_surfaces.py \
             tests/test_optimizer_observation_weighting.py \
             tests/test_optimizer_meta_router.py \
             tests/test_optimizer_meta_memory.py \
@@ -121,6 +132,14 @@ jobs:
           assert manifest['optimizer_observation_hysteresis'] == 'per_registry_routing_regime'
           assert manifest['optimizer_observation_exit_min_effective_rows'] == 3.5
           assert manifest['optimizer_observation_exit_max_weight_share'] == 0.55
+          assert manifest['optimizer_observation_drift_detection'] == 'temporal_change_point_local_geometry'
+          assert manifest['optimizer_observation_drift_min_window_rows'] == 4
+          assert manifest['optimizer_observation_drift_max_window_rows'] == 24
+          assert manifest['optimizer_observation_drift_primary_signals'] == 'local_order_or_contrast'
+          assert manifest['optimizer_observation_drift_feasibility_role'] == 'supporting_only_without_same_config_history'
+          assert manifest['optimizer_observation_drift_action'] == 'recent_only_if_entry_confident_else_pre_observation_fallback'
+          assert manifest['optimizer_observation_drift_authority'] == 'routing_descriptor_only'
+          assert manifest['optimizer_observation_drift_evaluator_calls'] == 0
           assert manifest['optimizer_observation_regime_checkpoint'] == 'optimizer_meta_memory_evidence_fenced_ttl'
           assert manifest['optimizer_observation_regime_checkpoint_ttl_seconds'] == 259200.0
           assert manifest['optimizer_observation_regime_checkpoint_refresh_seconds'] == 129600.0
