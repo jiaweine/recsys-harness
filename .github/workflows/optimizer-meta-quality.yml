@@ -29,6 +29,7 @@ on:
       - 'tests/test_optimizer_observation_drift_recency.py'
       - 'tests/test_optimizer_observation_drift_surfaces.py'
       - 'tests/test_optimizer_observation_feasibility_history.py'
+      - 'tests/test_optimizer_observation_future_clock.py'
       - 'tests/test_optimizer_observation_snapshot.py'
       - 'tests/test_optimizer_routing_epoch.py'
       - 'tests/test_optimizer_routing_epoch_fence.py'
@@ -68,6 +69,7 @@ on:
       - 'tests/test_optimizer_observation_drift_recency.py'
       - 'tests/test_optimizer_observation_drift_surfaces.py'
       - 'tests/test_optimizer_observation_feasibility_history.py'
+      - 'tests/test_optimizer_observation_future_clock.py'
       - 'tests/test_optimizer_observation_snapshot.py'
       - 'tests/test_optimizer_routing_epoch.py'
       - 'tests/test_optimizer_routing_epoch_fence.py'
@@ -123,6 +125,7 @@ jobs:
             tests/test_optimizer_observation_drift_recency.py \
             tests/test_optimizer_observation_drift_surfaces.py \
             tests/test_optimizer_observation_feasibility_history.py \
+            tests/test_optimizer_observation_future_clock.py \
             tests/test_optimizer_observation_snapshot.py \
             tests/test_optimizer_routing_epoch.py \
             tests/test_optimizer_routing_epoch_fence.py \
@@ -142,6 +145,7 @@ jobs:
             tests/test_optimizer_observation_drift_recency.py \
             tests/test_optimizer_observation_drift_surfaces.py \
             tests/test_optimizer_observation_feasibility_history.py \
+            tests/test_optimizer_observation_future_clock.py \
             tests/test_optimizer_observation_snapshot.py \
             tests/test_optimizer_routing_epoch.py \
             tests/test_optimizer_routing_epoch_fence.py \
@@ -182,6 +186,7 @@ jobs:
           assert manifest['optimizer_observation_snapshot_authority'] == 'routing_descriptor_only'
           assert manifest['optimizer_observation_snapshot_evaluator_calls'] == 0
           assert manifest['optimizer_observation_weighting'] == 'recency_half_life_and_log_evidence'
+          assert manifest['optimizer_observation_recency_reference_clock'] == 'caller_wall_clock_future_rows_clamped_locally'
           assert manifest['optimizer_observation_confidence'] == 'effective_fresh_rows_and_weight_concentration'
           assert manifest['optimizer_observation_effective_rows_method'] == 'min_kish_ess_and_total_routing_weight'
           assert manifest['optimizer_observation_confidence_fallback'] == 'pre_observation_router'
