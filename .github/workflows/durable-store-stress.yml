@@ -23,10 +23,19 @@ jobs:
         run: |
           python -m compileall -q \
             lingjing_harness/store.py \
+            lingjing_harness/store_handoff.py \
+            lingjing_harness/rate_limit_maintenance.py \
             scripts/stress_smoke.py \
             tests/test_store.py \
-            tests/test_store_fencing_stress.py
-      - name: Run deterministic lease, ownership, and clock fencing contracts
-        run: pytest -q tests/test_store.py tests/test_store_fencing_stress.py
+            tests/test_store_fencing_stress.py \
+            tests/test_graceful_handoff.py \
+            tests/test_rate_limit_maintenance.py
+      - name: Run deterministic lease, ownership, handoff, and clock fencing contracts
+        run: |
+          pytest -q \
+            tests/test_store.py \
+            tests/test_store_fencing_stress.py \
+            tests/test_graceful_handoff.py \
+            tests/test_rate_limit_maintenance.py
       - name: Exercise durable workspace contention at elevated load
         run: python scripts/stress_smoke.py --workers 16 --iterations 80 --processes 8
