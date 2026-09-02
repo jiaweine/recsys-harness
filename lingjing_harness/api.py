@@ -50,6 +50,40 @@ _DURABLE_EVENT_PHASES = frozenset({"execute", "resume", "verify", "complete", "c
 _PERSIST_META: dict[str, tuple[Any, ...]] = {}
 
 
+class _RunLeaseLost(RuntimeError):
+    """The durable run lease moved to another worker before a side effect."""
+
+
+class _LeaseFencedMemory:
+    """Fence non-idempotent final learning without changing shared tool memory."""
+
+    def __init__(self, memory: Any, fence) -> None:
+        self._memory = memory
+        self._fence = fence
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._memory, name)
+
+    def update_policy(self, *args: Any, **kwargs: Any) -> Any:
+        self._fence()
+        return self._memory.update_policy(*args, **kwargs)
+
+    def record_episode(self, *args: Any, **kwargs: Any) -> Any:
+        self._fence()
+        return self._memory.record_episode(*args, **kwargs)
+
+
+def _renew_execution_fence(run_id: str) -> None:
+    """Linearize execution authority through the existing durable owner lease."""
+
+    if not _core.store.renew_run_lease(
+        run_id,
+        _core.WORKER_ID,
+        _core.RUN_LEASE_SECONDS,
+    ):
+        raise _RunLeaseLost(f"run lease lost: {run_id}")
+
+
 def _checkpoint_signature(row: dict[str, Any]) -> tuple[Any, ...] | None:
     checkpoint = row.get("checkpoint")
     if not isinstance(checkpoint, dict):
@@ -155,7 +189,20 @@ def _coalesced_persist_run(row: dict[str, Any]) -> None:
         current_meta = _persistence_meta(row)
 
     if persisted_status in _core.ACTIVE_RUN_STATUSES:
-        _PERSIST_META[str(row["run_id"])] = current_meta
+        run_id = str(row["run_id"])
+        # Persistence helpers are also unit-tested as pure snapshot coalescers.
+        # Execution authority only applies when this process is actually running
+        # the job in its local RUNS set; normal production execution always meets
+        # that condition after reserve/claim and before any side effect.
+        with _core.RUN_LOCK:
+            locally_executing = run_id in _core.RUNS
+        if locally_executing:
+            try:
+                _renew_execution_fence(run_id)
+            except _RunLeaseLost:
+                _PERSIST_META.pop(run_id, None)
+                raise
+        _PERSIST_META[run_id] = current_meta
     else:
         _PERSIST_META.pop(str(row["run_id"]), None)
 
@@ -259,6 +306,7 @@ async def _recover_on_startup_hardened() -> None:
             result["job_id"] = run_id
             result["attachments"] = copy.deepcopy(snapshot.get("attachments") or [])
             result["catalog_revision"] = saved_revision
+            _renew_execution_fence(run_id)
             existing = _core.store.assistant_for_job(cid, run_id)
             if existing is None:
                 message = _core.store.add_message(cid, "assistant", str(result.get("answer") or ""), result)
@@ -315,14 +363,65 @@ async def _recover_on_startup_hardened() -> None:
         )
 
 
+_ORIGINAL_EXECUTE = _core._execute
+
+
+async def _execute_with_run_lease_fence(
+    run_id: str,
+    cid: str,
+    text: str,
+    runner: Any,
+    *,
+    attachment_ids: list[str] | None = None,
+    allow_network: bool = False,
+    resume: dict[str, Any] | None = None,
+    catalog_revision: str | None = None,
+) -> None:
+    """Fence tool, learning, and assistant side effects to the current lease owner."""
+
+    original_memory = runner.memory
+    original_run = runner.run
+    runner.memory = _LeaseFencedMemory(
+        original_memory,
+        lambda: _renew_execution_fence(run_id),
+    )
+
+    def run_with_final_fence(*args: Any, **kwargs: Any) -> Any:
+        result = original_run(*args, **kwargs)
+        _renew_execution_fence(run_id)
+        return result
+
+    runner.run = run_with_final_fence
+    try:
+        await _ORIGINAL_EXECUTE(
+            run_id,
+            cid,
+            text,
+            runner,
+            attachment_ids=attachment_ids,
+            allow_network=allow_network,
+            resume=resume,
+            catalog_revision=catalog_revision,
+        )
+    except _RunLeaseLost:
+        with _core.RUN_LOCK:
+            _core.RUNS.pop(run_id, None)
+        _PERSIST_META.pop(run_id, None)
+    finally:
+        runner.run = original_run
+        runner.memory = original_memory
+
+
 # Install persistence and recovery boundaries before the application lifespan is
 # entered.  api_core resolves these globals at runtime, so existing route and
 # integration monkeypatch behavior stays intact.
 _core._persist_run = _coalesced_persist_run
 _core._recover_on_startup = _recover_on_startup_hardened
+_core._execute = _execute_with_run_lease_fence
 _core._compact_run_snapshot = _compact_run_snapshot
 _core._inflate_checkpoint = _inflate_checkpoint
 _core._PERSIST_META = _PERSIST_META
+_core._RunLeaseLost = _RunLeaseLost
 
 
 _RUN_SNAPSHOT_RETRIES = 3
