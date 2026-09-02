@@ -31,6 +31,17 @@ def _runtime_configs(registry, count=8):
     return configs
 
 
+def _wide_runtime_configs(registry, count=52):
+    base = asdict(registry.search.config)
+    return [
+        {
+            **base,
+            "snapshot_contract_case": index,
+        }
+        for index in range(count)
+    ]
+
+
 def _rows(configs, *, feasible=True, offset=0.0):
     return [
         {
@@ -201,12 +212,16 @@ def test_routing_snapshot_keeps_latest_and_history_in_one_paid_evidence_cohort(
         "status": "coherent_snapshot",
         "latest_rows": len(configs),
         "history_rows": len(configs),
+        "history_rows_read": len(configs),
+        "history_filtered_rows": 0,
         "latest_newest_at": 1_000.0,
         "history_newest_at": 1_000.0,
         "new_evaluator_calls": 0,
     }
     assert manifest["optimizer_observation_snapshot"] == "single_sqlite_read_transaction"
     assert manifest["optimizer_observation_snapshot_scope"] == "one_routing_decision"
+    assert manifest["optimizer_observation_snapshot_history_scope"] == "current_latest_config_set"
+    assert manifest["optimizer_observation_snapshot_history_match"] == "exact_durable_config_key"
     assert manifest["optimizer_observation_snapshot_authority"] == "routing_descriptor_only"
     assert manifest["optimizer_observation_snapshot_evaluator_calls"] == 0
 
@@ -216,6 +231,125 @@ def test_routing_snapshot_keeps_latest_and_history_in_one_paid_evidence_cohort(
     assert snapshot_reads["count"] == 2
     assert detected[-1][0] == 2_000.0
     assert detected[-1][1] == 2_000.0
+
+
+def test_routing_snapshot_history_is_anchored_to_current_latest_config_set(
+    tmp_path,
+    monkeypatch,
+):
+    import lingjing_harness.runtime.optimizer_observation_drift as runtime_drift
+    import lingjing_harness.runtime.optimizer_observation_memory as observation_memory
+    import lingjing_harness.runtime.optimizer_routing_epoch as routing_epoch
+
+    path = tmp_path / "optimizer-observation-current-set-anchor.db"
+    registry = OptimizerToolRegistry(
+        build_sample_catalog(),
+        memory=AgentMemory(path),
+        optimizer_backend="auto",
+    )
+    configs = _wide_runtime_configs(registry)
+    keyed = sorted(
+        (observation_memory._config_key(config), config)
+        for config in configs
+    )
+    read_budget = observation_memory.OPTIMIZER_OBSERVATION_READ_BUDGET
+    assert len(keyed) == read_budget + 4
+    current = keyed[:read_budget]
+    orphaned = keyed[read_budget:]
+    current_keys = {key for key, _ in current}
+    orphaned_keys = {key for key, _ in orphaned}
+
+    # First give only the four configs that will later fall outside the latest read
+    # budget a prior feasibility label. They are legitimate paid history rows.
+    monkeypatch.setattr(observation_memory.time, "time", lambda: 1_000.0)
+    registry.memory.record_optimizer_observations(
+        registry.catalog_key,
+        "search",
+        _rows([config for _, config in orphaned], feasible=False),
+    )
+
+    # All 52 configs are then evaluated in one paid cohort. Latest uses config_key
+    # ASC as the same-timestamp tie-break, while history uses id DESC. Put the four
+    # excluded configs last so an unanchored history view sees exactly those four as
+    # its newest unique configs and can manufacture a 100% same-config flip signal.
+    monkeypatch.setattr(observation_memory.time, "time", lambda: 2_000.0)
+    current_order = [config for _, config in current] + [
+        config for _, config in orphaned
+    ]
+    registry.memory.record_optimizer_observations(
+        registry.catalog_key,
+        "search",
+        _rows(current_order, feasible=True, offset=1.0),
+    )
+
+    public_latest = registry.memory.optimizer_observations(
+        registry.catalog_key,
+        "search",
+    )
+    public_history = registry.memory.optimizer_observation_history(
+        registry.catalog_key,
+        "search",
+    )
+    public_latest_keys = {
+        observation_memory._config_key(row["config"])
+        for row in public_latest
+    }
+    assert public_latest_keys == current_keys
+    assert orphaned_keys.isdisjoint(public_latest_keys)
+    assert len(public_history) == len(configs) + len(orphaned)
+
+    dimensions, _ = core._evolution_schema(registry.search.config)
+    unanchored = runtime_drift.detect_optimizer_observation_drift(
+        dimensions=dimensions,
+        observations=public_latest,
+        observation_history=public_history,
+    )
+    assert unanchored["change_detected"] is True
+    assert "same_config_feasibility_shift" in unanchored["primary_signals"]
+    assert unanchored["same_config_feasibility_pairs"] == 4
+    assert unanchored["same_config_feasibility_flip_rate"] == 1.0
+
+    captured = []
+    original_detect = runtime_drift.detect_optimizer_observation_drift
+
+    def capture_detect(*args, **kwargs):
+        observations = list(kwargs.get("observations") or [])
+        history = list(kwargs.get("observation_history") or [])
+        captured.append((observations, history))
+        return original_detect(*args, **kwargs)
+
+    monkeypatch.setattr(runtime_drift, "detect_optimizer_observation_drift", capture_detect)
+    registry._routing_context("search")
+
+    routed_latest, routed_history = captured[-1]
+    routed_latest_keys = {
+        str(row.get("config_key") or "")
+        for row in routed_latest
+    }
+    routed_history_keys = {
+        str(row.get("config_key") or "")
+        for row in routed_history
+    }
+    assert routed_latest_keys == current_keys
+    assert routed_history_keys <= routed_latest_keys
+    assert orphaned_keys.isdisjoint(routed_history_keys)
+    assert len(routed_history) == read_budget
+
+    manifest = registry.inspect_data()["optimizer_meta_router"]
+    snapshot_state = manifest["optimizer_observation_snapshot_states"]["search"]
+    drift_state = manifest["optimizer_observation_drift_states"]["search"]
+    assert snapshot_state["latest_rows"] == read_budget
+    assert snapshot_state["history_rows_read"] == len(public_history)
+    assert snapshot_state["history_rows"] == read_budget
+    assert snapshot_state["history_filtered_rows"] == 2 * len(orphaned)
+    assert drift_state["change_detected"] is False
+    assert "same_config_feasibility_shift" not in drift_state.get("primary_signals", [])
+    assert routing_epoch.routing_epoch_boundary(registry, "search") == 0.0
+    assert routing_epoch.pending_routing_epoch_advance(registry, "search") is None
+    assert manifest["optimizer_observation_snapshot_history_scope"] == "current_latest_config_set"
+    assert manifest["optimizer_observation_snapshot_history_match"] == "exact_durable_config_key"
+    assert manifest["optimizer_observation_snapshot_authority"] == "routing_descriptor_only"
+    assert manifest["optimizer_observation_snapshot_evaluator_calls"] == 0
 
 
 def test_public_observation_readers_remain_live_outside_routing_snapshot(
