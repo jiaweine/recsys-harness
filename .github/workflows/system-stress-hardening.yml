@@ -11,6 +11,8 @@ on:
       - 'lingjing_harness/store.py'
       - 'lingjing_harness/store_handoff.py'
       - 'lingjing_harness/rate_limit_maintenance.py'
+      - 'lingjing_harness/runtime/__init__.py'
+      - 'lingjing_harness/runtime/run_finalization.py'
       - 'lingjing_harness/runtime/optimizer_observation_memory.py'
       - 'lingjing_harness/runtime/optimizer_observation_snapshot.py'
       - 'lingjing_harness/runtime/optimizer_routing_checkpoint.py'
@@ -19,6 +21,7 @@ on:
       - 'tests/test_api.py'
       - 'tests/test_api_security_boundary.py'
       - 'tests/test_run_lease_execution_fence.py'
+      - 'tests/test_run_finalization_crash_consistency.py'
       - 'tests/test_runtime_consistency.py'
       - 'tests/test_startup_recovery_batching.py'
       - 'tests/test_store_fencing_stress.py'
@@ -41,6 +44,8 @@ on:
       - 'lingjing_harness/store.py'
       - 'lingjing_harness/store_handoff.py'
       - 'lingjing_harness/rate_limit_maintenance.py'
+      - 'lingjing_harness/runtime/__init__.py'
+      - 'lingjing_harness/runtime/run_finalization.py'
       - 'lingjing_harness/runtime/optimizer_observation_memory.py'
       - 'lingjing_harness/runtime/optimizer_observation_snapshot.py'
       - 'lingjing_harness/runtime/optimizer_routing_checkpoint.py'
@@ -49,6 +54,7 @@ on:
       - 'tests/test_api.py'
       - 'tests/test_api_security_boundary.py'
       - 'tests/test_run_lease_execution_fence.py'
+      - 'tests/test_run_finalization_crash_consistency.py'
       - 'tests/test_runtime_consistency.py'
       - 'tests/test_startup_recovery_batching.py'
       - 'tests/test_store_fencing_stress.py'
@@ -84,6 +90,7 @@ jobs:
             echo "durable recovery race pass ${pass}/3"
             pytest -q \
               tests/test_run_lease_execution_fence.py \
+              tests/test_run_finalization_crash_consistency.py \
               tests/test_store_fencing_stress.py \
               tests/test_graceful_handoff.py \
               tests/test_rate_limit_maintenance.py \
