@@ -152,12 +152,20 @@ class AgentHarness(_BaseAgentHarness):
             tools=self.tools.fork(),
         )
 
+    def _fence_finalization(self) -> None:
+        """Refresh an installed execution-owner lease before public side effects."""
+
+        fence = getattr(self.memory, "_fence", None)
+        if callable(fence):
+            fence()
+
     def finalize_result(self, result: dict) -> dict:
         """Idempotently finish public learning before a run is durably complete."""
 
         autonomy = result.setdefault("autonomy", {})
         credit = result.get("policy_credit")
         if not isinstance(credit, dict):
+            self._fence_finalization()
             credit = apply_semantic_trajectory_credit(self.memory, result)
             result["policy_credit"] = credit
         autonomy["policy_credit_assignment"] = {
@@ -171,6 +179,7 @@ class AgentHarness(_BaseAgentHarness):
 
         mechanisms = result.get("mechanism_evidence")
         if not isinstance(mechanisms, dict):
+            self._fence_finalization()
             mechanisms = record_runtime_mechanism_evidence(
                 self.memory,
                 self.catalog_key,
@@ -187,8 +196,12 @@ class AgentHarness(_BaseAgentHarness):
 
         # Both maintenance paths are deletion-only and repeatable. Keep them after
         # evidence writes so a retry can still replay adaptive invocations until
-        # every correctness-bearing finalizer has committed.
+        # every correctness-bearing finalizer has committed. Refresh ownership at
+        # each boundary so a stale API worker cannot continue maintenance after a
+        # legal cross-process takeover during the extended finalization window.
+        self._fence_finalization()
         discard_completed_run_invocations(self.memory, str(result.get("run_id") or ""))
+        self._fence_finalization()
         prune_retired_strategy_history(self.memory)
         return result
 
