@@ -10,6 +10,7 @@ permissions:
 jobs:
   contention:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -18,5 +19,14 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: pip install -e . --no-deps
-      - name: Exercise durable workspace contention
-        run: python scripts/stress_smoke.py --workers 8 --iterations 25 --processes 4
+      - name: Compile durable store and stress contracts
+        run: |
+          python -m compileall -q \
+            lingjing_harness/store.py \
+            scripts/stress_smoke.py \
+            tests/test_store.py \
+            tests/test_store_fencing_stress.py
+      - name: Run deterministic lease, ownership, and clock fencing contracts
+        run: pytest -q tests/test_store.py tests/test_store_fencing_stress.py
+      - name: Exercise durable workspace contention at elevated load
+        run: python scripts/stress_smoke.py --workers 16 --iterations 80 --processes 8
