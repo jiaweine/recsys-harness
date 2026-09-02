@@ -525,7 +525,7 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
                 "optimizer_observation_routing_epoch_return_validation": "post_decision_checkpoint_revalidation",
                 "optimizer_observation_routing_epoch_conflict_action": "pre_observation_fallback",
                 "optimizer_observation_routing_revision_fence": "history_autoincrement_high_water",
-                "optimizer_observation_routing_revision_scope": "no_paid_observation_commit_during_routing_call",
+                "optimizer_observation_routing_revision_scope": "entry_checkpoint_write_and_post_decision_revision_revalidation",
                 "optimizer_observation_routing_revision_conflict_action": "pre_observation_fallback",
                 "optimizer_observation_routing_epoch_fence_states": (
                     dict(states) if isinstance(states, dict) else {}

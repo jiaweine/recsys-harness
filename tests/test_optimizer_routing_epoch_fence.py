@@ -184,7 +184,7 @@ def test_concurrent_epoch_advance_rejects_stale_checkpoint_writer(tmp_path, monk
         "history_autoincrement_high_water"
     )
     assert manifest["optimizer_observation_routing_revision_scope"] == (
-        "no_paid_observation_commit_during_routing_call"
+        "entry_checkpoint_write_and_post_decision_revision_revalidation"
     )
     assert manifest["optimizer_observation_routing_revision_conflict_action"] == (
         "pre_observation_fallback"
