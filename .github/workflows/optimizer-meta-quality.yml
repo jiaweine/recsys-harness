@@ -24,6 +24,7 @@ on:
       - 'scripts/optimizer_meta_benchmark.py'
       - 'tests/test_optimizer_drift_calibration.py'
       - 'tests/test_optimizer_landscape_descriptors.py'
+      - 'tests/test_optimizer_observation_clock_order.py'
       - 'tests/test_optimizer_observation_drift.py'
       - 'tests/test_optimizer_observation_drift_recency.py'
       - 'tests/test_optimizer_observation_drift_surfaces.py'
@@ -62,6 +63,7 @@ on:
       - 'scripts/optimizer_meta_benchmark.py'
       - 'tests/test_optimizer_drift_calibration.py'
       - 'tests/test_optimizer_landscape_descriptors.py'
+      - 'tests/test_optimizer_observation_clock_order.py'
       - 'tests/test_optimizer_observation_drift.py'
       - 'tests/test_optimizer_observation_drift_recency.py'
       - 'tests/test_optimizer_observation_drift_surfaces.py'
@@ -116,6 +118,7 @@ jobs:
             scripts/optimizer_meta_benchmark.py \
             tests/test_optimizer_drift_calibration.py \
             tests/test_optimizer_landscape_descriptors.py \
+            tests/test_optimizer_observation_clock_order.py \
             tests/test_optimizer_observation_drift.py \
             tests/test_optimizer_observation_drift_recency.py \
             tests/test_optimizer_observation_drift_surfaces.py \
@@ -134,6 +137,7 @@ jobs:
           pytest -q \
             tests/test_optimizer_drift_calibration.py \
             tests/test_optimizer_landscape_descriptors.py \
+            tests/test_optimizer_observation_clock_order.py \
             tests/test_optimizer_observation_drift.py \
             tests/test_optimizer_observation_drift_recency.py \
             tests/test_optimizer_observation_drift_surfaces.py \
@@ -166,6 +170,8 @@ jobs:
           assert manifest['landscape_descriptors'] == 'durable_evaluator_observations_with_strategy_fallback'
           assert manifest['optimizer_observation_memory'] == 'evaluator_paid_discovery_rows_only'
           assert manifest['optimizer_observation_history'] == 'bounded_same_config_evaluator_history'
+          assert manifest['optimizer_observation_retention'] == 96
+          assert manifest['optimizer_observation_latest_selection_order'] == 'retained_history_commit_order_then_updated_at'
           assert manifest['optimizer_observation_history_retention'] == 192
           assert manifest['optimizer_observation_history_retention_order'] == 'autoincrement_commit_order'
           assert manifest['optimizer_observation_authority'] == 'routing_descriptor_only'

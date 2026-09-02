@@ -83,8 +83,9 @@ class _ReaderConnection:
         cursor = self._connection.execute(sql, *args, **kwargs)
         normalized = " ".join(str(sql).lower().split())
         if (
-            "from agent_optimizer_observations" in normalized
-            and "agent_optimizer_observation_history" not in normalized
+            "from agent_optimizer_observations o" in normalized
+            and "max(id) as commit_id" in normalized
+            and "limit ?" in normalized
         ):
             return _FetchPauseCursor(cursor, self._entered, self._release)
         return cursor
@@ -268,13 +269,13 @@ def test_routing_snapshot_history_is_anchored_to_current_latest_config_set(
         _rows([config for _, config in orphaned], feasible=False),
     )
 
-    # All 52 configs are then evaluated in one paid cohort. Latest uses config_key
-    # ASC as the same-timestamp tie-break, while history uses id DESC. Put the four
-    # excluded configs last so an unanchored history view sees exactly those four as
-    # its newest unique configs and can manufacture a 100% same-config flip signal.
+    # All 52 configs are then evaluated in one paid cohort. Current-set membership
+    # follows retained history commit order, so commit the four configs to exclude
+    # first and the 48 current configs after them. History still sees the whole
+    # cohort and can manufacture a 100% same-config flip without the anchor.
     monkeypatch.setattr(observation_memory.time, "time", lambda: 2_000.0)
-    current_order = [config for _, config in current] + [
-        config for _, config in orphaned
+    current_order = [config for _, config in orphaned] + [
+        config for _, config in current
     ]
     registry.memory.record_optimizer_observations(
         registry.catalog_key,

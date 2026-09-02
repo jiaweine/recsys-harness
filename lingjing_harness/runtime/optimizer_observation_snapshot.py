@@ -103,20 +103,12 @@ def _read_atomic_snapshot(
         try:
             connection.execute("pragma busy_timeout=10000")
             connection.execute("begin")
-            latest_rows = connection.execute(
-                """
-                select config_key,config,score,feasible,source,generation,feasibility_basis,
-                       constraints,seen_count,updated_at
-                from agent_optimizer_observations
-                where catalog_key=? and domain=?
-                order by updated_at desc, config_key asc limit ?
-                """,
-                (
-                    catalog_key,
-                    domain,
-                    observation_memory.OPTIMIZER_OBSERVATION_READ_BUDGET,
-                ),
-            ).fetchall()
+            latest_rows = observation_memory._latest_observation_rows(
+                connection,
+                catalog_key=catalog_key,
+                domain=domain,
+                limit=observation_memory.OPTIMIZER_OBSERVATION_READ_BUDGET,
+            )
             history_rows = connection.execute(
                 """
                 select config_key,config,score,feasible,source,generation,feasibility_basis,

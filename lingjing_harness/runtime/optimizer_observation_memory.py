@@ -22,6 +22,7 @@ OPTIMIZER_OBSERVATION_RETENTION = 96
 OPTIMIZER_OBSERVATION_HISTORY_RETENTION = 2 * OPTIMIZER_OBSERVATION_RETENTION
 OPTIMIZER_OBSERVATION_HISTORY_READ_BUDGET = OPTIMIZER_OBSERVATION_HISTORY_RETENTION
 OPTIMIZER_OBSERVATION_HISTORY_RETENTION_ORDER = "autoincrement_commit_order"
+OPTIMIZER_OBSERVATION_LATEST_SELECTION_ORDER = "retained_history_commit_order_then_updated_at"
 _INSTALLED = False
 
 
@@ -90,6 +91,75 @@ def _ensure_optimizer_observation_table(memory: Any) -> None:
             conn.commit()
         finally:
             memory._close(conn)
+
+
+def _latest_observation_rows(
+    connection: Any,
+    *,
+    catalog_key: str,
+    domain: str,
+    limit: int,
+) -> list[Any]:
+    """Select current-set membership by durable commit rank, then present by time."""
+
+    return connection.execute(
+        """
+        select config_key,config,score,feasible,source,generation,feasibility_basis,
+               constraints,seen_count,updated_at
+        from (
+          select o.config_key,o.config,o.score,o.feasible,o.source,o.generation,
+                 o.feasibility_basis,o.constraints,o.seen_count,o.updated_at,
+                 coalesce(h.commit_id,0) as commit_id
+          from agent_optimizer_observations o
+          left join (
+            select config_key,max(id) as commit_id
+            from agent_optimizer_observation_history
+            where catalog_key=? and domain=?
+            group by config_key
+          ) h on h.config_key=o.config_key
+          where o.catalog_key=? and o.domain=?
+          order by coalesce(h.commit_id,0) desc,o.updated_at desc,o.config_key asc
+          limit ?
+        ) selected
+        order by updated_at desc,config_key asc
+        """,
+        (catalog_key, domain, catalog_key, domain, limit),
+    ).fetchall()
+
+
+def _prune_latest_observations(
+    connection: Any,
+    *,
+    catalog_key: str,
+    domain: str,
+) -> None:
+    connection.execute(
+        """
+        delete from agent_optimizer_observations
+        where catalog_key=? and domain=? and config_key not in (
+          select o.config_key
+          from agent_optimizer_observations o
+          left join (
+            select config_key,max(id) as commit_id
+            from agent_optimizer_observation_history
+            where catalog_key=? and domain=?
+            group by config_key
+          ) h on h.config_key=o.config_key
+          where o.catalog_key=? and o.domain=?
+          order by coalesce(h.commit_id,0) desc,o.updated_at desc,o.config_key asc
+          limit ?
+        )
+        """,
+        (
+            catalog_key,
+            domain,
+            catalog_key,
+            domain,
+            catalog_key,
+            domain,
+            OPTIMIZER_OBSERVATION_RETENTION,
+        ),
+    )
 
 
 def _record_optimizer_observations(
@@ -224,22 +294,12 @@ def _record_optimizer_observations(
                         now,
                     ),
                 )
-            conn.execute(
-                """
-                delete from agent_optimizer_observations
-                where catalog_key=? and domain=? and config_key not in (
-                  select config_key from agent_optimizer_observations
-                  where catalog_key=? and domain=?
-                  order by updated_at desc, config_key asc limit ?
-                )
-                """,
-                (
-                    catalog_key,
-                    domain,
-                    catalog_key,
-                    domain,
-                    OPTIMIZER_OBSERVATION_RETENTION,
-                ),
+            # Membership follows the durable paid-observation commit sequence rather
+            # than wall clock. updated_at remains the recency/presentation clock.
+            _prune_latest_observations(
+                conn,
+                catalog_key=catalog_key,
+                domain=domain,
             )
             # The routing revision fence uses the per-scope maximum history id as
             # its commit high-water. Retain by AUTOINCREMENT id, not wall clock, so
@@ -297,16 +357,12 @@ def _optimizer_observations(
     with memory._lock:
         conn = memory._connect()
         try:
-            rows = conn.execute(
-                """
-                select config,score,feasible,source,generation,feasibility_basis,
-                       constraints,seen_count,updated_at
-                from agent_optimizer_observations
-                where catalog_key=? and domain=?
-                order by updated_at desc, config_key asc limit ?
-                """,
-                (catalog_key, domain, limit),
-            ).fetchall()
+            rows = _latest_observation_rows(
+                conn,
+                catalog_key=catalog_key,
+                domain=domain,
+                limit=limit,
+            )
         finally:
             memory._close(conn)
 
@@ -492,6 +548,8 @@ def install_optimizer_observation_runtime(agent_memory_cls: type, optimizer_regi
                 "landscape_descriptors": "durable_evaluator_observations_with_strategy_fallback",
                 "optimizer_observation_memory": "evaluator_paid_discovery_rows_only",
                 "optimizer_observation_history": "bounded_same_config_evaluator_history",
+                "optimizer_observation_retention": OPTIMIZER_OBSERVATION_RETENTION,
+                "optimizer_observation_latest_selection_order": OPTIMIZER_OBSERVATION_LATEST_SELECTION_ORDER,
                 "optimizer_observation_history_retention": OPTIMIZER_OBSERVATION_HISTORY_RETENTION,
                 "optimizer_observation_history_retention_order": OPTIMIZER_OBSERVATION_HISTORY_RETENTION_ORDER,
                 "optimizer_observation_feasibility": "discovery_robustness_guardrails",
@@ -511,6 +569,7 @@ __all__ = [
     "OPTIMIZER_OBSERVATION_HISTORY_READ_BUDGET",
     "OPTIMIZER_OBSERVATION_HISTORY_RETENTION",
     "OPTIMIZER_OBSERVATION_HISTORY_RETENTION_ORDER",
+    "OPTIMIZER_OBSERVATION_LATEST_SELECTION_ORDER",
     "OPTIMIZER_OBSERVATION_READ_BUDGET",
     "OPTIMIZER_OBSERVATION_RETENTION",
     "install_optimizer_observation_runtime",
