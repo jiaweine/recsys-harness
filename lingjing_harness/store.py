@@ -184,7 +184,18 @@ class WorkspaceStore:
             row = connection.execute(
                 "select window_start,count from rate_limits where scope_key=?", (scope_key,)
             ).fetchone()
-            if not row or now - float(row["window_start"]) >= window_seconds:
+            window_start = float(row["window_start"]) if row else now
+            if row and window_start > now:
+                # A wall-clock jump forward followed by rollback must not freeze a
+                # shared limiter until the old future timestamp is reached. Repair
+                # only the window anchor while preserving the consumed count, so
+                # clock recovery never manufactures extra allowance.
+                window_start = now
+                connection.execute(
+                    "update rate_limits set window_start=?,updated_at=? where scope_key=?",
+                    (now, now, scope_key),
+                )
+            if not row or now - window_start >= window_seconds:
                 connection.execute(
                     """
                     insert into rate_limits(scope_key,window_start,count,updated_at) values(?,?,1,?)
@@ -287,19 +298,32 @@ class WorkspaceStore:
         with self._lock, self._connect() as connection:
             connection.execute("begin immediate")
             row = connection.execute(
-                "select update_owner from workspace_state where id=1"
+                "select update_owner,update_until from workspace_state where id=1"
             ).fetchone()
-            if not row or row["update_owner"] != owner_id:
+            if (
+                not row
+                or row["update_owner"] != owner_id
+                or float(row["update_until"] or 0.0) <= now
+            ):
                 connection.rollback()
                 return False
-            connection.execute(
+            active = connection.execute(
+                "select 1 from runs where status in ('running','interrupted','cancel_requested') limit 1"
+            ).fetchone()
+            if active:
+                connection.rollback()
+                return False
+            cursor = connection.execute(
                 """
                 update workspace_state
                 set catalog_revision=?,update_owner=null,update_until=null,updated_at=?
-                where id=1
+                where id=1 and update_owner=? and update_until>?
                 """,
-                (revision, now),
+                (revision, now, owner_id, now),
             )
+            if cursor.rowcount != 1:
+                connection.rollback()
+                return False
             connection.commit()
         return True
 
@@ -325,7 +349,7 @@ class WorkspaceStore:
         lease_seconds: float,
     ) -> bool:
         now = time.time()
-        created = float(snapshot.get("created_at") or now)
+        created = min(float(snapshot.get("created_at") or now), now)
         lease_until = now + max(1.0, float(lease_seconds))
         payload = dict(snapshot)
         payload.update(
@@ -334,6 +358,7 @@ class WorkspaceStore:
                 "conversation_id": conversation_id,
                 "goal": goal,
                 "status": "running",
+                "created_at": created,
                 "updated_at": now,
             }
         )
@@ -401,8 +426,8 @@ class WorkspaceStore:
         owner_id: str | None = None,
         lease_seconds: float = 30.0,
     ) -> str:
-        now = float(snapshot.get("updated_at") or time.time())
-        created = float(snapshot.get("created_at") or now)
+        decision_at = time.time()
+        created = min(float(snapshot.get("created_at") or decision_at), decision_at)
         active = status in ACTIVE_RUN_STATUSES
         with self._lock, self._connect() as connection:
             connection.execute("begin immediate")
@@ -417,26 +442,32 @@ class WorkspaceStore:
                 connection.rollback()
                 return str(existing["status"])
             if (
-                owner_id
-                and existing
+                existing
                 and existing["status"] in ACTIVE_RUN_STATUSES
                 and existing["owner_id"]
-                and existing["owner_id"] != owner_id
-                and float(existing["lease_until"] or 0.0) > time.time()
+                and str(existing["owner_id"]) != str(owner_id or "")
             ):
+                # Expiration grants eligibility to *claim* a run; it never restores
+                # an old owner's write authority. Ownership transfer is linearized
+                # only by claim_recoverable_runs() or graceful handoff.
                 connection.rollback()
                 return str(existing["status"])
+            payload = dict(snapshot)
             if (
                 existing
                 and existing["status"] == "cancel_requested"
                 and status in {"running", "interrupted"}
             ):
                 status = "cancel_requested"
-                snapshot = {**snapshot, "status": "cancel_requested", "updated_at": now}
+            payload.update({"status": status, "created_at": created, "updated_at": decision_at})
             current_owner = owner_id if active else None
             if active and existing and existing["owner_id"] and owner_id is None:
                 current_owner = existing["owner_id"]
-            lease_until = now + max(1.0, float(lease_seconds)) if active and current_owner else None
+            lease_until = (
+                decision_at + max(1.0, float(lease_seconds))
+                if active and current_owner
+                else None
+            )
             connection.execute(
                 """
                 insert into runs(
@@ -456,9 +487,9 @@ class WorkspaceStore:
                     conversation_id,
                     goal,
                     status,
-                    json.dumps({**snapshot, "status": status}, ensure_ascii=False),
+                    json.dumps(payload, ensure_ascii=False),
                     created,
-                    now,
+                    decision_at,
                     current_owner,
                     lease_until,
                 ),
@@ -471,7 +502,7 @@ class WorkspaceStore:
         with self._lock, self._connect() as connection:
             cursor = connection.execute(
                 """
-                update runs set lease_until=?,updated_at=max(updated_at,?)
+                update runs set lease_until=?,updated_at=?
                 where run_id=? and owner_id=?
                   and status in ('running','interrupted','cancel_requested')
                 """,
