@@ -77,6 +77,56 @@ class WorkspaceStore:
             return {}
         return data if isinstance(data, dict) else {}
 
+    @staticmethod
+    def _reanchored_until(updated_at: Any, lease_until: Any, now: float) -> float:
+        updated = float(updated_at or now)
+        until = float(lease_until or updated)
+        return now + max(0.0, until - updated)
+
+    def _workspace_update_row(
+        self, connection: sqlite3.Connection, now: float
+    ) -> dict[str, Any] | None:
+        row = connection.execute(
+            "select update_owner,update_until,updated_at from workspace_state where id=1"
+        ).fetchone()
+        if not row:
+            return None
+        data = dict(row)
+        if data.get("update_owner") and float(data.get("updated_at") or 0.0) > now:
+            repaired_until = self._reanchored_until(
+                data.get("updated_at"), data.get("update_until"), now
+            )
+            connection.execute(
+                "update workspace_state set update_until=?,updated_at=? where id=1",
+                (repaired_until, now),
+            )
+            data["update_until"] = repaired_until
+            data["updated_at"] = now
+        return data
+
+    def _repair_future_run_leases(
+        self, connection: sqlite3.Connection, now: float
+    ) -> None:
+        rows = connection.execute(
+            """
+            select run_id,updated_at,lease_until from runs
+            where status in ('running','interrupted','cancel_requested')
+              and lease_until is not null and updated_at>?
+            """,
+            (now,),
+        ).fetchall()
+        for row in rows:
+            repaired_until = self._reanchored_until(
+                row["updated_at"], row["lease_until"], now
+            )
+            connection.execute(
+                """
+                update runs set updated_at=?,lease_until=?
+                where run_id=? and updated_at>?
+                """,
+                (now, repaired_until, row["run_id"], now),
+            )
+
     def list_conversations(self, limit: int = 40) -> list[dict[str, Any]]:
         with self._connect() as connection:
             rows = connection.execute(
@@ -186,10 +236,6 @@ class WorkspaceStore:
             ).fetchone()
             window_start = float(row["window_start"]) if row else now
             if row and window_start > now:
-                # A wall-clock jump forward followed by rollback must not freeze a
-                # shared limiter until the old future timestamp is reached. Repair
-                # only the window anchor while preserving the consumed count, so
-                # clock recovery never manufactures extra allowance.
                 window_start = now
                 connection.execute(
                     "update rate_limits set window_start=?,updated_at=? where scope_key=?",
@@ -249,14 +295,14 @@ class WorkspaceStore:
 
     def workspace_update_active(self, now: float | None = None) -> bool:
         now = time.time() if now is None else float(now)
-        with self._connect() as connection:
-            row = connection.execute(
-                "select update_owner,update_until from workspace_state where id=1"
-            ).fetchone()
+        with self._lock, self._connect() as connection:
+            connection.execute("begin immediate")
+            row = self._workspace_update_row(connection, now)
+            connection.commit()
         return bool(
             row
-            and row["update_owner"]
-            and float(row["update_until"] or 0.0) > now
+            and row.get("update_owner")
+            and float(row.get("update_until") or 0.0) > now
         )
 
     def begin_workspace_update(
@@ -272,14 +318,12 @@ class WorkspaceStore:
             if active:
                 connection.rollback()
                 return False
-            row = connection.execute(
-                "select update_owner,update_until from workspace_state where id=1"
-            ).fetchone()
+            row = self._workspace_update_row(connection, now)
             if (
                 row
-                and row["update_owner"]
-                and row["update_owner"] != owner_id
-                and float(row["update_until"] or 0.0) > now
+                and row.get("update_owner")
+                and row.get("update_owner") != owner_id
+                and float(row.get("update_until") or 0.0) > now
             ):
                 connection.rollback()
                 return False
@@ -297,13 +341,11 @@ class WorkspaceStore:
         now = time.time()
         with self._lock, self._connect() as connection:
             connection.execute("begin immediate")
-            row = connection.execute(
-                "select update_owner,update_until from workspace_state where id=1"
-            ).fetchone()
+            row = self._workspace_update_row(connection, now)
             if (
                 not row
-                or row["update_owner"] != owner_id
-                or float(row["update_until"] or 0.0) <= now
+                or row.get("update_owner") != owner_id
+                or float(row.get("update_until") or 0.0) <= now
             ):
                 connection.rollback()
                 return False
@@ -364,13 +406,11 @@ class WorkspaceStore:
         )
         with self._lock, self._connect() as connection:
             connection.execute("begin immediate")
-            workspace = connection.execute(
-                "select update_owner,update_until from workspace_state where id=1"
-            ).fetchone()
+            workspace = self._workspace_update_row(connection, now)
             if (
                 workspace
-                and workspace["update_owner"]
-                and float(workspace["update_until"] or 0.0) > now
+                and workspace.get("update_owner")
+                and float(workspace.get("update_until") or 0.0) > now
             ):
                 connection.rollback()
                 return False
@@ -434,10 +474,6 @@ class WorkspaceStore:
             existing = connection.execute(
                 "select status,owner_id,lease_until from runs where run_id=?", (run_id,)
             ).fetchone()
-            # Terminal run states are monotonic. Once a run has completed, failed, or
-            # been cancelled, no late checkpoint from any worker may resurrect or
-            # overwrite that terminal result. This is the final fencing boundary for
-            # workers that outlive their lease and return after a takeover finishes.
             if existing and existing["status"] not in ACTIVE_RUN_STATUSES:
                 connection.rollback()
                 return str(existing["status"])
@@ -447,9 +483,6 @@ class WorkspaceStore:
                 and existing["owner_id"]
                 and str(existing["owner_id"]) != str(owner_id or "")
             ):
-                # Expiration grants eligibility to *claim* a run; it never restores
-                # an old owner's write authority. Ownership transfer is linearized
-                # only by claim_recoverable_runs() or graceful handoff.
                 connection.rollback()
                 return str(existing["status"])
             payload = dict(snapshot)
@@ -601,6 +634,7 @@ class WorkspaceStore:
         lease_until = now + max(1.0, float(lease_seconds))
         with self._lock, self._connect() as connection:
             connection.execute("begin immediate")
+            self._repair_future_run_leases(connection, now)
             rows = connection.execute(
                 """
                 select run_id,conversation_id,goal,status,snapshot
