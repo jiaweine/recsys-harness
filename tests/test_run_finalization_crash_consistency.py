@@ -237,48 +237,36 @@ def test_api_runner_binds_job_id_as_stable_finalization_key(monkeypatch, tmp_pat
 
 def test_completed_checkpoint_recovery_repairs_legacy_public_finalization_before_publish(
     monkeypatch,
-    tmp_path,
 ):
-    store = WorkspaceStore(tmp_path / "legacy-completed.db")
-    monkeypatch.setattr(api_module, "store", store)
-    conversation = store.create_conversation("legacy-completed", "search")
+    store = api_module.store
+    conversation = store.create_conversation("legacy completed finalization", "search")
     run_id = "job-legacy-completed-finalization"
     internal_result = {
         "run_id": "run-legacy-internal",
         "answer": "legacy answer",
-        "events": [],
+        "events": [{"phase": "complete", "progress": 100}],
         "actions": [],
         "plan": {"mode": "audit"},
         "autonomy": {},
     }
     snapshot = _api_snapshot(run_id, conversation["id"])
+    snapshot["events"] = copy.deepcopy(internal_result["events"])
     snapshot["checkpoint"] = {
         "status": "completed",
         "run_id": internal_result["run_id"],
-        "cycle": 0,
+        "cycle": 2,
         "result": copy.deepcopy(internal_result),
-        "events": [],
+        "events": copy.deepcopy(internal_result["events"]),
     }
-    # Claim batching/future-clock semantics have their own real-SQLite stress
-    # coverage. This regression isolates the completed-checkpoint branch: keep a
-    # real durable row already owned by this worker so lease renew, assistant
-    # publication and terminal save still exercise production WorkspaceStore SQL.
+    store.delete_run(run_id)
     assert store.reserve_run(
         run_id,
         conversation["id"],
         snapshot["goal"],
-        snapshot,
+        api_module._compact_run_snapshot(snapshot),
         owner_id=api_module.WORKER_ID,
         lease_seconds=api_module.RUN_LEASE_SECONDS,
     )
-    claimed = {
-        "run_id": run_id,
-        "conversation_id": conversation["id"],
-        "goal": snapshot["goal"],
-        "status": "running",
-        "snapshot": copy.deepcopy(snapshot),
-    }
-    monkeypatch.setattr(store, "claim_recoverable_runs", lambda **kwargs: [copy.deepcopy(claimed)])
 
     calls: list[str] = []
 
@@ -300,3 +288,4 @@ def test_completed_checkpoint_recovery_repairs_legacy_public_finalization_before
     payload = assistant["payload"]
     assert payload["policy_credit"]["method"] == "legacy-repair"
     assert payload["mechanism_evidence"]["method"] == "legacy-repair"
+    store.delete_run(run_id)
