@@ -174,6 +174,10 @@ jobs:
           assert manifest['optimizer_observation_latest_selection_order'] == 'retained_history_commit_order_then_updated_at'
           assert manifest['optimizer_observation_history_retention'] == 192
           assert manifest['optimizer_observation_history_retention_order'] == 'autoincrement_commit_order'
+          assert manifest['optimizer_observation_history_retention_policy'] == 'current_routing_pair_floor_then_commit_order'
+          assert manifest['optimizer_observation_history_pair_floor'] == 2
+          assert manifest['optimizer_observation_history_pair_scope'] == 'current_latest_read_budget'
+          assert manifest['optimizer_observation_history_pair_scope_rows'] == 48
           assert manifest['optimizer_observation_authority'] == 'routing_descriptor_only'
           assert manifest['optimizer_observation_snapshot'] == 'single_sqlite_read_transaction'
           assert manifest['optimizer_observation_snapshot_scope'] == 'one_routing_decision'
