@@ -4,7 +4,7 @@ import json
 import os
 from urllib import request
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 
 BASE_URL = os.environ.get("RECSYS_CAPTURE_URL", "http://127.0.0.1:8765").rstrip("/")
@@ -52,14 +52,13 @@ def main() -> None:
         )
 
         page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30_000)
-        page.wait_for_function("document.getElementById('dataMeta').textContent.includes('内容')", timeout=15_000)
-        page.wait_for_function(
-            "document.querySelectorAll('.history-item[aria-current=\"page\"]').length === 1",
-            timeout=10_000,
-        )
+        page.locator("#dataMeta", has_text="内容").wait_for(state="visible", timeout=15_000)
+        current = page.locator('.history-item[aria-current="page"]')
+        current.first.wait_for(state="attached", timeout=10_000)
+        if current.count() != 1:
+            raise RuntimeError("Workspace Switcher QA expected exactly one current history task")
         page.wait_for_timeout(300)
 
-        current = page.locator('.history-item[aria-current="page"]')
         if current.get_attribute("data-id") != str(search["id"]):
             raise RuntimeError("Workspace Switcher QA did not start on the newest persisted task")
 
@@ -72,10 +71,10 @@ def main() -> None:
             raise RuntimeError("Workspace Switcher did not expose the recent-task group")
 
         page.locator("#commandInput").fill("安全标题")
-        page.wait_for_function(
-            "document.querySelectorAll('#commandList .history-command').length === 1",
-            timeout=5_000,
-        )
+        history_commands = page.locator("#commandList .history-command")
+        history_commands.first.wait_for(state="visible", timeout=5_000)
+        if history_commands.count() != 1:
+            raise RuntimeError("Workspace Switcher filtering did not converge to one history command")
         unsafe_command = page.locator(
             f'#commandList .history-command[data-history-id="{unsafe["id"]}"]'
         )
@@ -89,11 +88,10 @@ def main() -> None:
             raise RuntimeError("User-provided history title executed script in Workspace Switcher")
 
         page.locator("#commandInput").fill("推荐首屏历史复核")
-        page.wait_for_function(
-            "document.querySelectorAll('#commandList .history-command').length === 1",
-            timeout=5_000,
-        )
-        history_command = page.locator("#commandList .history-command").first
+        history_commands.first.wait_for(state="visible", timeout=5_000)
+        if history_commands.count() != 1:
+            raise RuntimeError("Workspace Switcher recommendation filter did not converge to one command")
+        history_command = history_commands.first
         command_text = history_command.inner_text()
         if "推荐首屏历史复核" not in command_text or "推荐" not in command_text:
             raise RuntimeError("History command lost its real task title or scene metadata")
@@ -104,14 +102,10 @@ def main() -> None:
             )
 
         page.keyboard.press("Enter")
-        page.wait_for_function(
-            "document.getElementById('taskTitle').textContent === '推荐首屏历史复核'",
-            timeout=10_000,
-        )
-        page.wait_for_function(
-            f"document.querySelector('.history-item[aria-current=\"page\"]')?.dataset.id === {json.dumps(str(recommend['id']))}",
-            timeout=10_000,
-        )
+        expect(page.locator("#taskTitle")).to_have_text("推荐首屏历史复核", timeout=10_000)
+        page.locator(
+            f'.history-item[aria-current="page"][data-id="{recommend["id"]}"]'
+        ).wait_for(state="attached", timeout=10_000)
         if page.locator("#commandPalette").is_visible():
             raise RuntimeError("Workspace Switcher stayed open after navigating to a history task")
 
@@ -142,14 +136,10 @@ def main() -> None:
             timeout=5_000,
         )
         page.keyboard.press("Enter")
-        page.wait_for_function(
-            "document.getElementById('taskTitle').textContent === '露营灯搜索当前任务'",
-            timeout=10_000,
-        )
-        page.wait_for_function(
-            f"document.querySelector('.history-item[aria-current=\"page\"]')?.dataset.id === {json.dumps(str(search['id']))}",
-            timeout=10_000,
-        )
+        expect(page.locator("#taskTitle")).to_have_text("露营灯搜索当前任务", timeout=10_000)
+        page.locator(
+            f'.history-item[aria-current="page"][data-id="{search["id"]}"]'
+        ).wait_for(state="attached", timeout=10_000)
 
         if browser_errors:
             raise RuntimeError("Browser errors during Workspace Switcher QA:\n" + "\n".join(browser_errors))

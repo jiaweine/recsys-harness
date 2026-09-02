@@ -10,6 +10,7 @@ permissions:
 jobs:
   lifecycle:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -18,5 +19,9 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: pip install -e . --no-deps
-      - name: Exercise API run lifecycle contention
-        run: python scripts/api_stress_smoke.py --workers 6 --race 8
+      - name: Exercise API run lifecycle contention repeatedly
+        run: |
+          for pass in 1 2 3; do
+            echo "API lifecycle stress pass ${pass}/3"
+            python scripts/api_stress_smoke.py --workers 12 --race 32
+          done

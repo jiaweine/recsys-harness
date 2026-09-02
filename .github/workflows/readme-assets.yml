@@ -62,6 +62,25 @@ jobs:
           pip install -r requirements.txt playwright
           python -m playwright install --with-deps chromium
 
+      - name: Reject CSP-incompatible Playwright waits
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          scripts = (
+              "scripts/capture_readme_assets.py",
+              "scripts/check_run_library.py",
+              "scripts/check_workspace_switcher.py",
+              "scripts/check_run_context.py",
+              "scripts/check_theme_modes.py",
+              "scripts/check_evidence_navigation.py",
+              "scripts/check_runtime_response_cache.py",
+          )
+          offenders = [path for path in scripts if ".wait_for_function(" in Path(path).read_text(encoding="utf-8")]
+          if offenders:
+              raise SystemExit("Visual QA must remain compatible with strict CSP; replace wait_for_function with locator/expect or Python polling: " + ", ".join(offenders))
+          PY
+
       - name: Start Recsys Harness
         run: |
           rm -rf "$LINGJING_DATA_DIR"

@@ -1,0 +1,120 @@
+name: System Stress Hardening
+
+on:
+  push:
+    paths:
+      - '.github/workflows/system-stress-hardening.yml'
+      - 'lingjing_harness/api_recovery.py'
+      - 'lingjing_harness/api_security.py'
+      - 'lingjing_harness/api_shutdown.py'
+      - 'lingjing_harness/store.py'
+      - 'lingjing_harness/store_handoff.py'
+      - 'lingjing_harness/rate_limit_maintenance.py'
+      - 'lingjing_harness/runtime/optimizer_observation_memory.py'
+      - 'lingjing_harness/runtime/optimizer_observation_snapshot.py'
+      - 'lingjing_harness/runtime/optimizer_routing_checkpoint.py'
+      - 'lingjing_harness/runtime/optimizer_routing_epoch.py'
+      - 'lingjing_harness/runtime/optimizer_routing_epoch_fence.py'
+      - 'tests/test_api.py'
+      - 'tests/test_api_security_boundary.py'
+      - 'tests/test_runtime_consistency.py'
+      - 'tests/test_startup_recovery_batching.py'
+      - 'tests/test_store_fencing_stress.py'
+      - 'tests/test_graceful_handoff.py'
+      - 'tests/test_rate_limit_maintenance.py'
+      - 'tests/test_optimizer_checkpoint_future_clock.py'
+      - 'tests/test_optimizer_observation_clock_order.py'
+      - 'tests/test_optimizer_observation_future_clock.py'
+      - 'tests/test_optimizer_observation_snapshot.py'
+      - 'tests/test_optimizer_observation_feasibility_history.py'
+      - 'tests/test_optimizer_routing_epoch.py'
+      - 'tests/test_optimizer_routing_epoch_fence.py'
+  pull_request:
+    paths:
+      - '.github/workflows/system-stress-hardening.yml'
+      - 'lingjing_harness/api_recovery.py'
+      - 'lingjing_harness/api_security.py'
+      - 'lingjing_harness/api_shutdown.py'
+      - 'lingjing_harness/store.py'
+      - 'lingjing_harness/store_handoff.py'
+      - 'lingjing_harness/rate_limit_maintenance.py'
+      - 'lingjing_harness/runtime/optimizer_observation_memory.py'
+      - 'lingjing_harness/runtime/optimizer_observation_snapshot.py'
+      - 'lingjing_harness/runtime/optimizer_routing_checkpoint.py'
+      - 'lingjing_harness/runtime/optimizer_routing_epoch.py'
+      - 'lingjing_harness/runtime/optimizer_routing_epoch_fence.py'
+      - 'tests/test_api.py'
+      - 'tests/test_api_security_boundary.py'
+      - 'tests/test_runtime_consistency.py'
+      - 'tests/test_startup_recovery_batching.py'
+      - 'tests/test_store_fencing_stress.py'
+      - 'tests/test_graceful_handoff.py'
+      - 'tests/test_rate_limit_maintenance.py'
+      - 'tests/test_optimizer_checkpoint_future_clock.py'
+      - 'tests/test_optimizer_observation_clock_order.py'
+      - 'tests/test_optimizer_observation_future_clock.py'
+      - 'tests/test_optimizer_observation_snapshot.py'
+      - 'tests/test_optimizer_observation_feasibility_history.py'
+      - 'tests/test_optimizer_routing_epoch.py'
+      - 'tests/test_optimizer_routing_epoch_fence.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  durable-recovery-races:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Repeat durable fencing, lifecycle, security, and rollback contracts
+        run: |
+          for pass in 1 2 3; do
+            echo "durable recovery race pass ${pass}/3"
+            pytest -q \
+              tests/test_store_fencing_stress.py \
+              tests/test_graceful_handoff.py \
+              tests/test_rate_limit_maintenance.py \
+              tests/test_startup_recovery_batching.py \
+              tests/test_api_security_boundary.py
+            pytest -q \
+              tests/test_api.py::test_host_header_is_rejected \
+              tests/test_api.py::test_origin_header_is_enforced_for_mutations \
+              tests/test_api.py::test_security_headers_are_present
+            pytest -q \
+              tests/test_runtime_consistency.py::test_completed_checkpoint_recovery_finalizes_without_replaying_harness
+          done
+
+  optimizer-routing-races:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Repeat optimizer cross-connection, clock, history, and epoch races
+        run: |
+          for pass in 1 2 3; do
+            echo "optimizer routing race pass ${pass}/3"
+            pytest -q \
+              tests/test_optimizer_checkpoint_future_clock.py \
+              tests/test_optimizer_observation_clock_order.py \
+              tests/test_optimizer_observation_future_clock.py \
+              tests/test_optimizer_observation_snapshot.py \
+              tests/test_optimizer_observation_feasibility_history.py \
+              tests/test_optimizer_routing_epoch.py \
+              tests/test_optimizer_routing_epoch_fence.py
+          done
+      - name: Run wider deterministic drift calibration
+        run: python scripts/optimizer_drift_calibration.py --seeds 256

@@ -90,7 +90,7 @@ def main() -> None:
             else None,
         )
         page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30_000)
-        page.wait_for_function("document.getElementById('dataMeta').textContent.includes('内容')", timeout=15_000)
+        page.locator("#dataMeta", has_text="内容").wait_for(state="visible", timeout=15_000)
 
         capture_theme = page.locator("html").get_attribute("data-theme")
         if capture_theme != "light":
@@ -126,7 +126,7 @@ def main() -> None:
 
         page.locator("#input").fill(PROMPT)
         page.locator("#sendBtn").click()
-        page.wait_for_function("document.getElementById('stateText').textContent === '已完成'", timeout=30_000)
+        page.locator("#stateText", has_text="已完成").wait_for(state="visible", timeout=30_000)
 
         # The completed engineering console must be backed by the actual run payload,
         # not merely by decorative empty containers. Waiting on [hidden] also covers

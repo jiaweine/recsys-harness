@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import os
+import time
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 
 BASE_URL = os.environ.get("RECSYS_CAPTURE_URL", "http://127.0.0.1:8765").rstrip("/")
@@ -16,7 +17,7 @@ def wait_for_completed_search(page) -> None:
     page.locator('.scene[data-scene="search"]').click()
     page.locator("#input").fill(PROMPT)
     page.locator("#sendBtn").click()
-    page.wait_for_function("document.getElementById('stateText').textContent === '已完成'", timeout=30_000)
+    expect(page.locator("#stateText")).to_have_text("已完成", timeout=30_000)
     page.wait_for_selector('#resultAnalysis:not([hidden]) .rank-row[data-evidence-linked="true"]', timeout=10_000)
     page.wait_for_selector("#evidenceList .evidence-item", state="attached", timeout=10_000)
     page.wait_for_selector("#evidenceList .evidence-item[data-result-linked='true'][data-followup-linked='true']", state="attached", timeout=10_000)
@@ -45,10 +46,7 @@ def assert_selected_evidence(page, expected_title: str, expected_rank: int) -> N
     detail = target.locator("small").inner_text().strip()
     if f"第 {expected_rank} 位" not in detail:
         raise RuntimeError(f"Evidence navigation matched the right title but wrong ranked evidence: {detail!r}")
-    page.wait_for_function(
-        "document.activeElement?.classList.contains('evidence-item') && document.activeElement?.classList.contains('evidence-target')",
-        timeout=2_000,
-    )
+    expect(target).to_be_focused(timeout=2_000)
 
 
 def assert_selected_rank(page, expected_title: str, expected_rank: int) -> None:
@@ -61,10 +59,7 @@ def assert_selected_rank(page, expected_title: str, expected_rank: int) -> None:
     actual_rank = int(target.get_attribute("data-evidence-rank") or "0")
     if actual_rank != expected_rank:
         raise RuntimeError(f"Reverse navigation matched the wrong rank: {actual_rank} != {expected_rank}")
-    page.wait_for_function(
-        "document.activeElement?.classList.contains('rank-row') && document.activeElement?.classList.contains('rank-target')",
-        timeout=2_000,
-    )
+    expect(target).to_be_focused(timeout=2_000)
 
 
 def reverse_button(page, title: str, rank: int):
@@ -93,11 +88,11 @@ def assert_scoped_followup(page, title: str, rank: int, *, mobile: bool) -> None
     button.click()
 
     if mobile:
-        page.wait_for_function("document.getElementById('inspectorToggle').getAttribute('aria-expanded') === 'false'", timeout=5_000)
+        expect(page.locator("#inspectorToggle")).to_have_attribute("aria-expanded", "false", timeout=5_000)
     elif page.locator("#inspectorToggle").get_attribute("aria-expanded") != "true":
         raise RuntimeError("Desktop scoped follow-up incorrectly closed the persistent Evidence rail")
 
-    page.wait_for_function("document.activeElement?.id === 'input'", timeout=2_500)
+    expect(composer).to_be_focused(timeout=2_500)
     value = composer.input_value()
     if USER_NOTE not in value:
         raise RuntimeError("Scoped follow-up overwrote an existing user draft")
@@ -114,12 +109,25 @@ def assert_scoped_followup(page, title: str, rank: int, *, mobile: bool) -> None
     composer.fill("")
 
 
+def wait_runtime_bus(page, timeout: float = 3.0) -> dict:
+    deadline = time.monotonic() + timeout
+    latest = None
+    while time.monotonic() < deadline:
+        latest = page.evaluate(
+            "window.XushuRuntimeBus?.snapshot ? window.XushuRuntimeBus.snapshot() : null"
+        )
+        if (
+            isinstance(latest, dict)
+            and latest.get("matchedResponses", 0) > 0
+            and latest.get("parsedResponses") == latest.get("matchedResponses")
+        ):
+            return latest
+        page.wait_for_timeout(50)
+    raise RuntimeError(f"Shared runtime response cache did not converge: {latest}")
+
+
 def assert_runtime_response_cache(page) -> None:
-    page.wait_for_function(
-        "window.XushuRuntimeBus?.snapshot && (() => { const s = window.XushuRuntimeBus.snapshot(); return s.matchedResponses > 0 && s.parsedResponses === s.matchedResponses; })()",
-        timeout=3_000,
-    )
-    stats = page.evaluate("window.XushuRuntimeBus.snapshot()")
+    stats = wait_runtime_bus(page)
     if stats["parseErrors"] != 0:
         raise RuntimeError(f"Shared runtime response cache saw JSON parse errors: {stats}")
     if stats["parsedResponses"] != stats["matchedResponses"]:
@@ -150,7 +158,7 @@ def main() -> None:
         page.on("console", lambda msg: browser_errors.append(f"console: {msg.text}") if msg.type == "error" else None)
 
         page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30_000)
-        page.wait_for_function("document.body.classList.contains('ready')", timeout=15_000)
+        page.locator("body.ready").wait_for(state="attached", timeout=15_000)
         if page.locator("html").get_attribute("data-theme") != "light":
             raise RuntimeError("Evidence navigation QA must start from the default regular theme")
         if not page.evaluate("Boolean(window.XushuRuntimeBus?.snapshot)"):
@@ -171,7 +179,7 @@ def main() -> None:
 
         # Desktop: Rank -> Evidence -> editable evidence-grounded follow-up -> same Rank.
         link.click()
-        page.wait_for_function("document.getElementById('inspectorToggle').getAttribute('aria-expanded') === 'true'", timeout=5_000)
+        expect(page.locator("#inspectorToggle")).to_have_attribute("aria-expanded", "true", timeout=5_000)
         page.wait_for_selector("#evidenceList .evidence-item.evidence-target", timeout=5_000)
         assert_selected_evidence(page, title, rank)
         assert_scoped_followup(page, title, rank, mobile=False)
@@ -195,7 +203,7 @@ def main() -> None:
         if not close.is_visible():
             raise RuntimeError("Mobile evidence sheet did not expose its close control")
         close.click()
-        page.wait_for_function("document.getElementById('inspectorToggle').getAttribute('aria-expanded') === 'false'", timeout=5_000)
+        expect(page.locator("#inspectorToggle")).to_have_attribute("aria-expanded", "false", timeout=5_000)
 
         first_row = page.locator('#resultAnalysis .rank-row[data-evidence-linked="true"]').first
         row_box = first_row.bounding_box()
@@ -210,14 +218,14 @@ def main() -> None:
 
         # Mobile follow-up closes the Bottom Sheet and returns keyboard focus to the existing Composer.
         mobile_link.click()
-        page.wait_for_function("document.getElementById('inspectorToggle').getAttribute('aria-expanded') === 'true'", timeout=5_000)
+        expect(page.locator("#inspectorToggle")).to_have_attribute("aria-expanded", "true", timeout=5_000)
         page.wait_for_selector("#evidenceList .evidence-item.evidence-target", timeout=5_000)
         assert_selected_evidence(page, title, rank)
         assert_scoped_followup(page, title, rank, mobile=True)
 
         # Re-open the same evidence and still preserve the independent Evidence -> Rank round trip.
         mobile_link.click()
-        page.wait_for_function("document.getElementById('inspectorToggle').getAttribute('aria-expanded') === 'true'", timeout=5_000)
+        expect(page.locator("#inspectorToggle")).to_have_attribute("aria-expanded", "true", timeout=5_000)
         page.wait_for_selector("#evidenceList .evidence-item.evidence-target", timeout=5_000)
         assert_selected_evidence(page, title, rank)
         mobile_reverse = reverse_button(page, title, rank)
@@ -225,7 +233,7 @@ def main() -> None:
         if not reverse_box or reverse_box["height"] < 44 or reverse_box["width"] < 44:
             raise RuntimeError(f"Mobile reverse Result action lost its 44px touch target: {reverse_box}")
         mobile_reverse.click()
-        page.wait_for_function("document.getElementById('inspectorToggle').getAttribute('aria-expanded') === 'false'", timeout=5_000)
+        expect(page.locator("#inspectorToggle")).to_have_attribute("aria-expanded", "false", timeout=5_000)
         page.wait_for_selector("#resultAnalysis .rank-row.rank-target", timeout=5_000)
         assert_selected_rank(page, title, rank)
 

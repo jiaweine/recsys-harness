@@ -63,11 +63,11 @@ jobs:
             tests/test_online_experiment_store_concurrency.py \
             tests/test_online_experiment_api.py \
             tests/test_online_experiment_integrity.py
-      - name: Run multi-worker SQLite and CAS stress
+      - name: Run elevated multi-worker SQLite and CAS stress
         run: |
           python scripts/online_experiment_store_stress.py \
-            --workers 8 \
-            --units 2048 \
+            --workers 16 \
+            --units 4096 \
             | tee /tmp/online-experiment-store-stress.json
       - name: Verify no automatic traffic or production activation contract
         run: |
@@ -75,6 +75,8 @@ jobs:
           from pathlib import Path
           import json
           report = json.loads(Path('/tmp/online-experiment-store-stress.json').read_text())
+          assert report['workers'] == 16
+          assert report['units'] == 4096
           assert report['production_activation'] is False
           assert report['cas_successes'] == 1
           assert report['cas_conflicts'] == report['workers'] - 1
