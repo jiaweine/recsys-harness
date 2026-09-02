@@ -5,7 +5,7 @@ import json
 import os
 from urllib import request
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 
 BASE_URL = os.environ.get("RECSYS_CAPTURE_URL", "http://127.0.0.1:8765").rstrip("/")
@@ -45,12 +45,11 @@ def main() -> None:
         page.on("console", lambda msg: browser_errors.append(f"console: {msg.text}") if msg.type == "error" else None)
 
         page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30_000)
-        page.wait_for_function("document.body.classList.contains('ready')", timeout=15_000)
+        page.locator("body.ready").wait_for(state="attached", timeout=15_000)
         page.wait_for_selector("#runContextStrip .run-context-scene", timeout=8_000)
-        page.wait_for_function(
-            f"document.querySelector('#historyList .history-item[aria-current=\"page\"]')?.dataset.id === {json.dumps(str(historical['id']))}",
-            timeout=8_000,
-        )
+        page.locator(
+            f'#historyList .history-item[aria-current="page"][data-id="{historical["id"]}"]'
+        ).wait_for(state="visible", timeout=8_000)
 
         strip = page.locator("#runContextStrip")
         if "推荐" not in strip.locator(".run-context-scene").inner_text():
@@ -60,39 +59,27 @@ def main() -> None:
 
         page.locator("#newTaskBtn").click()
         page.locator('.scene[data-scene="search"]').click()
-        page.wait_for_function(
-            "document.querySelector('#runContextStrip .run-context-scene')?.textContent.includes('搜索')",
-            timeout=5_000,
-        )
+        expect(page.locator("#runContextStrip .run-context-scene")).to_contain_text("搜索", timeout=5_000)
         if page.locator("#runContextStrip .run-context-time").count():
             raise RuntimeError("Draft Run Context kept a persisted history timestamp")
 
         page.locator("#input").fill(PROMPT)
         page.locator("#sendBtn").click()
         page.wait_for_selector('#runContextStrip .run-context-state[data-tone="live"]', timeout=8_000)
-        page.wait_for_function("document.getElementById('stateText').textContent === '已完成'", timeout=30_000)
-        page.wait_for_function(
-            """() => {
-              const target = document.querySelector('#runContextStrip .run-context-target .run-context-value');
-              return target && target.textContent.includes('露营灯');
-            }""",
-            timeout=8_000,
-        )
-        page.wait_for_function("document.getElementById('taskState').textContent === '可继续追问'", timeout=8_000)
-        page.wait_for_function(
-            "document.querySelector('#runContextStrip .run-context-state')?.textContent.includes('已完成')",
-            timeout=8_000,
-        )
+        expect(page.locator("#stateText")).to_have_text("已完成", timeout=30_000)
+        expect(
+            page.locator("#runContextStrip .run-context-target .run-context-value")
+        ).to_contain_text("露营灯", timeout=8_000)
+        expect(page.locator("#taskState")).to_have_text("可继续追问", timeout=8_000)
+        expect(page.locator("#runContextStrip .run-context-state")).to_contain_text("已完成", timeout=8_000)
         # Run completion precedes the asynchronous history refresh that supplies the persisted timestamp.
         # Wait for the context to reconcile with that persisted history row instead of racing it.
-        page.wait_for_function(
-            """() => {
-              const selectedTime = document.querySelector('#historyList .history-item[aria-current="page"] small');
-              const contextTime = document.querySelector('#runContextStrip .run-context-time .run-context-value');
-              return Boolean(selectedTime?.textContent.trim() && contextTime?.textContent.trim());
-            }""",
-            timeout=8_000,
-        )
+        selected_time = page.locator('#historyList .history-item[aria-current="page"] small')
+        context_time = page.locator("#runContextStrip .run-context-time .run-context-value")
+        selected_time.wait_for(state="visible", timeout=8_000)
+        context_time.wait_for(state="visible", timeout=8_000)
+        expect(selected_time).not_to_have_text("", timeout=8_000)
+        expect(context_time).not_to_have_text("", timeout=8_000)
 
         if "已完成" not in strip.locator(".run-context-state").inner_text():
             raise RuntimeError("Run Context must show execution completion instead of the follow-up affordance")
@@ -142,14 +129,8 @@ def main() -> None:
         page.set_viewport_size({"width": 1440, "height": 900})
         historical_button = page.locator(f'#historyList .history-item[data-id="{historical["id"]}"]')
         historical_button.click()
-        page.wait_for_function(
-            f"document.getElementById('taskTitle').textContent === {json.dumps(HISTORY_TITLE, ensure_ascii=False)}",
-            timeout=8_000,
-        )
-        page.wait_for_function(
-            "document.querySelector('#runContextStrip .run-context-scene')?.textContent.includes('推荐')",
-            timeout=5_000,
-        )
+        expect(page.locator("#taskTitle")).to_have_text(HISTORY_TITLE, timeout=8_000)
+        expect(page.locator("#runContextStrip .run-context-scene")).to_contain_text("推荐", timeout=5_000)
         if page.locator("#runContextStrip .run-context-target").count():
             raise RuntimeError("Historical navigation left the previous search target in Run Context")
 

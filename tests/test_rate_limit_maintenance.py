@@ -63,6 +63,33 @@ def test_maintenance_preserves_shared_counter_semantics(tmp_path):
     assert two.consume_rate_limit("login:client", limit=2, window_seconds=60, now=161) is True
 
 
+def test_maintenance_clock_rollback_rearms_future_gc_deadline(tmp_path):
+    path = tmp_path / "rate-limit-maintenance-clock.db"
+    store = WorkspaceStore(path)
+    install_rate_limit_maintenance(
+        store,
+        interval_seconds=60,
+        retention_seconds=120,
+    )
+
+    assert store.consume_rate_limit("task:normal", limit=10, window_seconds=60, now=100)
+    # A host clock jump far into the future advances the process-local GC
+    # deadline.  Without rollback repair, returning to the normal clock would
+    # suppress maintenance until that future deadline was reached again.
+    assert store.consume_rate_limit("task:future", limit=10, window_seconds=60, now=10_000)
+
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "insert or replace into rate_limits(scope_key,window_start,count,updated_at) values(?,?,?,?)",
+            ("task:stale-after-jump", 0.0, 1, 0.0),
+        )
+        connection.commit()
+    assert "task:stale-after-jump" in _rate_limit_keys(path)
+
+    assert store.consume_rate_limit("task:recovered", limit=10, window_seconds=60, now=200)
+    assert "task:stale-after-jump" not in _rate_limit_keys(path)
+
+
 def test_install_is_idempotent(tmp_path):
     store = WorkspaceStore(tmp_path / "rate-limit-idempotent.db")
     install_rate_limit_maintenance(store)

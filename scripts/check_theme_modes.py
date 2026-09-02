@@ -21,6 +21,10 @@ def luma(page, selector: str) -> float:
     }"""))
 
 
+def wait_ready(page) -> None:
+    page.locator("body.ready").wait_for(state="attached", timeout=15_000)
+
+
 def assert_selected_theme(page, theme: str) -> None:
     actual_theme = page.locator("html").get_attribute("data-theme")
     if actual_theme != theme:
@@ -89,10 +93,10 @@ def main() -> None:
         page.on("console", lambda msg: browser_errors.append(f"console: {msg.text}") if msg.type == "error" else None)
 
         page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30_000)
-        page.wait_for_function("document.body.classList.contains('ready')", timeout=15_000)
+        wait_ready(page)
         page.evaluate("localStorage.removeItem('xushu-theme')")
         page.reload(wait_until="domcontentloaded")
-        page.wait_for_function("document.body.classList.contains('ready')", timeout=15_000)
+        wait_ready(page)
 
         # A new user gets the regular light workspace, not a dark canvas.
         assert_desktop_theme(page, "light")
@@ -104,14 +108,14 @@ def main() -> None:
         if page.locator('meta[name="theme-color"]').get_attribute("content") != "#101319":
             raise RuntimeError("Dark theme did not publish its Charcoal browser chrome color")
         page.reload(wait_until="domcontentloaded")
-        page.wait_for_function("document.body.classList.contains('ready')", timeout=15_000)
+        wait_ready(page)
         assert_desktop_theme(page, "dark")
 
         # Explicitly switch back and verify persistence in the other direction too.
         page.locator('[data-theme-choice="light"]').click()
         assert_desktop_theme(page, "light")
         page.reload(wait_until="domcontentloaded")
-        page.wait_for_function("document.body.classList.contains('ready')", timeout=15_000)
+        wait_ready(page)
         assert_desktop_theme(page, "light")
 
         page.set_viewport_size({"width": 393, "height": 852})

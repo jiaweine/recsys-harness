@@ -2,12 +2,26 @@
 from __future__ import annotations
 
 import os
+import time
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 
 BASE_URL = os.environ.get("RECSYS_CAPTURE_URL", "http://127.0.0.1:8765").rstrip("/")
 PROMPT = "检查搜索“露营灯”的当前结果，只做复现和证据核对，不改变策略。"
+
+
+def wait_for_runtime_cache(page, timeout: float = 3.0) -> dict:
+    deadline = time.monotonic() + timeout
+    last: dict = {}
+    while time.monotonic() < deadline:
+        last = page.evaluate("window.XushuRuntimeBus?.snapshot?.() || {}")
+        matched = int(last.get("matchedResponses") or 0)
+        parsed = int(last.get("parsedResponses") or 0)
+        if matched > 0 and parsed == matched:
+            return last
+        time.sleep(0.05)
+    raise RuntimeError(f"Runtime response cache did not settle before timeout: {last}")
 
 
 def main() -> None:
@@ -19,7 +33,7 @@ def main() -> None:
         page.on("console", lambda msg: browser_errors.append(f"console: {msg.text}") if msg.type == "error" else None)
 
         page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30_000)
-        page.wait_for_function("document.body.classList.contains('ready')", timeout=15_000)
+        page.locator("body.ready").wait_for(state="attached", timeout=15_000)
         if not page.evaluate("Boolean(window.XushuRuntimeBus?.snapshot)"):
             raise RuntimeError("Runtime response cache did not initialize before product consumers")
 
@@ -27,17 +41,13 @@ def main() -> None:
         page.locator('.scene[data-scene="search"]').click()
         page.locator("#input").fill(PROMPT)
         page.locator("#sendBtn").click()
-        page.wait_for_function("document.getElementById('stateText').textContent === '已完成'", timeout=30_000)
+        expect(page.locator("#stateText")).to_have_text("已完成", timeout=30_000)
         page.wait_for_selector("#resultSnapshot:not([hidden])", timeout=10_000)
         page.wait_for_selector("#agentTrace:not([hidden])", timeout=10_000)
         page.wait_for_selector("#runControlPlane:not([hidden])", timeout=10_000)
         page.wait_for_selector("#learningLedger:not([hidden])", state="attached", timeout=10_000)
-        page.wait_for_function(
-            "(() => { const s = window.XushuRuntimeBus.snapshot(); return s.matchedResponses > 0 && s.parsedResponses === s.matchedResponses; })()",
-            timeout=3_000,
-        )
+        stats = wait_for_runtime_cache(page)
 
-        stats = page.evaluate("window.XushuRuntimeBus.snapshot()")
         matched = stats["matchedResponses"]
         if stats["parseErrors"] != 0:
             raise RuntimeError(f"Runtime cache saw JSON parse errors: {stats}")

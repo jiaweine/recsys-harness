@@ -8,6 +8,8 @@ import threading
 import time
 from typing import Any
 
+from .api_recovery import install_startup_recovery_batching
+from .api_security import install_api_security_boundary
 from .store_handoff import release_interrupted_run
 
 
@@ -111,7 +113,15 @@ def _handoff_run(core: Any, run_id: str) -> bool:
 
 
 def install_shutdown_boundary(core: Any) -> None:
-    """Install graceful handoff around the existing stable API implementation."""
+    """Install late-stage API lifecycle, security, and handoff hardening."""
+
+    # This installer is the stable late hook invoked after the API wrapper has
+    # replaced persistence/recovery functions and installed all routes.  Keep the
+    # browser security and startup recovery layers idempotent and install them
+    # before the graceful-shutdown guard so repeated integration imports cannot
+    # silently lose one of the boundaries.
+    install_api_security_boundary(core)
+    install_startup_recovery_batching(core)
 
     if getattr(core, "_GRACEFUL_SHUTDOWN_INSTALLED", False):
         return

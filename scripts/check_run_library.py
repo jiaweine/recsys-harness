@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 BASE_URL = os.environ.get("RECSYS_CAPTURE_URL", "http://127.0.0.1:8765").rstrip("/")
 PROMPT = "检查搜索“露营灯”的当前结果，只做复现和证据核对，不改变策略。"
@@ -50,7 +50,7 @@ def main() -> None:
         )
 
         page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30_000)
-        page.wait_for_function("document.body.classList.contains('ready')", timeout=15_000)
+        page.locator("body.ready").wait_for(state="attached", timeout=15_000)
         page.wait_for_selector("#historyList .history-item .history-scene", timeout=8_000)
 
         if current_rows(page).count() != 1:
@@ -82,13 +82,11 @@ def main() -> None:
         if live.locator(".history-scene").inner_text().strip() != "搜":
             raise RuntimeError("Active search task lost its scene badge")
 
-        page.wait_for_function("document.getElementById('stateText').textContent === '已完成'", timeout=30_000)
-        page.wait_for_function("""() => {
-          const rows = document.querySelectorAll("#historyList .history-item[aria-current='page']");
-          return rows.length === 1 && !rows[0].classList.contains('running') && rows[0].querySelector('.history-state')?.textContent === '当前';
-        }""", timeout=8_000)
+        expect(page.locator("#stateText")).to_have_text("已完成", timeout=30_000)
+        completed = page.locator("#historyList .history-item[aria-current='page']:not(.running)").first
+        completed.wait_for(state="visible", timeout=8_000)
+        expect(completed.locator(".history-state")).to_have_text("当前", timeout=8_000)
 
-        completed = current_rows(page).first
         completed_id = completed.get_attribute("data-id")
         other = page.locator("#historyList .history-item[aria-current='false']").first
         other_id = other.get_attribute("data-id")
@@ -96,13 +94,11 @@ def main() -> None:
             raise RuntimeError("Run Library did not expose a distinct historical task for navigation")
 
         other.click()
-        page.wait_for_function(
-            """expected => document.querySelectorAll("#historyList .history-item[aria-current='page']").length === 1 && document.querySelector("#historyList .history-item[aria-current='page']")?.dataset.id === expected""",
-            arg=other_id,
-            timeout=8_000,
-        )
-        if page.locator(f"#historyList .history-item[data-id='{completed_id}']").get_attribute("aria-current") != "false":
-            raise RuntimeError("Previous current task stayed selected after navigating history")
+        selected_other = page.locator(f"#historyList .history-item[data-id='{other_id}']")
+        previous = page.locator(f"#historyList .history-item[data-id='{completed_id}']")
+        expect(selected_other).to_have_attribute("aria-current", "page", timeout=8_000)
+        expect(previous).to_have_attribute("aria-current", "false", timeout=8_000)
+        expect(current_rows(page)).to_have_count(1, timeout=8_000)
 
         if browser_errors:
             raise RuntimeError("Browser errors during Run Library QA: " + " | ".join(browser_errors))
