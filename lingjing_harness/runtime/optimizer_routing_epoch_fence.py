@@ -4,6 +4,7 @@ from contextvars import ContextVar
 from math import isfinite
 from typing import Any
 
+from . import optimizer_observation_memory as observation_memory
 from . import optimizer_observation_weighting as weighting
 from . import optimizer_routing_checkpoint as checkpoint_runtime
 from . import optimizer_routing_epoch as routing_epoch
@@ -72,17 +73,86 @@ def _checkpoint_row(
     ).fetchone()
 
 
+def _observation_revision_target(
+    registry: Any,
+    surface: str,
+) -> tuple[Any, str, str] | None:
+    surface = str(surface or "").strip()
+    if surface not in {"search", "recommend"}:
+        return None
+    memory = getattr(registry, "memory", None)
+    if memory is None:
+        return None
+    catalog_key = str(getattr(registry, "catalog_key", "") or "")
+    scoped_catalog_key = getattr(memory, "scoped_catalog_key", None)
+    if callable(scoped_catalog_key):
+        catalog_key = str(scoped_catalog_key(catalog_key, surface))
+    base_memory = getattr(memory, "base_memory", memory)
+    if not hasattr(base_memory, "_connect") or not hasattr(base_memory, "_lock"):
+        return None
+    return base_memory, catalog_key, surface
+
+
+def _history_high_water(
+    connection: Any,
+    *,
+    catalog_key: str,
+    domain: str,
+) -> int:
+    row = connection.execute(
+        """
+        select coalesce(max(id), 0) as high_water
+        from agent_optimizer_observation_history
+        where catalog_key=? and domain=?
+        """,
+        (catalog_key, domain),
+    ).fetchone()
+    if row is None:
+        return 0
+    try:
+        return max(0, int(row["high_water"] or 0))
+    except (KeyError, TypeError):
+        return max(0, int(row[0] or 0))
+
+
+def _read_observation_revision(
+    registry: Any,
+    surface: str,
+) -> dict[str, Any] | None:
+    target = _observation_revision_target(registry, surface)
+    if target is None:
+        return None
+    memory, catalog_key, domain = target
+    observation_memory._ensure_optimizer_observation_table(memory)
+    with memory._lock:
+        connection = memory._connect()
+        try:
+            connection.execute("pragma busy_timeout=10000")
+            high_water = _history_high_water(
+                connection,
+                catalog_key=catalog_key,
+                domain=domain,
+            )
+        finally:
+            memory._close(connection)
+    return {
+        "catalog_key": catalog_key,
+        "domain": domain,
+        "high_water": high_water,
+    }
+
+
 def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
-    """Fence routing decisions against concurrent durable epoch advancement.
+    """Fence routing decisions against concurrent epoch or evidence advancement.
 
     The existing optimizer routing checkpoint remains the only durable routing
     state. This layer adds no table, lease, heartbeat, evaluator call, or serving
-    authority. A routing call snapshots the checkpoint epoch token; any checkpoint
-    write must still observe that exact token inside the existing SQLite write
-    transaction. The completed routing decision is then revalidated against the
-    durable token before it is returned. Concurrent epoch advancement therefore
-    fails closed to the pre-observation router for that call instead of allowing a
-    stale process to overwrite or act on evidence from an older regime.
+    authority. A routing call snapshots both the checkpoint epoch token and the
+    paid-observation history high-water at entry. Any checkpoint write must still
+    observe both values inside the existing SQLite write transaction. The completed
+    routing decision is then revalidated before return. Concurrent epoch advancement
+    or any paid observation commit therefore fails closed to the pre-observation
+    router instead of allowing a stale decision to act on an older evidence view.
     """
 
     global _INSTALLED
@@ -158,6 +228,9 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
         expected_token = context.get("expected_token")
         if not isinstance(expected_token, tuple) or len(expected_token) != 2:
             expected_token = (0, 0.0)
+        expected_revision = context.get("expected_observation_revision")
+        observation_catalog_key = str(context.get("observation_catalog_key") or "")
+        observation_domain = str(context.get("surface") or "")
 
         with self.memory._lock:
             connection = self.memory._connect()
@@ -173,13 +246,37 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
                 existing_token = _epoch_token(existing_dict)
                 if not _same_epoch_token(existing_token, expected_token):
                     context["conflict"] = True
+                    context["conflict_reason"] = "concurrent_epoch_advance"
                     context["observed_token"] = existing_token
                     connection.commit()
                     return {
                         "recorded": False,
                         "stale_epoch_fence": True,
+                        "stale_observation_revision_fence": False,
                         **(existing_dict or {}),
                     }
+
+                if (
+                    isinstance(expected_revision, int)
+                    and observation_catalog_key
+                    and observation_domain == domain
+                ):
+                    observed_revision = _history_high_water(
+                        connection,
+                        catalog_key=observation_catalog_key,
+                        domain=observation_domain,
+                    )
+                    context["observed_observation_revision"] = observed_revision
+                    if observed_revision != expected_revision:
+                        context["conflict"] = True
+                        context["conflict_reason"] = "concurrent_observation_advance"
+                        connection.commit()
+                        return {
+                            "recorded": False,
+                            "stale_epoch_fence": False,
+                            "stale_observation_revision_fence": True,
+                            **(existing_dict or {}),
+                        }
 
                 current_epoch = existing_token[0]
                 current_epoch_started_at = existing_token[1]
@@ -252,6 +349,7 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
         result = {
             "recorded": bool(cursor.rowcount),
             "stale_epoch_fence": False,
+            "stale_observation_revision_fence": False,
             **(dict(row) if row is not None else {}),
         }
         context["authorized_token"] = _epoch_token(result)
@@ -262,9 +360,56 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
     original_routing_context = optimizer_registry_cls._routing_context
 
     def routing_context_with_durable_epoch_fence(self: Any, surface: str):
+        expected_observation = _read_observation_revision(self, surface)
+        expected_revision = (
+            int(expected_observation["high_water"])
+            if isinstance(expected_observation, dict)
+            else None
+        )
+        observation_catalog_key = (
+            str(expected_observation.get("catalog_key") or "")
+            if isinstance(expected_observation, dict)
+            else ""
+        )
         store = checkpoint_runtime._checkpoint_store(self)
         if store is None:
-            return original_routing_context(self, surface)
+            result = original_routing_context(self, surface)
+            observed_observation = _read_observation_revision(self, surface)
+            observed_revision = (
+                int(observed_observation["high_water"])
+                if isinstance(observed_observation, dict)
+                else None
+            )
+            states = _fence_states(self)
+            if expected_revision is not None and observed_revision != expected_revision:
+                routing_epoch.clear_pending_routing_epoch_advance(self, surface)
+                weighting._routing_regimes(self)[surface] = weighting._ROUTING_REGIME_FALLBACK
+                states[surface] = {
+                    "status": "observation_conflict",
+                    "reason": "concurrent_observation_advance",
+                    "action": "pre_observation_fallback",
+                    "expected_evidence_epoch": 0,
+                    "expected_epoch_started_at": 0.0,
+                    "observed_evidence_epoch": 0,
+                    "observed_epoch_started_at": 0.0,
+                    "expected_observation_revision": expected_revision,
+                    "observed_observation_revision": observed_revision,
+                    "new_evaluator_calls": 0,
+                }
+                return weighting._pre_observation_context(self, surface, result)
+            states[surface] = {
+                "status": "validated",
+                "reason": "routing_fences_current",
+                "action": "none",
+                "expected_evidence_epoch": 0,
+                "expected_epoch_started_at": 0.0,
+                "observed_evidence_epoch": 0,
+                "observed_epoch_started_at": 0.0,
+                "expected_observation_revision": expected_revision,
+                "observed_observation_revision": observed_revision,
+                "new_evaluator_calls": 0,
+            }
+            return result
 
         initial = store.read(
             self.catalog_key,
@@ -279,7 +424,11 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
             "expected_token": expected_token,
             "authorized_token": expected_token,
             "observed_token": expected_token,
+            "observation_catalog_key": observation_catalog_key,
+            "expected_observation_revision": expected_revision,
+            "observed_observation_revision": expected_revision,
             "conflict": False,
+            "conflict_reason": "",
         }
         token = _ROUTING_EPOCH_FENCE_CONTEXT.set(context)
         try:
@@ -291,10 +440,24 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
             )
             observed_token = _epoch_token(latest)
             authorized_token = context.get("authorized_token", expected_token)
-            conflict = bool(context.get("conflict")) or not _same_epoch_token(
-                observed_token,
-                authorized_token,
+            token_conflict = not _same_epoch_token(observed_token, authorized_token)
+
+            observed_observation = _read_observation_revision(self, surface)
+            observed_revision = (
+                int(observed_observation["high_water"])
+                if isinstance(observed_observation, dict)
+                else None
             )
+            context["observed_observation_revision"] = observed_revision
+            observation_conflict = bool(
+                expected_revision is not None and observed_revision != expected_revision
+            )
+            if observation_conflict:
+                context["conflict_reason"] = "concurrent_observation_advance"
+            elif token_conflict and not context.get("conflict_reason"):
+                context["conflict_reason"] = "concurrent_epoch_advance"
+
+            conflict = bool(context.get("conflict")) or token_conflict or observation_conflict
             states = _fence_states(self)
             if conflict:
                 if isinstance(latest, dict):
@@ -313,26 +476,35 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
                     )
                 routing_epoch.clear_pending_routing_epoch_advance(self, surface)
                 weighting._routing_regimes(self)[surface] = weighting._ROUTING_REGIME_FALLBACK
+                reason = str(context.get("conflict_reason") or "concurrent_epoch_advance")
                 states[surface] = {
-                    "status": "epoch_conflict",
-                    "reason": "concurrent_epoch_advance",
+                    "status": (
+                        "observation_conflict"
+                        if reason == "concurrent_observation_advance"
+                        else "epoch_conflict"
+                    ),
+                    "reason": reason,
                     "action": "pre_observation_fallback",
                     "expected_evidence_epoch": expected_token[0],
                     "expected_epoch_started_at": expected_token[1],
                     "observed_evidence_epoch": observed_token[0],
                     "observed_epoch_started_at": observed_token[1],
+                    "expected_observation_revision": expected_revision,
+                    "observed_observation_revision": observed_revision,
                     "new_evaluator_calls": 0,
                 }
                 return weighting._pre_observation_context(self, surface, result)
 
             states[surface] = {
                 "status": "validated",
-                "reason": "epoch_token_current",
+                "reason": "routing_fences_current",
                 "action": "none",
                 "expected_evidence_epoch": expected_token[0],
                 "expected_epoch_started_at": expected_token[1],
                 "observed_evidence_epoch": observed_token[0],
                 "observed_epoch_started_at": observed_token[1],
+                "expected_observation_revision": expected_revision,
+                "observed_observation_revision": observed_revision,
                 "new_evaluator_calls": 0,
             }
             return result
@@ -352,6 +524,9 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
                 "optimizer_observation_routing_epoch_cas": "transactional_expected_epoch_token",
                 "optimizer_observation_routing_epoch_return_validation": "post_decision_checkpoint_revalidation",
                 "optimizer_observation_routing_epoch_conflict_action": "pre_observation_fallback",
+                "optimizer_observation_routing_revision_fence": "history_autoincrement_high_water",
+                "optimizer_observation_routing_revision_scope": "no_paid_observation_commit_during_routing_call",
+                "optimizer_observation_routing_revision_conflict_action": "pre_observation_fallback",
                 "optimizer_observation_routing_epoch_fence_states": (
                     dict(states) if isinstance(states, dict) else {}
                 ),

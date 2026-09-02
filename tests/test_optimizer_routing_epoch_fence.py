@@ -96,6 +96,16 @@ def _advance_epoch_from_other_process(registry, *, now, boundary, regime="fallba
     return store
 
 
+def _append_paid_observations(registry, configs):
+    result = registry.memory.record_optimizer_observations(
+        registry.catalog_key,
+        "search",
+        _rows(configs),
+    )
+    assert result["history_rows"] == len(configs)
+    assert result["new_evaluator_calls"] == 0
+
+
 def test_concurrent_epoch_advance_rejects_stale_checkpoint_writer(tmp_path, monkeypatch):
     path = tmp_path / "routing-epoch-cas-writer.db"
     now = 3_000.0
@@ -151,6 +161,8 @@ def test_concurrent_epoch_advance_rejects_stale_checkpoint_writer(tmp_path, monk
         "expected_epoch_started_at": 0.0,
         "observed_evidence_epoch": 1,
         "observed_epoch_started_at": boundary,
+        "expected_observation_revision": len(configs),
+        "observed_observation_revision": len(configs),
         "new_evaluator_calls": 0,
     }
     assert context.landscape == fallback.landscape
@@ -166,6 +178,15 @@ def test_concurrent_epoch_advance_rejects_stale_checkpoint_writer(tmp_path, monk
         "post_decision_checkpoint_revalidation"
     )
     assert manifest["optimizer_observation_routing_epoch_conflict_action"] == (
+        "pre_observation_fallback"
+    )
+    assert manifest["optimizer_observation_routing_revision_fence"] == (
+        "history_autoincrement_high_water"
+    )
+    assert manifest["optimizer_observation_routing_revision_scope"] == (
+        "no_paid_observation_commit_during_routing_call"
+    )
+    assert manifest["optimizer_observation_routing_revision_conflict_action"] == (
         "pre_observation_fallback"
     )
     assert manifest["optimizer_observation_routing_epoch_fence_authority"] == (
@@ -226,5 +247,109 @@ def test_concurrent_epoch_advance_is_caught_even_without_checkpoint_write(
     assert fence["status"] == "epoch_conflict"
     assert fence["expected_evidence_epoch"] == 0
     assert fence["observed_evidence_epoch"] == 1
+    assert fence["expected_observation_revision"] == len(configs)
+    assert fence["observed_observation_revision"] == len(configs)
+    assert fence["action"] == "pre_observation_fallback"
+    assert context.landscape == fallback.landscape
+
+
+def test_concurrent_paid_observation_commit_rejects_checkpoint_writer(
+    tmp_path,
+    monkeypatch,
+):
+    path = tmp_path / "routing-observation-revision-writer.db"
+    now = 5_000.0
+    _freeze_runtime_clock(monkeypatch, now)
+
+    stale = OptimizerToolRegistry(
+        build_sample_catalog(),
+        memory=AgentMemory(path),
+        optimizer_backend="auto",
+    )
+    writer = OptimizerToolRegistry(
+        build_sample_catalog(),
+        memory=AgentMemory(path),
+        optimizer_backend="auto",
+    )
+    configs = _runtime_configs(stale)
+    _append_paid_observations(stale, configs)
+
+    entered, release = _block_first_observation_read(monkeypatch, stale)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(stale._routing_context, "search")
+        assert entered.wait(10.0)
+        # Keep the same frozen timestamp on purpose. The revision fence must rely
+        # on the history id high-water rather than wall-clock movement.
+        _append_paid_observations(writer, configs)
+        release.set()
+        context = future.result(timeout=15.0)
+
+    store = OptimizerRoutingCheckpointStore(OptimizerMetaMemory(writer.memory))
+    checkpoint = store.read(writer.catalog_key, "search", now=now)
+    manifest = stale.inspect_data()["optimizer_meta_router"]
+    fence = manifest["optimizer_observation_routing_epoch_fence_states"]["search"]
+    fallback = stale._routing_context_without_optimizer_observations("search")
+
+    assert checkpoint is None
+    assert fence == {
+        "status": "observation_conflict",
+        "reason": "concurrent_observation_advance",
+        "action": "pre_observation_fallback",
+        "expected_evidence_epoch": 0,
+        "expected_epoch_started_at": 0.0,
+        "observed_evidence_epoch": 0,
+        "observed_epoch_started_at": 0.0,
+        "expected_observation_revision": len(configs),
+        "observed_observation_revision": 2 * len(configs),
+        "new_evaluator_calls": 0,
+    }
+    assert context.landscape == fallback.landscape
+    assert manifest["optimizer_observation_routing_regimes"]["search"] == "fallback"
+    assert manifest["optimizer_observation_routing_epoch_states"]["search"] == {
+        "evidence_epoch": 0,
+        "epoch_started_at": 0.0,
+    }
+
+
+def test_concurrent_paid_observation_commit_is_caught_without_checkpoint_write(
+    tmp_path,
+    monkeypatch,
+):
+    path = tmp_path / "routing-observation-revision-return.db"
+    now = 6_000.0
+    _freeze_runtime_clock(monkeypatch, now)
+
+    stale = OptimizerToolRegistry(
+        build_sample_catalog(),
+        memory=AgentMemory(path),
+        optimizer_backend="auto",
+    )
+    writer = OptimizerToolRegistry(
+        build_sample_catalog(),
+        memory=AgentMemory(path),
+        optimizer_backend="auto",
+    )
+    configs = _runtime_configs(stale, count=3)
+    _append_paid_observations(stale, configs)
+
+    entered, release = _block_first_observation_read(monkeypatch, stale)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(stale._routing_context, "search")
+        assert entered.wait(10.0)
+        _append_paid_observations(writer, configs)
+        release.set()
+        context = future.result(timeout=15.0)
+
+    store = OptimizerRoutingCheckpointStore(OptimizerMetaMemory(writer.memory))
+    checkpoint = store.read(writer.catalog_key, "search", now=now)
+    manifest = stale.inspect_data()["optimizer_meta_router"]
+    fence = manifest["optimizer_observation_routing_epoch_fence_states"]["search"]
+    fallback = stale._routing_context_without_optimizer_observations("search")
+
+    assert checkpoint is None
+    assert fence["status"] == "observation_conflict"
+    assert fence["reason"] == "concurrent_observation_advance"
+    assert fence["expected_observation_revision"] == len(configs)
+    assert fence["observed_observation_revision"] == 2 * len(configs)
     assert fence["action"] == "pre_observation_fallback"
     assert context.landscape == fallback.landscape
