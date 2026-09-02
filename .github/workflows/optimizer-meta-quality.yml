@@ -167,6 +167,10 @@ jobs:
           assert manifest['optimizer_observation_memory'] == 'evaluator_paid_discovery_rows_only'
           assert manifest['optimizer_observation_history'] == 'bounded_same_config_evaluator_history'
           assert manifest['optimizer_observation_history_retention'] == 192
+          assert manifest['optimizer_observation_history_retention_policy'] == 'current_routing_pair_floor_then_global_recency'
+          assert manifest['optimizer_observation_history_pair_floor'] == 2
+          assert manifest['optimizer_observation_history_pair_scope'] == 'current_latest_read_budget'
+          assert manifest['optimizer_observation_history_pair_scope_rows'] == 48
           assert manifest['optimizer_observation_authority'] == 'routing_descriptor_only'
           assert manifest['optimizer_observation_snapshot'] == 'single_sqlite_read_transaction'
           assert manifest['optimizer_observation_snapshot_scope'] == 'one_routing_decision'
