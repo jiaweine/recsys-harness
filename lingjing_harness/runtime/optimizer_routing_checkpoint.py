@@ -129,6 +129,77 @@ class OptimizerRoutingCheckpointStore:
         )
         return result
 
+    def retire_expired(
+        self,
+        catalog_key: str,
+        domain: str,
+        *,
+        expected_decision_at: float,
+        expected_expires_at: float,
+        observed_at: float | None = None,
+    ) -> dict[str, Any]:
+        """Durably retire one exact expired weighted checkpoint version."""
+
+        domain = str(domain or "").strip()
+        if domain not in {"search", "recommend"}:
+            raise ValueError("optimizer routing checkpoint domain must be search or recommend")
+        catalog_key = self._scoped_catalog_key(catalog_key, domain)
+        expected_decision_at = float(expected_decision_at)
+        expected_expires_at = float(expected_expires_at)
+        if observed_at is None:
+            observed_at = time.time()
+        observed_at = float(observed_at)
+        for value, name in (
+            (expected_decision_at, "expected decision_at"),
+            (expected_expires_at, "expected expires_at"),
+            (observed_at, "observed_at"),
+        ):
+            if not isfinite(value) or value < 0.0:
+                raise ValueError(f"optimizer routing checkpoint {name} must be finite and >= 0")
+
+        with self.memory._lock:
+            connection = self.memory._connect()
+            try:
+                connection.execute("pragma busy_timeout=10000")
+                connection.execute("begin immediate")
+                cursor = connection.execute(
+                    """
+                    update agent_optimizer_routing_checkpoint
+                    set regime='fallback', decision_at=?, expires_at=?
+                    where catalog_key=? and domain=? and regime='weighted'
+                      and decision_at=? and expires_at=? and expires_at < ?
+                    """,
+                    (
+                        observed_at,
+                        observed_at,
+                        catalog_key,
+                        domain,
+                        expected_decision_at,
+                        expected_expires_at,
+                        observed_at,
+                    ),
+                )
+                row = connection.execute(
+                    """
+                    select catalog_key,domain,regime,evidence_updated_at,
+                           evidence_seen_count,evidence_rows,evidence_epoch,
+                           epoch_started_at,decision_at,expires_at
+                    from agent_optimizer_routing_checkpoint
+                    where catalog_key=? and domain=?
+                    """,
+                    (catalog_key, domain),
+                ).fetchone()
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                self.memory._close(connection)
+        return {
+            "retired": bool(cursor.rowcount),
+            **(dict(row) if row is not None else {}),
+        }
+
     def record(
         self,
         catalog_key: str,
@@ -399,6 +470,20 @@ def install_optimizer_routing_checkpoint(optimizer_registry_cls: type) -> None:
             if store is not None
             else None
         )
+        if (
+            store is not None
+            and isinstance(checkpoint, dict)
+            and checkpoint.get("regime") == weighting._ROUTING_REGIME_WEIGHTED
+            and float(checkpoint.get("expires_at", 0.0) or 0.0) < now
+        ):
+            store.retire_expired(
+                self.catalog_key,
+                surface,
+                expected_decision_at=float(checkpoint.get("decision_at", 0.0) or 0.0),
+                expected_expires_at=float(checkpoint.get("expires_at", 0.0) or 0.0),
+                observed_at=now,
+            )
+            checkpoint = store.read(self.catalog_key, surface, now=now)
         if isinstance(checkpoint, dict):
             routing_epoch.set_routing_epoch_state(
                 self,
