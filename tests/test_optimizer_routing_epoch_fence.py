@@ -353,3 +353,78 @@ def test_concurrent_paid_observation_commit_is_caught_without_checkpoint_write(
     assert fence["observed_observation_revision"] == 2 * len(configs)
     assert fence["action"] == "pre_observation_fallback"
     assert context.landscape == fallback.landscape
+
+
+def test_concurrent_checkpoint_retirement_fails_closed_for_inflight_rollback_router(
+    tmp_path,
+    monkeypatch,
+):
+    import lingjing_harness.runtime.optimizer_observation_drift as runtime_drift
+    import lingjing_harness.runtime.optimizer_observation_memory as observation_memory
+    import lingjing_harness.runtime.optimizer_observation_weighting as runtime_weighting
+    import lingjing_harness.runtime.optimizer_routing_checkpoint as runtime_checkpoint
+
+    path = tmp_path / "routing-checkpoint-retirement-fence.db"
+    day = 24.0 * 60.0 * 60.0
+    decision_at = 70_000_000.0
+    rollback_now = decision_at + 2.0 * day
+    expiry_observed_at = decision_at + 4.0 * day
+    clock = {"now": decision_at}
+    monkeypatch.setattr(observation_memory.time, "time", lambda: clock["now"])
+    monkeypatch.setattr(runtime_drift.time, "time", lambda: clock["now"])
+    monkeypatch.setattr(runtime_weighting.time, "time", lambda: clock["now"])
+    monkeypatch.setattr(runtime_checkpoint.time, "time", lambda: clock["now"])
+
+    stale = OptimizerToolRegistry(
+        build_sample_catalog(),
+        memory=AgentMemory(path),
+        optimizer_backend="auto",
+    )
+    winner = OptimizerToolRegistry(
+        build_sample_catalog(),
+        memory=AgentMemory(path),
+        optimizer_backend="auto",
+    )
+    configs = _runtime_configs(stale)
+    _append_paid_observations(stale, configs)
+    store = OptimizerRoutingCheckpointStore(OptimizerMetaMemory(winner.memory))
+    checkpoint = store.record(
+        winner.catalog_key,
+        "search",
+        regime="weighted",
+        evidence_updated_at=decision_at,
+        evidence_seen_count=len(configs),
+        evidence_rows=len(configs),
+        decision_at=decision_at,
+        ttl_seconds=OPTIMIZER_OBSERVATION_REGIME_CHECKPOINT_TTL_SECONDS,
+    )
+    assert checkpoint["recorded"] is True
+
+    clock["now"] = rollback_now
+    entered, release = _block_first_observation_read(monkeypatch, stale)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(stale._routing_context, "search")
+        assert entered.wait(10.0)
+        retired = store.retire_expired(
+            winner.catalog_key,
+            "search",
+            expected_decision_at=checkpoint["decision_at"],
+            expected_expires_at=checkpoint["expires_at"],
+            observed_at=expiry_observed_at,
+        )
+        assert retired["retired"] is True
+        assert retired["regime"] == "fallback"
+        release.set()
+        context = future.result(timeout=15.0)
+
+    current = store.read(winner.catalog_key, "search", now=rollback_now)
+    manifest = stale.inspect_data()["optimizer_meta_router"]
+    fence = manifest["optimizer_observation_routing_epoch_fence_states"]["search"]
+    fallback = stale._routing_context_without_optimizer_observations("search")
+
+    assert current["regime"] == "fallback"
+    assert current["decision_at"] == expiry_observed_at
+    assert current["active_weighted"] is False
+    assert context.landscape == fallback.landscape
+    assert manifest["optimizer_observation_routing_regimes"]["search"] == "fallback"
+    assert fence["action"] == "pre_observation_fallback"
