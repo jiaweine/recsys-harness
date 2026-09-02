@@ -1,3 +1,8 @@
+from __future__ import annotations
+
+import copy
+from uuid import uuid4
+
 from .capabilities import (
     CapabilityContract,
     CapabilityGate,
@@ -39,6 +44,7 @@ from .optimizer_routing_epoch import install_optimizer_routing_epoch_counts
 from .optimizer_routing_epoch_fence import install_optimizer_routing_epoch_fence
 from .perception import PerceptionEngine
 from .policy import OwnedPolicy
+from .run_finalization import AtomicFinalLearningMemory, FINAL_LEARNING_METHOD
 from .semantic_tools import SearchBackendToolRegistry
 from .skill_retention import prune_retired_strategy_history
 from .tools import ToolRegistry
@@ -146,13 +152,14 @@ class AgentHarness(_BaseAgentHarness):
             tools=self.tools.fork(),
         )
 
-    def run(self, *args, **kwargs):
-        """Run, apply process credit, persist mechanism evidence, then prune state."""
+    def finalize_result(self, result: dict) -> dict:
+        """Idempotently finish public learning before a run is durably complete."""
 
-        result = super().run(*args, **kwargs)
-
-        credit = apply_semantic_trajectory_credit(self.memory, result)
         autonomy = result.setdefault("autonomy", {})
+        credit = result.get("policy_credit")
+        if not isinstance(credit, dict):
+            credit = apply_semantic_trajectory_credit(self.memory, result)
+            result["policy_credit"] = credit
         autonomy["policy_credit_assignment"] = {
             "method": credit.get("method"),
             "applied": bool(credit.get("applied")),
@@ -161,9 +168,15 @@ class AgentHarness(_BaseAgentHarness):
             "process_weight": credit.get("process_weight"),
             "adjusted_policy_rows": int(credit.get("adjusted_policy_rows", 0) or 0),
         }
-        result["policy_credit"] = credit
 
-        mechanisms = record_runtime_mechanism_evidence(self.memory, self.catalog_key, result)
+        mechanisms = result.get("mechanism_evidence")
+        if not isinstance(mechanisms, dict):
+            mechanisms = record_runtime_mechanism_evidence(
+                self.memory,
+                self.catalog_key,
+                result,
+            )
+            result["mechanism_evidence"] = mechanisms
         autonomy["mechanism_evidence_graph"] = {
             "method": mechanisms.get("method"),
             "recorded": int(mechanisms.get("recorded", 0) or 0),
@@ -171,10 +184,71 @@ class AgentHarness(_BaseAgentHarness):
             "mechanisms": int(mechanisms.get("mechanisms", 0) or 0),
             "contexts": int(mechanisms.get("contexts", 0) or 0),
         }
-        result["mechanism_evidence"] = mechanisms
 
+        # Both maintenance paths are deletion-only and repeatable. Keep them after
+        # evidence writes so a retry can still replay adaptive invocations until
+        # every correctness-bearing finalizer has committed.
         discard_completed_run_invocations(self.memory, str(result.get("run_id") or ""))
         prune_retired_strategy_history(self.memory)
+        return result
+
+    def run(self, *args, **kwargs):
+        """Run and publish a completed checkpoint only after all learning commits."""
+
+        resume = kwargs.get("resume")
+        explicit_key = str(getattr(self, "_finalization_event_key", "") or "").strip()
+        if explicit_key:
+            event_key = explicit_key
+        elif isinstance(resume, dict) and resume.get("run_id"):
+            event_key = f"harness:{resume['run_id']}"
+        else:
+            event_key = f"harness-call:{uuid4().hex}"
+
+        original_memory = self.memory
+        final_memory = AtomicFinalLearningMemory(original_memory, event_key)
+        original_checkpoint_sink = kwargs.get("checkpoint_sink")
+        completed_checkpoint: dict | None = None
+        run_kwargs = dict(kwargs)
+
+        if callable(original_checkpoint_sink):
+            def commit_aware_checkpoint(payload):
+                nonlocal completed_checkpoint
+                if (
+                    isinstance(payload, dict)
+                    and payload.get("status") == "completed"
+                    and isinstance(payload.get("result"), dict)
+                ):
+                    # The base harness has completed verifier + base learning, but
+                    # semantic credit/mechanism evidence still belong to the same
+                    # logical transaction boundary. Withhold this marker until the
+                    # public finalizers below have durably finished.
+                    completed_checkpoint = copy.deepcopy(payload)
+                    return
+                original_checkpoint_sink(payload)
+
+            run_kwargs["checkpoint_sink"] = commit_aware_checkpoint
+
+        self.memory = final_memory
+        try:
+            result = super().run(*args, **run_kwargs)
+        finally:
+            self.memory = original_memory
+
+        commit = final_memory.last_commit
+        if isinstance(commit, dict):
+            result.setdefault("autonomy", {})["final_learning_commit"] = {
+                "method": commit.get("method") or FINAL_LEARNING_METHOD,
+                "atomic": bool(commit.get("atomic")),
+                "applied": bool(commit.get("applied")),
+                "deduplicated": bool(commit.get("deduplicated")),
+                "policy_actions": int(commit.get("policy_actions", 0) or 0),
+            }
+
+        result = self.finalize_result(result)
+
+        if completed_checkpoint is not None and callable(original_checkpoint_sink):
+            completed_checkpoint["result"] = copy.deepcopy(result)
+            original_checkpoint_sink(completed_checkpoint)
         return result
 
 
