@@ -21,6 +21,7 @@ OPTIMIZER_OBSERVATION_READ_BUDGET = 48
 OPTIMIZER_OBSERVATION_RETENTION = 96
 OPTIMIZER_OBSERVATION_HISTORY_RETENTION = 2 * OPTIMIZER_OBSERVATION_RETENTION
 OPTIMIZER_OBSERVATION_HISTORY_READ_BUDGET = OPTIMIZER_OBSERVATION_HISTORY_RETENTION
+OPTIMIZER_OBSERVATION_HISTORY_PAIR_FLOOR = 2
 OPTIMIZER_OBSERVATION_HISTORY_RETENTION_ORDER = "autoincrement_commit_order"
 OPTIMIZER_OBSERVATION_LATEST_SELECTION_ORDER = "retained_history_commit_order_then_updated_at"
 _INSTALLED = False
@@ -159,6 +160,85 @@ def _prune_latest_observations(
             domain,
             OPTIMIZER_OBSERVATION_RETENTION,
         ),
+    )
+
+
+def _prune_optimizer_observation_history(
+    connection: Any,
+    *,
+    catalog_key: str,
+    domain: str,
+) -> None:
+    """Preserve pair depth for current routing configs, then fill by commit order."""
+
+    current_keys = [
+        str(row["config_key"])
+        for row in _latest_observation_rows(
+            connection,
+            catalog_key=catalog_key,
+            domain=domain,
+            limit=OPTIMIZER_OBSERVATION_READ_BUDGET,
+        )
+    ]
+
+    reserved_ids: list[int] = []
+    reserved_set: set[int] = set()
+    for config_key in current_keys:
+        for row in connection.execute(
+            """
+            select id from agent_optimizer_observation_history
+            where catalog_key=? and domain=? and config_key=?
+            order by id desc limit ?
+            """,
+            (
+                catalog_key,
+                domain,
+                config_key,
+                OPTIMIZER_OBSERVATION_HISTORY_PAIR_FLOOR,
+            ),
+        ).fetchall():
+            row_id = int(row[0])
+            if row_id not in reserved_set:
+                reserved_ids.append(row_id)
+                reserved_set.add(row_id)
+
+    keep_ids = list(reserved_ids)
+    keep_set = set(reserved_set)
+    if len(keep_ids) < OPTIMIZER_OBSERVATION_HISTORY_RETENTION:
+        for row in connection.execute(
+            """
+            select id from agent_optimizer_observation_history
+            where catalog_key=? and domain=?
+            order by id desc limit ?
+            """,
+            (
+                catalog_key,
+                domain,
+                OPTIMIZER_OBSERVATION_HISTORY_RETENTION,
+            ),
+        ).fetchall():
+            row_id = int(row[0])
+            if row_id in keep_set:
+                continue
+            keep_ids.append(row_id)
+            keep_set.add(row_id)
+            if len(keep_ids) >= OPTIMIZER_OBSERVATION_HISTORY_RETENTION:
+                break
+
+    if not keep_ids:
+        connection.execute(
+            "delete from agent_optimizer_observation_history where catalog_key=? and domain=?",
+            (catalog_key, domain),
+        )
+        return
+
+    placeholders = ",".join("?" for _ in keep_ids)
+    connection.execute(
+        f"""
+        delete from agent_optimizer_observation_history
+        where catalog_key=? and domain=? and id not in ({placeholders})
+        """,
+        (catalog_key, domain, *keep_ids),
     )
 
 
@@ -301,26 +381,13 @@ def _record_optimizer_observations(
                 catalog_key=catalog_key,
                 domain=domain,
             )
-            # The routing revision fence uses the per-scope maximum history id as
-            # its commit high-water. Retain by AUTOINCREMENT id, not wall clock, so
-            # a newly committed observation cannot be pruned immediately by clock
-            # rollback or cross-process timestamp skew before the fence can see it.
-            conn.execute(
-                """
-                delete from agent_optimizer_observation_history
-                where catalog_key=? and domain=? and id not in (
-                  select id from agent_optimizer_observation_history
-                  where catalog_key=? and domain=?
-                  order by id desc limit ?
-                )
-                """,
-                (
-                    catalog_key,
-                    domain,
-                    catalog_key,
-                    domain,
-                    OPTIMIZER_OBSERVATION_HISTORY_RETENTION,
-                ),
+            # The routing revision fence uses the per-scope maximum history id as its
+            # commit high-water. Pair-floor retention keeps that maximum while also
+            # preserving two paid rows for every config in the current routing set.
+            _prune_optimizer_observation_history(
+                conn,
+                catalog_key=catalog_key,
+                domain=domain,
             )
             conn.commit()
         except Exception:
@@ -552,6 +619,10 @@ def install_optimizer_observation_runtime(agent_memory_cls: type, optimizer_regi
                 "optimizer_observation_latest_selection_order": OPTIMIZER_OBSERVATION_LATEST_SELECTION_ORDER,
                 "optimizer_observation_history_retention": OPTIMIZER_OBSERVATION_HISTORY_RETENTION,
                 "optimizer_observation_history_retention_order": OPTIMIZER_OBSERVATION_HISTORY_RETENTION_ORDER,
+                "optimizer_observation_history_retention_policy": "current_routing_pair_floor_then_commit_order",
+                "optimizer_observation_history_pair_floor": OPTIMIZER_OBSERVATION_HISTORY_PAIR_FLOOR,
+                "optimizer_observation_history_pair_scope": "current_latest_read_budget",
+                "optimizer_observation_history_pair_scope_rows": OPTIMIZER_OBSERVATION_READ_BUDGET,
                 "optimizer_observation_feasibility": "discovery_robustness_guardrails",
                 "optimizer_observation_authority": "routing_descriptor_only",
                 "optimizer_observation_read_budget": OPTIMIZER_OBSERVATION_READ_BUDGET,
@@ -566,6 +637,7 @@ def install_optimizer_observation_runtime(agent_memory_cls: type, optimizer_regi
 
 
 __all__ = [
+    "OPTIMIZER_OBSERVATION_HISTORY_PAIR_FLOOR",
     "OPTIMIZER_OBSERVATION_HISTORY_READ_BUDGET",
     "OPTIMIZER_OBSERVATION_HISTORY_RETENTION",
     "OPTIMIZER_OBSERVATION_HISTORY_RETENTION_ORDER",

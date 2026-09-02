@@ -301,3 +301,113 @@ def test_runtime_uses_basis_matched_same_config_feasibility_change_as_routing_on
     assert manifest["optimizer_observation_drift_same_config_min_pairs"] == 4
     assert manifest["optimizer_observation_drift_authority"] == "routing_descriptor_only"
     assert manifest["optimizer_observation_drift_evaluator_calls"] == 0
+
+
+def test_hot_config_cannot_evict_current_routing_prior_pairs(tmp_path, monkeypatch):
+    import lingjing_harness.runtime.optimizer_observation_drift as runtime_drift
+    import lingjing_harness.runtime.optimizer_observation_memory as observation_memory
+    import lingjing_harness.runtime.optimizer_observation_weighting as runtime_weighting
+    import lingjing_harness.runtime.optimizer_routing_checkpoint as runtime_checkpoint
+
+    path = tmp_path / "optimizer-history-hot-config.db"
+    registry = OptimizerToolRegistry(
+        build_sample_catalog(),
+        memory=AgentMemory(path),
+        optimizer_backend="auto",
+    )
+    clock = {"now": 1_000.0}
+    monkeypatch.setattr(observation_memory.time, "time", lambda: clock["now"])
+    monkeypatch.setattr(runtime_drift.time, "time", lambda: clock["now"])
+    monkeypatch.setattr(runtime_weighting.time, "time", lambda: clock["now"])
+    monkeypatch.setattr(runtime_checkpoint.time, "time", lambda: clock["now"])
+
+    prior_rows = _runtime_observations(registry, [False, False, False, False])
+    registry.memory.record_optimizer_observations(
+        registry.catalog_key,
+        "search",
+        prior_rows,
+    )
+
+    clock["now"] = 2_000.0
+    recent_rows = _runtime_observations(registry, [True, True, True, True])
+    registry.memory.record_optimizer_observations(
+        registry.catalog_key,
+        "search",
+        recent_rows,
+    )
+
+    # One still-current hot config gets enough paid re-evaluations to overflow the
+    # 192-row history by exactly four rows. Pure global commit-order retention evicts
+    # the four t=1000 prior rows above and turns a real 4/4 feasibility flip into a
+    # false negative. Pair-floor retention must keep those paid priors without
+    # capping the hot config's repeated-evidence history to two rows.
+    clock["now"] = 3_000.0
+    hot_config = asdict(registry.search.config)
+    target_keys = {
+        observation_memory._config_key(row["config"])
+        for row in recent_rows
+    }
+    hot_key = observation_memory._config_key(hot_config)
+    assert hot_key not in target_keys
+    hot_template = {
+        "config": hot_config,
+        "objective": 0.95,
+        "feasible": True,
+        "source": "hot_history_contract_evaluator",
+        "generation": 100,
+        "feasibility_basis": BASIS,
+        "constraints": {"worse_share": 0.05, "worst_delta": -0.05},
+    }
+    hot_rows = [
+        {**hot_template, "generation": 100 + index}
+        for index in range(188)
+    ]
+    hot_summary = registry.memory.record_optimizer_observations(
+        registry.catalog_key,
+        "search",
+        hot_rows,
+    )
+
+    latest = registry.memory.optimizer_observations(registry.catalog_key, "search")
+    history = registry.memory.optimizer_observation_history(
+        registry.catalog_key,
+        "search",
+    )
+    history_counts = {}
+    for row in history:
+        history_counts[row["config_key"]] = history_counts.get(row["config_key"], 0) + 1
+
+    assert hot_summary["captured_rows"] == 188
+    assert len(latest) == 5
+    assert len(history) == observation_memory.OPTIMIZER_OBSERVATION_HISTORY_RETENTION == 192
+    assert all(history_counts.get(config_key) == 2 for config_key in target_keys)
+    assert history_counts.get(hot_key) == 184
+    assert sum(history_counts.values()) == 192
+    latest_by_key = {
+        observation_memory._config_key(row["config"]): row
+        for row in latest
+    }
+    assert all(latest_by_key[key]["seen_count"] == 2 for key in target_keys)
+    assert latest_by_key[hot_key]["seen_count"] == 188
+
+    registry._routing_context("search")
+    manifest = registry.inspect_data()["optimizer_meta_router"]
+    state = manifest["optimizer_observation_drift_states"]["search"]
+
+    assert state["change_detected"] is True
+    assert "same_config_feasibility_shift" in state["primary_signals"]
+    assert state["same_config_feasibility_pairs"] == 4
+    assert state["same_config_feasibility_flips"] == 4
+    assert state["same_config_feasibility_flip_rate"] == pytest.approx(1.0)
+    assert manifest["optimizer_observation_history_retention"] == 192
+    assert manifest["optimizer_observation_history_retention_order"] == "autoincrement_commit_order"
+    assert (
+        manifest["optimizer_observation_history_retention_policy"]
+        == "current_routing_pair_floor_then_commit_order"
+    )
+    assert manifest["optimizer_observation_history_pair_floor"] == 2
+    assert manifest["optimizer_observation_history_pair_scope"] == "current_latest_read_budget"
+    assert manifest["optimizer_observation_history_pair_scope_rows"] == 48
+    assert manifest["optimizer_observation_authority"] == "routing_descriptor_only"
+    assert manifest["optimizer_observation_drift_authority"] == "routing_descriptor_only"
+    assert manifest["optimizer_observation_drift_evaluator_calls"] == 0
