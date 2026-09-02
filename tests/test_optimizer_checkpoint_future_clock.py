@@ -283,3 +283,138 @@ def test_restart_does_not_restore_checkpoint_decided_ahead_of_caller_clock(
     assert restored["decision_at"] == decision_at
     assert restored["active_weighted"] is False
     assert context.landscape.informative is False
+
+
+def test_expired_checkpoint_does_not_resurrect_after_restart_clock_rollback(
+    tmp_path,
+    monkeypatch,
+):
+    import lingjing_harness.runtime.optimizer_observation_drift as runtime_drift
+    import lingjing_harness.runtime.optimizer_observation_memory as observation_memory
+    import lingjing_harness.runtime.optimizer_observation_weighting as runtime_weighting
+    import lingjing_harness.runtime.optimizer_routing_checkpoint as runtime_checkpoint
+
+    path = tmp_path / "expired-checkpoint-rollback.db"
+    decision_at = 50_000_000.0
+    clock = {"now": decision_at - 5.0 * DAY}
+    monkeypatch.setattr(observation_memory.time, "time", lambda: clock["now"])
+    monkeypatch.setattr(runtime_drift.time, "time", lambda: clock["now"])
+    monkeypatch.setattr(runtime_weighting.time, "time", lambda: clock["now"])
+    monkeypatch.setattr(runtime_checkpoint.time, "time", lambda: clock["now"])
+
+    registry = OptimizerToolRegistry(
+        build_sample_catalog(),
+        memory=AgentMemory(path),
+        optimizer_backend="auto",
+    )
+    rows = _runtime_rows(registry)
+    registry.memory.record_optimizer_observations(
+        registry.catalog_key,
+        "search",
+        rows[:1],
+    )
+    clock["now"] = decision_at
+    registry.memory.record_optimizer_observations(
+        registry.catalog_key,
+        "search",
+        rows[1:],
+    )
+
+    store = OptimizerRoutingCheckpointStore(registry.optimizer_meta_memory)
+    checkpoint = store.record(
+        registry.catalog_key,
+        "search",
+        regime="weighted",
+        evidence_updated_at=decision_at,
+        evidence_seen_count=4,
+        evidence_rows=4,
+        epoch_started_at=0.0,
+        decision_at=decision_at,
+        ttl_seconds=OPTIMIZER_OBSERVATION_REGIME_CHECKPOINT_TTL_SECONDS,
+    )
+    assert checkpoint["recorded"] is True
+
+    # The later process genuinely observes this checkpoint after its TTL. The
+    # current evidence is too decayed to stay weighted, so routing falls back.
+    clock["now"] = decision_at + 4.0 * DAY
+    expired_registry = OptimizerToolRegistry(
+        build_sample_catalog(),
+        memory=AgentMemory(path),
+        optimizer_backend="auto",
+    )
+    expired_context = expired_registry._routing_context("search")
+    expired_checkpoint = expired_registry._optimizer_routing_checkpoint_store.read(
+        expired_registry.catalog_key,
+        "search",
+        now=clock["now"],
+    )
+    assert expired_checkpoint["regime"] == "fallback"
+    assert expired_checkpoint["decision_at"] == clock["now"]
+    assert expired_checkpoint["expires_at"] == clock["now"]
+    assert expired_checkpoint["active_weighted"] is False
+    assert expired_context.landscape.informative is False
+
+    # A restart then sees a rolled-back wall clock that lies inside the original
+    # TTL. Evidence only satisfies the stay band, not the enter gate. A durable
+    # checkpoint already observed expired must not regain cold-start authority.
+    clock["now"] = decision_at + 1.0 * DAY
+    rollback_registry = OptimizerToolRegistry(
+        build_sample_catalog(),
+        memory=AgentMemory(path),
+        optimizer_backend="auto",
+    )
+    rollback_context = rollback_registry._routing_context("search")
+    resurrected = rollback_registry._optimizer_routing_checkpoint_store.read(
+        rollback_registry.catalog_key,
+        "search",
+        now=clock["now"],
+    )
+
+    assert resurrected["regime"] == "fallback"
+    assert resurrected["active_weighted"] is False
+    assert rollback_context.landscape.informative is False
+
+
+def test_expiry_retirement_cas_does_not_clobber_refreshed_checkpoint(tmp_path):
+    _, store = _store(tmp_path, "expiry-retirement-cas.db")
+    decision_at = 60_000.0
+    ttl = 100.0
+
+    initial = store.record(
+        "catalog",
+        "search",
+        regime="weighted",
+        evidence_updated_at=decision_at,
+        evidence_seen_count=4,
+        evidence_rows=4,
+        decision_at=decision_at,
+        ttl_seconds=ttl,
+    )
+    stale = store.read("catalog", "search", now=decision_at + ttl + 1.0)
+    assert initial["recorded"] is True
+    assert stale["active_weighted"] is False
+
+    refreshed = store.record(
+        "catalog",
+        "search",
+        regime="weighted",
+        evidence_updated_at=decision_at,
+        evidence_seen_count=4,
+        evidence_rows=4,
+        decision_at=decision_at + ttl + 2.0,
+        ttl_seconds=ttl,
+    )
+    retired = store.retire_expired(
+        "catalog",
+        "search",
+        expected_decision_at=stale["decision_at"],
+        expected_expires_at=stale["expires_at"],
+        observed_at=decision_at + ttl + 3.0,
+    )
+    current = store.read("catalog", "search", now=decision_at + ttl + 3.0)
+
+    assert refreshed["recorded"] is True
+    assert retired["retired"] is False
+    assert retired["regime"] == "weighted"
+    assert retired["decision_at"] == refreshed["decision_at"]
+    assert current["active_weighted"] is True
