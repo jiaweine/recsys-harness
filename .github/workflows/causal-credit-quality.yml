@@ -11,6 +11,7 @@ on:
       - 'lingjing_harness/runtime/credit_assignment.py'
       - 'lingjing_harness/runtime/mechanism_graph.py'
       - 'lingjing_harness/runtime/mechanism_transfer.py'
+      - 'lingjing_harness/runtime/run_finalization.py'
       - 'lingjing_harness/runtime/__init__.py'
       - 'lingjing_harness/ontology/xushu-mechanism.ttl'
       - 'lingjing_harness/ontology/xushu-mechanism-shapes.ttl'
@@ -18,6 +19,7 @@ on:
       - 'tests/test_counterfactual_robust.py'
       - 'tests/test_credit_assignment.py'
       - 'tests/test_mechanism_graph.py'
+      - 'tests/test_run_finalization_crash_consistency.py'
       - 'tests/test_basin_routing.py'
   pull_request:
     paths:
@@ -29,6 +31,7 @@ on:
       - 'lingjing_harness/runtime/credit_assignment.py'
       - 'lingjing_harness/runtime/mechanism_graph.py'
       - 'lingjing_harness/runtime/mechanism_transfer.py'
+      - 'lingjing_harness/runtime/run_finalization.py'
       - 'lingjing_harness/runtime/__init__.py'
       - 'lingjing_harness/ontology/xushu-mechanism.ttl'
       - 'lingjing_harness/ontology/xushu-mechanism-shapes.ttl'
@@ -36,6 +39,7 @@ on:
       - 'tests/test_counterfactual_robust.py'
       - 'tests/test_credit_assignment.py'
       - 'tests/test_mechanism_graph.py'
+      - 'tests/test_run_finalization_crash_consistency.py'
       - 'tests/test_basin_routing.py'
   workflow_dispatch:
 
@@ -60,6 +64,7 @@ jobs:
           tests/test_counterfactual_robust.py
           tests/test_credit_assignment.py
           tests/test_mechanism_graph.py
+          tests/test_run_finalization_crash_consistency.py
           tests/test_basin_routing.py
       - name: Run causal, credit, and mechanism quality gates
         run: >-
@@ -68,4 +73,5 @@ jobs:
           tests/test_counterfactual_robust.py
           tests/test_credit_assignment.py
           tests/test_mechanism_graph.py
+          tests/test_run_finalization_crash_consistency.py
           tests/test_basin_routing.py
