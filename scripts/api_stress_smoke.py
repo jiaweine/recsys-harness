@@ -33,7 +33,11 @@ async def _exercise_api(workers: int, race: int) -> dict[str, Any]:
     transport = ASGITransport(app=api_module.app)
 
     async with api_module.lifespan(api_module.app):
-        async with AsyncClient(transport=transport, base_url="http://xushu.test") as client:
+        # This is an in-process ASGI client, not a public deployment hostname.
+        # Use the standard trusted synthetic host so the stress harness exercises
+        # the same Host boundary as TestClient without weakening production
+        # LINGJING_ALLOWED_HOSTS defaults.
+        async with AsyncClient(transport=transport, base_url="http://testserver") as client:
             status = await client.get("/api/status")
             if status.status_code != 200:
                 raise AssertionError(f"status failed: {status.status_code} {status.text}")
