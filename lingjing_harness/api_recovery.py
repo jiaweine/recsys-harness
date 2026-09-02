@@ -23,6 +23,8 @@ def install_startup_recovery_batching(core: Any) -> None:
 
     original_recover = core._recover_on_startup
     original_claim = core.store.claim_recoverable_runs
+    store_had_instance_claim = "claim_recoverable_runs" in vars(core.store)
+    original_instance_claim = vars(core.store).get("claim_recoverable_runs")
 
     async def recover_without_batch_starvation() -> None:
         def claim_all_currently_recoverable(
@@ -57,7 +59,10 @@ def install_startup_recovery_batching(core: Any) -> None:
         try:
             await original_recover()
         finally:
-            core.store.claim_recoverable_runs = original_claim
+            if store_had_instance_claim:
+                core.store.claim_recoverable_runs = original_instance_claim
+            else:
+                delattr(core.store, "claim_recoverable_runs")
 
     core._recover_on_startup = recover_without_batch_starvation
     core._STARTUP_RECOVERY_BATCHING_INSTALLED = True
