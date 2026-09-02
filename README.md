@@ -71,7 +71,7 @@ xushu-harness "做一次全局体检"
 
 <p align="center"><sub>DESKTOP · FULL WORKSPACE</sub></p>
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@089bd5967642e1798e6aeab1a43a244d0e5b656a/docs/readme-assets/overview.png" alt="序枢真实运行界面" width="96%">
+  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@bedaae0c5810a77bb13d63c357c6b044a847b458/docs/readme-assets/overview.png" alt="序枢真实运行界面" width="96%">
 </p>
 <p align="center"><sub>目标、对话、运行状态、证据、附件与可恢复执行保持在同一个任务上下文。</sub></p>
 
@@ -82,12 +82,12 @@ xushu-harness "做一次全局体检"
     <td width="50%" valign="top" align="center">
       <strong>任务工作台</strong><br>
       <sub>目标、附件、联网权限与执行入口位于同一操作面。</sub><br><br>
-      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@089bd5967642e1798e6aeab1a43a244d0e5b656a/docs/readme-assets/workbench.png" alt="序枢工作台" width="100%">
+      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@bedaae0c5810a77bb13d63c357c6b044a847b458/docs/readme-assets/workbench.png" alt="序枢工作台" width="100%">
     </td>
     <td width="50%" valign="top" align="center">
       <strong>证据与判断</strong><br>
       <sub>动作、轨迹、来源、验证结果与结论集中在检查视图。</sub><br><br>
-      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@089bd5967642e1798e6aeab1a43a244d0e5b656a/docs/readme-assets/evidence.png" alt="序枢证据面板" width="100%">
+      <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@bedaae0c5810a77bb13d63c357c6b044a847b458/docs/readme-assets/evidence.png" alt="序枢证据面板" width="100%">
     </td>
   </tr>
 </table>
@@ -101,9 +101,9 @@ xushu-harness "做一次全局体检"
     <td width="33%" valign="top" align="center"><strong>03 · 判断依据</strong><br><sub>证据 / 来源</sub></td>
   </tr>
   <tr>
-    <td width="33%" valign="top" align="center"><img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@089bd5967642e1798e6aeab1a43a244d0e5b656a/docs/readme-assets/mobile-workspace.png" alt="序枢移动端主任务" width="92%"></td>
-    <td width="33%" valign="top" align="center"><img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@089bd5967642e1798e6aeab1a43a244d0e5b656a/docs/readme-assets/mobile-progress.png" alt="序枢移动端执行轨迹" width="92%"></td>
-    <td width="33%" valign="top" align="center"><img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@089bd5967642e1798e6aeab1a43a244d0e5b656a/docs/readme-assets/mobile-evidence.png" alt="序枢移动端判断依据" width="92%"></td>
+    <td width="33%" valign="top" align="center"><img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@bedaae0c5810a77bb13d63c357c6b044a847b458/docs/readme-assets/mobile-workspace.png" alt="序枢移动端主任务" width="92%"></td>
+    <td width="33%" valign="top" align="center"><img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@bedaae0c5810a77bb13d63c357c6b044a847b458/docs/readme-assets/mobile-progress.png" alt="序枢移动端执行轨迹" width="92%"></td>
+    <td width="33%" valign="top" align="center"><img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@bedaae0c5810a77bb13d63c357c6b044a847b458/docs/readme-assets/mobile-evidence.png" alt="序枢移动端判断依据" width="92%"></td>
   </tr>
 </table>
 
@@ -447,7 +447,7 @@ Elasticsearch、OpenSearch、Vespa、内部 rank API、已有 recommendation ser
 
 <p align="center"><sub>AGENT HARNESS RUNTIME · CONTROL · EVIDENCE · EVOLUTION · TRUST · STATE</sub></p>
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@089bd5967642e1798e6aeab1a43a244d0e5b656a/docs/readme-assets/architecture.svg" alt="序枢 system architecture" width="97%">
+  <img src="https://cdn.jsdelivr.net/gh/jiaweine/recsys-harness@bedaae0c5810a77bb13d63c357c6b044a847b458/docs/readme-assets/architecture.svg" alt="序枢 system architecture" width="97%">
 </p>
 
 ```text
