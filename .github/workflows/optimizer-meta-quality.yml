@@ -167,6 +167,7 @@ jobs:
           assert manifest['optimizer_observation_memory'] == 'evaluator_paid_discovery_rows_only'
           assert manifest['optimizer_observation_history'] == 'bounded_same_config_evaluator_history'
           assert manifest['optimizer_observation_history_retention'] == 192
+          assert manifest['optimizer_observation_history_retention_order'] == 'autoincrement_commit_order'
           assert manifest['optimizer_observation_authority'] == 'routing_descriptor_only'
           assert manifest['optimizer_observation_snapshot'] == 'single_sqlite_read_transaction'
           assert manifest['optimizer_observation_snapshot_scope'] == 'one_routing_decision'
@@ -208,6 +209,9 @@ jobs:
           assert manifest['optimizer_observation_routing_epoch_cas'] == 'transactional_expected_epoch_token'
           assert manifest['optimizer_observation_routing_epoch_return_validation'] == 'post_decision_checkpoint_revalidation'
           assert manifest['optimizer_observation_routing_epoch_conflict_action'] == 'pre_observation_fallback'
+          assert manifest['optimizer_observation_routing_revision_fence'] == 'history_autoincrement_high_water'
+          assert manifest['optimizer_observation_routing_revision_scope'] == 'no_paid_observation_commit_during_routing_call'
+          assert manifest['optimizer_observation_routing_revision_conflict_action'] == 'pre_observation_fallback'
           assert manifest['optimizer_observation_routing_epoch_fence_authority'] == 'routing_descriptor_only'
           assert manifest['optimizer_observation_routing_epoch_fence_evaluator_calls'] == 0
           assert manifest['optimizer_observation_weighting_authority'] == 'routing_descriptor_only'

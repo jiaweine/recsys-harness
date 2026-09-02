@@ -8,6 +8,8 @@ from lingjing_harness.algorithms.optimizer_meta import (
     rank_optimizer_backends,
 )
 from lingjing_harness.runtime import AgentMemory
+from lingjing_harness.runtime import optimizer_observation_memory as observation_memory
+from lingjing_harness.runtime import optimizer_routing_epoch_fence as routing_epoch_fence
 from lingjing_harness.runtime.backend_memory import BackendScopedMemory
 from lingjing_harness.runtime.optimizer_tools import OptimizerToolRegistry
 from lingjing_harness.sample_data import build_sample_catalog
@@ -312,3 +314,70 @@ def test_backend_scoped_optimizer_observations_do_not_cross_serving_namespaces()
 
     assert len(scoped_rows) == 1
     assert unscoped_rows == []
+
+
+def test_history_retention_uses_commit_sequence_when_clock_moves_backward(monkeypatch):
+    registry = OptimizerToolRegistry(build_sample_catalog(), optimizer_backend="auto")
+    retention = observation_memory.OPTIMIZER_OBSERVATION_HISTORY_RETENTION
+    repeated = [
+        {
+            "config": {"x": 0.25},
+            "objective": 0.1 + index / 10_000.0,
+            "feasible": True,
+            "source": "clock_skew_contract",
+            "generation": index,
+            "feasibility_basis": "search_discovery_robustness_guardrails",
+            "constraints": {},
+        }
+        for index in range(retention)
+    ]
+
+    monkeypatch.setattr(observation_memory.time, "time", lambda: 1_000.0)
+    first = registry.memory.record_optimizer_observations(
+        registry.catalog_key,
+        "search",
+        repeated,
+    )
+    before = routing_epoch_fence._read_observation_revision(registry, "search")
+
+    assert first["history_rows"] == retention
+    assert before is not None
+    assert before["high_water"] == retention
+
+    monkeypatch.setattr(observation_memory.time, "time", lambda: 500.0)
+    next_row = {
+        "config": {"x": 0.25},
+        "objective": 9.9,
+        "feasible": False,
+        "source": "clock_skew_contract",
+        "generation": retention,
+        "feasibility_basis": "search_discovery_robustness_guardrails",
+        "constraints": {"worse_share": 0.9},
+    }
+    second = registry.memory.record_optimizer_observations(
+        registry.catalog_key,
+        "search",
+        [next_row],
+    )
+    after = routing_epoch_fence._read_observation_revision(registry, "search")
+    history = registry.memory.optimizer_observation_history(
+        registry.catalog_key,
+        "search",
+    )
+    latest = registry.memory.optimizer_observations(
+        registry.catalog_key,
+        "search",
+    )
+    manifest = registry.inspect_data()["optimizer_meta_router"]
+
+    assert second["updated_rows"] == 1
+    assert second["history_rows"] == 1
+    assert after is not None
+    assert after["high_water"] == retention + 1
+    assert len(history) == retention
+    assert history[-1]["objective"] == 9.9
+    assert latest[0]["objective"] == 9.9
+    assert latest[0]["feasible"] is False
+    assert manifest["optimizer_observation_history_retention_order"] == (
+        "autoincrement_commit_order"
+    )
