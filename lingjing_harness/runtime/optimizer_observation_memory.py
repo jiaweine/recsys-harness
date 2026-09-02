@@ -21,6 +21,7 @@ OPTIMIZER_OBSERVATION_READ_BUDGET = 48
 OPTIMIZER_OBSERVATION_RETENTION = 96
 OPTIMIZER_OBSERVATION_HISTORY_RETENTION = 2 * OPTIMIZER_OBSERVATION_RETENTION
 OPTIMIZER_OBSERVATION_HISTORY_READ_BUDGET = OPTIMIZER_OBSERVATION_HISTORY_RETENTION
+OPTIMIZER_OBSERVATION_HISTORY_PAIR_FLOOR = 2
 _INSTALLED = False
 
 
@@ -89,6 +90,86 @@ def _ensure_optimizer_observation_table(memory: Any) -> None:
             conn.commit()
         finally:
             memory._close(conn)
+
+
+def _prune_optimizer_observation_history(
+    connection: Any,
+    catalog_key: str,
+    domain: str,
+) -> None:
+    """Keep current routing configs pairable before filling by global recency."""
+
+    current_keys = [
+        str(row[0])
+        for row in connection.execute(
+            """
+            select config_key from agent_optimizer_observations
+            where catalog_key=? and domain=?
+            order by updated_at desc, config_key asc limit ?
+            """,
+            (catalog_key, domain, OPTIMIZER_OBSERVATION_READ_BUDGET),
+        ).fetchall()
+    ]
+
+    reserved_ids: list[int] = []
+    reserved_set: set[int] = set()
+    for config_key in current_keys:
+        for row in connection.execute(
+            """
+            select id from agent_optimizer_observation_history
+            where catalog_key=? and domain=? and config_key=?
+            order by observed_at desc, id desc limit ?
+            """,
+            (
+                catalog_key,
+                domain,
+                config_key,
+                OPTIMIZER_OBSERVATION_HISTORY_PAIR_FLOOR,
+            ),
+        ).fetchall():
+            row_id = int(row[0])
+            if row_id not in reserved_set:
+                reserved_ids.append(row_id)
+                reserved_set.add(row_id)
+
+    keep_ids = list(reserved_ids)
+    keep_set = set(reserved_set)
+    if len(keep_ids) < OPTIMIZER_OBSERVATION_HISTORY_RETENTION:
+        for row in connection.execute(
+            """
+            select id from agent_optimizer_observation_history
+            where catalog_key=? and domain=?
+            order by observed_at desc, id desc limit ?
+            """,
+            (
+                catalog_key,
+                domain,
+                OPTIMIZER_OBSERVATION_HISTORY_RETENTION,
+            ),
+        ).fetchall():
+            row_id = int(row[0])
+            if row_id in keep_set:
+                continue
+            keep_ids.append(row_id)
+            keep_set.add(row_id)
+            if len(keep_ids) >= OPTIMIZER_OBSERVATION_HISTORY_RETENTION:
+                break
+
+    if not keep_ids:
+        connection.execute(
+            "delete from agent_optimizer_observation_history where catalog_key=? and domain=?",
+            (catalog_key, domain),
+        )
+        return
+
+    placeholders = ",".join("?" for _ in keep_ids)
+    connection.execute(
+        f"""
+        delete from agent_optimizer_observation_history
+        where catalog_key=? and domain=? and id not in ({placeholders})
+        """,
+        (catalog_key, domain, *keep_ids),
+    )
 
 
 def _record_optimizer_observations(
@@ -240,23 +321,7 @@ def _record_optimizer_observations(
                     OPTIMIZER_OBSERVATION_RETENTION,
                 ),
             )
-            conn.execute(
-                """
-                delete from agent_optimizer_observation_history
-                where catalog_key=? and domain=? and id not in (
-                  select id from agent_optimizer_observation_history
-                  where catalog_key=? and domain=?
-                  order by observed_at desc, id desc limit ?
-                )
-                """,
-                (
-                    catalog_key,
-                    domain,
-                    catalog_key,
-                    domain,
-                    OPTIMIZER_OBSERVATION_HISTORY_RETENTION,
-                ),
-            )
+            _prune_optimizer_observation_history(conn, catalog_key, domain)
             conn.commit()
         except Exception:
             conn.rollback()
@@ -488,6 +553,10 @@ def install_optimizer_observation_runtime(agent_memory_cls: type, optimizer_regi
                 "optimizer_observation_memory": "evaluator_paid_discovery_rows_only",
                 "optimizer_observation_history": "bounded_same_config_evaluator_history",
                 "optimizer_observation_history_retention": OPTIMIZER_OBSERVATION_HISTORY_RETENTION,
+                "optimizer_observation_history_retention_policy": "current_routing_pair_floor_then_global_recency",
+                "optimizer_observation_history_pair_floor": OPTIMIZER_OBSERVATION_HISTORY_PAIR_FLOOR,
+                "optimizer_observation_history_pair_scope": "current_latest_read_budget",
+                "optimizer_observation_history_pair_scope_rows": OPTIMIZER_OBSERVATION_READ_BUDGET,
                 "optimizer_observation_feasibility": "discovery_robustness_guardrails",
                 "optimizer_observation_authority": "routing_descriptor_only",
                 "optimizer_observation_read_budget": OPTIMIZER_OBSERVATION_READ_BUDGET,
@@ -502,6 +571,7 @@ def install_optimizer_observation_runtime(agent_memory_cls: type, optimizer_regi
 
 
 __all__ = [
+    "OPTIMIZER_OBSERVATION_HISTORY_PAIR_FLOOR",
     "OPTIMIZER_OBSERVATION_HISTORY_READ_BUDGET",
     "OPTIMIZER_OBSERVATION_HISTORY_RETENTION",
     "OPTIMIZER_OBSERVATION_READ_BUDGET",
