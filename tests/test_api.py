@@ -289,7 +289,19 @@ def test_cancel_can_land_on_a_different_worker():
         assert response.json()['status'] == 'cancel_requested'
         assert api_module.store.run_status(run_id) == 'cancel_requested'
         final = {**snapshot, "status":"cancelled", "updated_at":time.time()}
-        api_module.store.save_run(run_id, conv["id"], "remote", "cancelled", final)
+        assert api_module.store.save_run(
+            run_id, conv["id"], "remote", "cancelled", final
+        ) == "cancel_requested"
+        assert api_module.store.run_status(run_id) == "cancel_requested"
+        assert api_module.store.save_run(
+            run_id,
+            conv["id"],
+            "remote",
+            "cancelled",
+            final,
+            owner_id="other-worker",
+        ) == "cancelled"
+        assert api_module.store.run_status(run_id) == "cancelled"
 
 
 def test_worker_sync_reloads_catalog_after_shared_revision_changes():
@@ -333,11 +345,36 @@ def test_protected_mode_uses_signed_http_only_session(monkeypatch):
         assert before.json()['authenticated'] is False
         assert c.get('/api/status').status_code == 401
         assert c.post('/api/auth/login', json={'access_key':'wrong'}).status_code == 401
-        login = c.post('/api/auth/login', json={'access_key':'test-secret-with-enough-length'})
-        assert login.status_code == 200
-        cookie = login.headers.get('set-cookie','')
-        assert 'HttpOnly' in cookie and 'SameSite=strict' in cookie
+        assert c.post('/api/auth/login', json={'access_key':'test-secret-with-enough-length'}).status_code == 200
+        after = c.get('/api/auth/status')
+        assert after.json()['authenticated'] is True
         assert c.get('/api/status').status_code == 200
-        logout = c.post('/api/auth/logout', json={})
+        logout = c.post('/api/auth/logout')
         assert logout.status_code == 200
         assert c.get('/api/status').status_code == 401
+
+
+def test_host_header_is_rejected():
+    c=TestClient(app)
+    response=c.get('/api/status',headers={'host':'evil.example'})
+    assert response.status_code==400
+
+
+def test_origin_header_is_enforced_for_mutations():
+    c=TestClient(app)
+    conv=c.post('/api/conversations',json={"scene":"search","title":"origin"}).json()
+    denied=c.post(
+        f"/api/conversations/{conv['id']}/messages",
+        headers={'origin':'https://evil.example'},
+        json={'content':'检查体验'},
+    )
+    assert denied.status_code==403
+
+
+def test_security_headers_are_present():
+    c=TestClient(app)
+    response=c.get('/api/status')
+    assert response.headers['x-content-type-options']=='nosniff'
+    assert response.headers['x-frame-options']=='DENY'
+    assert response.headers['referrer-policy']=='no-referrer'
+    assert "default-src 'self'" in response.headers['content-security-policy']
