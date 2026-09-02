@@ -112,6 +112,16 @@ class OptimizerRoutingCheckpointStore:
         if row is None:
             return None
         result = dict(row)
+        decision_at = float(result.get("decision_at", 0.0) or 0.0)
+        if isfinite(decision_at) and decision_at >= 0.0:
+            result["evidence_updated_at"] = min(
+                float(result.get("evidence_updated_at", 0.0) or 0.0),
+                decision_at,
+            )
+            result["epoch_started_at"] = min(
+                float(result.get("epoch_started_at", 0.0) or 0.0),
+                decision_at,
+            )
         result["active_weighted"] = bool(
             result.get("regime") == "weighted"
             and float(result.get("expires_at", 0.0) or 0.0) >= now
