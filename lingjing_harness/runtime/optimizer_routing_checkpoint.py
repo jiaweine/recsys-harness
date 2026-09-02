@@ -124,6 +124,7 @@ class OptimizerRoutingCheckpointStore:
             )
         result["active_weighted"] = bool(
             result.get("regime") == "weighted"
+            and decision_at <= now + 1e-12
             and float(result.get("expires_at", 0.0) or 0.0) >= now
         )
         return result

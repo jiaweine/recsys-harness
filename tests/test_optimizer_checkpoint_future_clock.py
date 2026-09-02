@@ -216,3 +216,70 @@ def test_restart_normalizes_legacy_future_checkpoint_before_epoch_filtering(
         "evidence_epoch": 1,
         "epoch_started_at": decision_at,
     }
+
+
+def test_restart_does_not_restore_checkpoint_decided_ahead_of_caller_clock(
+    tmp_path,
+    monkeypatch,
+):
+    import lingjing_harness.runtime.optimizer_observation_drift as runtime_drift
+    import lingjing_harness.runtime.optimizer_observation_memory as observation_memory
+    import lingjing_harness.runtime.optimizer_observation_weighting as runtime_weighting
+    import lingjing_harness.runtime.optimizer_routing_checkpoint as runtime_checkpoint
+
+    path = tmp_path / "future-checkpoint-decision.db"
+    decision_at = 40_000_000.0
+    clock = {"now": decision_at - 5.0 * DAY}
+    monkeypatch.setattr(observation_memory.time, "time", lambda: clock["now"])
+    monkeypatch.setattr(runtime_drift.time, "time", lambda: clock["now"])
+    monkeypatch.setattr(runtime_weighting.time, "time", lambda: clock["now"])
+    monkeypatch.setattr(runtime_checkpoint.time, "time", lambda: clock["now"])
+
+    registry = OptimizerToolRegistry(
+        build_sample_catalog(),
+        memory=AgentMemory(path),
+        optimizer_backend="auto",
+    )
+    rows = _runtime_rows(registry)
+    registry.memory.record_optimizer_observations(
+        registry.catalog_key,
+        "search",
+        rows[:1],
+    )
+    clock["now"] = decision_at
+    registry.memory.record_optimizer_observations(
+        registry.catalog_key,
+        "search",
+        rows[1:],
+    )
+
+    store = OptimizerRoutingCheckpointStore(registry.optimizer_meta_memory)
+    checkpoint = store.record(
+        registry.catalog_key,
+        "search",
+        regime="weighted",
+        evidence_updated_at=decision_at,
+        evidence_seen_count=4,
+        evidence_rows=4,
+        epoch_started_at=0.0,
+        decision_at=decision_at,
+        ttl_seconds=OPTIMIZER_OBSERVATION_REGIME_CHECKPOINT_TTL_SECONDS,
+    )
+    assert checkpoint["recorded"] is True
+
+    clock["now"] = decision_at - 100.0
+    restarted = OptimizerToolRegistry(
+        build_sample_catalog(),
+        memory=AgentMemory(path),
+        optimizer_backend="auto",
+    )
+    context = restarted._routing_context("search")
+    restored = restarted._optimizer_routing_checkpoint_store.read(
+        restarted.catalog_key,
+        "search",
+        now=clock["now"],
+    )
+
+    assert restored["decision_at"] == decision_at
+    assert restored["active_weighted"] is False
+    assert context.landscape.informative is False
