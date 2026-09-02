@@ -76,14 +76,12 @@ def weight_optimizer_observations(
     """Attach transient routing weights without mutating durable observation rows."""
 
     rows = [dict(row) for row in observations if isinstance(row, dict)]
-    finite_times = [
-        value
-        for value in (_finite_float(row.get("updated_at")) for row in rows)
-        if value is not None
-    ]
     now = _finite_float(reference_time)
     if now is None:
-        now = max(time.time(), max(finite_times, default=0.0))
+        # A future-skewed durable timestamp is data, not authority to advance the
+        # cohort clock. Clamp that row locally in optimizer_observation_routing_weight
+        # instead of making every correctly timestamped peer artificially stale.
+        now = time.time()
     weighted: list[dict[str, Any]] = []
     for row in rows:
         enriched = dict(row)
@@ -274,6 +272,7 @@ def install_optimizer_observation_weighting(optimizer_registry_cls: type) -> Non
         router.update(
             {
                 "optimizer_observation_weighting": "recency_half_life_and_log_evidence",
+                "optimizer_observation_recency_reference_clock": "caller_wall_clock_future_rows_clamped_locally",
                 "optimizer_observation_recency_half_life_days": OPTIMIZER_OBSERVATION_RECENCY_HALF_LIFE_DAYS,
                 "optimizer_observation_recency_floor": OPTIMIZER_OBSERVATION_RECENCY_FLOOR,
                 "optimizer_observation_recency_grace_seconds": OPTIMIZER_OBSERVATION_RECENCY_GRACE_SECONDS,
