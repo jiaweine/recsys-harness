@@ -259,18 +259,26 @@ def test_completed_checkpoint_recovery_repairs_legacy_public_finalization_before
         "result": copy.deepcopy(internal_result),
         "events": [],
     }
+    # Claim batching/future-clock semantics have their own real-SQLite stress
+    # coverage. This regression isolates the completed-checkpoint branch: keep a
+    # real durable row already owned by this worker so lease renew, assistant
+    # publication and terminal save still exercise production WorkspaceStore SQL.
     assert store.reserve_run(
         run_id,
         conversation["id"],
         snapshot["goal"],
         snapshot,
-        owner_id="dead-worker",
-        lease_seconds=1.0,
+        owner_id=api_module.WORKER_ID,
+        lease_seconds=api_module.RUN_LEASE_SECONDS,
     )
-    now = time.time()
-    with store._lock, store._connect() as conn:  # noqa: SLF001 - deterministic recovery fixture
-        conn.execute("update runs set lease_until=? where run_id=?", (now - 1.0, run_id))
-        conn.commit()
+    claimed = {
+        "run_id": run_id,
+        "conversation_id": conversation["id"],
+        "goal": snapshot["goal"],
+        "status": "running",
+        "snapshot": copy.deepcopy(snapshot),
+    }
+    monkeypatch.setattr(store, "claim_recoverable_runs", lambda **kwargs: [copy.deepcopy(claimed)])
 
     calls: list[str] = []
 
