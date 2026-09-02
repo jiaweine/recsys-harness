@@ -162,10 +162,17 @@ class OptimizerRoutingCheckpointStore:
             decision_at = time.time()
         decision_at = float(decision_at)
         ttl_seconds = float(ttl_seconds)
-        if not isfinite(decision_at):
-            raise ValueError("optimizer routing decision_at must be finite")
+        if not isfinite(decision_at) or decision_at < 0.0:
+            raise ValueError("optimizer routing decision_at must be finite and >= 0")
         if not isfinite(ttl_seconds) or ttl_seconds <= 0.0:
             raise ValueError("optimizer routing checkpoint ttl_seconds must be finite and > 0")
+
+        # Observation timestamps are external wall-clock evidence. They may be
+        # locally ahead after a clock jump, but a checkpoint must never let that
+        # external clock outrank the caller's routing-decision clock. Clamp both
+        # evidence and epoch boundary to the same local linearization point.
+        evidence_updated_at = min(evidence_updated_at, decision_at)
+        epoch_started_at = min(epoch_started_at, decision_at)
         expires_at = decision_at + ttl_seconds if regime == "weighted" else decision_at
 
         with self.memory._lock:
@@ -175,7 +182,7 @@ class OptimizerRoutingCheckpointStore:
                 connection.execute("begin immediate")
                 existing = connection.execute(
                     """
-                    select evidence_epoch,epoch_started_at
+                    select evidence_epoch,epoch_started_at,decision_at
                     from agent_optimizer_routing_checkpoint
                     where catalog_key=? and domain=?
                     """,
@@ -185,6 +192,12 @@ class OptimizerRoutingCheckpointStore:
                 current_epoch_started_at = (
                     float(existing["epoch_started_at"]) if existing is not None else 0.0
                 )
+                if (
+                    existing is not None
+                    and current_epoch_started_at > decision_at + 1e-12
+                    and decision_at >= float(existing["decision_at"])
+                ):
+                    current_epoch_started_at = decision_at
                 effective_epoch_started_at = max(
                     current_epoch_started_at,
                     epoch_started_at,
@@ -224,6 +237,18 @@ class OptimizerRoutingCheckpointStore:
                         and excluded.evidence_seen_count = agent_optimizer_routing_checkpoint.evidence_seen_count
                         and excluded.evidence_rows = agent_optimizer_routing_checkpoint.evidence_rows
                         and excluded.decision_at >= agent_optimizer_routing_checkpoint.decision_at
+                      )
+                      or (
+                        agent_optimizer_routing_checkpoint.evidence_updated_at
+                          > excluded.decision_at + 1e-12
+                        and excluded.decision_at
+                          >= agent_optimizer_routing_checkpoint.decision_at
+                      )
+                      or (
+                        agent_optimizer_routing_checkpoint.epoch_started_at
+                          > excluded.decision_at + 1e-12
+                        and excluded.decision_at
+                          >= agent_optimizer_routing_checkpoint.decision_at
                       )
                     """,
                     (
@@ -502,6 +527,9 @@ def install_optimizer_routing_checkpoint(optimizer_registry_cls: type) -> None:
                 ),
                 "optimizer_observation_regime_checkpoint_refresh_seconds": (
                     OPTIMIZER_OBSERVATION_REGIME_CHECKPOINT_REFRESH_SECONDS
+                ),
+                "optimizer_observation_regime_checkpoint_clock": (
+                    "caller_decision_clock_clamp_and_legacy_future_repair"
                 ),
                 "optimizer_observation_regime_checkpoint_authority": "routing_hysteresis_only",
                 "optimizer_observation_regime_checkpoint_evaluator_calls": 0,
