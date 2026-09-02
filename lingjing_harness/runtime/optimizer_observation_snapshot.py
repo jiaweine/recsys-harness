@@ -37,6 +37,7 @@ def _decode_latest_rows(rows: list[Any]) -> list[dict[str, Any]]:
         observations.append(
             {
                 "status": "optimizer_observation",
+                "config_key": str(row["config_key"]),
                 "config": config,
                 "objective": float(row["score"]),
                 "feasible": bool(row["feasible"]),
@@ -83,13 +84,15 @@ def _read_atomic_snapshot(
     catalog_key: str,
     domain: str,
 ) -> dict[str, Any]:
-    """Materialize latest rows and paid history from one SQLite read snapshot."""
+    """Materialize one current-set-anchored latest/history SQLite snapshot."""
 
     domain = str(domain or "").strip()
     if domain not in {"search", "recommend"}:
         return {
             "observations": [],
             "history": [],
+            "history_rows_read": 0,
+            "history_filtered_rows": 0,
             "latest_newest_at": 0.0,
             "history_newest_at": 0.0,
         }
@@ -102,7 +105,7 @@ def _read_atomic_snapshot(
             connection.execute("begin")
             latest_rows = connection.execute(
                 """
-                select config,score,feasible,source,generation,feasibility_basis,
+                select config_key,config,score,feasible,source,generation,feasibility_basis,
                        constraints,seen_count,updated_at
                 from agent_optimizer_observations
                 where catalog_key=? and domain=?
@@ -136,10 +139,22 @@ def _read_atomic_snapshot(
             memory._close(connection)
 
     observations = _decode_latest_rows(list(latest_rows))
-    history = _decode_history_rows(list(history_rows))
+    raw_history = _decode_history_rows(list(history_rows))
+    latest_config_keys = {
+        str(row.get("config_key") or "").strip()
+        for row in observations
+        if str(row.get("config_key") or "").strip()
+    }
+    history = [
+        row
+        for row in raw_history
+        if str(row.get("config_key") or "").strip() in latest_config_keys
+    ]
     return {
         "observations": observations,
         "history": history,
+        "history_rows_read": len(raw_history),
+        "history_filtered_rows": max(0, len(raw_history) - len(history)),
         "latest_newest_at": max(
             (_finite_float(row.get("updated_at")) or 0.0 for row in observations),
             default=0.0,
@@ -183,6 +198,10 @@ def _snapshot_for(
                 "status": "coherent_snapshot",
                 "latest_rows": len(snapshot.get("observations") or []),
                 "history_rows": len(snapshot.get("history") or []),
+                "history_rows_read": int(snapshot.get("history_rows_read", 0) or 0),
+                "history_filtered_rows": int(
+                    snapshot.get("history_filtered_rows", 0) or 0
+                ),
                 "latest_newest_at": float(snapshot.get("latest_newest_at", 0.0) or 0.0),
                 "history_newest_at": float(snapshot.get("history_newest_at", 0.0) or 0.0),
                 "new_evaluator_calls": 0,
@@ -285,6 +304,8 @@ def install_optimizer_observation_snapshot(
             {
                 "optimizer_observation_snapshot": "single_sqlite_read_transaction",
                 "optimizer_observation_snapshot_scope": "one_routing_decision",
+                "optimizer_observation_snapshot_history_scope": "current_latest_config_set",
+                "optimizer_observation_snapshot_history_match": "exact_durable_config_key",
                 "optimizer_observation_snapshot_latest_budget": observation_memory.OPTIMIZER_OBSERVATION_READ_BUDGET,
                 "optimizer_observation_snapshot_history_budget": observation_memory.OPTIMIZER_OBSERVATION_HISTORY_READ_BUDGET,
                 "optimizer_observation_snapshot_states": (
