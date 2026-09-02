@@ -218,13 +218,12 @@ def _inflate_checkpoint(snapshot: dict[str, Any]) -> dict[str, Any] | None:
 
 
 async def _recover_on_startup_hardened() -> None:
-    """Recover active work without replaying an already completed final checkpoint.
+    """Recover active work without replaying a truly finalized checkpoint.
 
-    ``AgentHarness`` writes its final checkpoint after verifier + memory updates,
-    but the API still has a tiny window before it stores the assistant message and
-    terminal run row.  A crash in that window used to replay the tail of the run,
-    which could double-count episodic/policy learning.  A completed checkpoint is
-    already sufficient to finalize the API transaction, so recover it directly.
+    Public ``AgentHarness`` now withholds ``status=completed`` until atomic base
+    learning plus semantic/mechanism finalization have finished. Legacy completed
+    checkpoints may predate that boundary, so recovery idempotently repairs their
+    public finalizers before publishing the assistant result.
     """
 
     claimed = _core.store.claim_recoverable_runs(
@@ -303,10 +302,13 @@ async def _recover_on_startup_hardened() -> None:
             and isinstance(checkpoint.get("result"), dict)
         ):
             result = copy.deepcopy(checkpoint["result"])
+            _renew_execution_fence(run_id)
+            finalizer = getattr(_core.harness, "finalize_result", None)
+            if callable(finalizer):
+                result = finalizer(result)
             result["job_id"] = run_id
             result["attachments"] = copy.deepcopy(snapshot.get("attachments") or [])
             result["catalog_revision"] = saved_revision
-            _renew_execution_fence(run_id)
             existing = _core.store.assistant_for_job(cid, run_id)
             if existing is None:
                 message = _core.store.add_message(cid, "assistant", str(result.get("answer") or ""), result)
@@ -381,6 +383,9 @@ async def _execute_with_run_lease_fence(
 
     original_memory = runner.memory
     original_run = runner.run
+    had_finalization_key = hasattr(runner, "_finalization_event_key")
+    original_finalization_key = getattr(runner, "_finalization_event_key", None)
+    runner._finalization_event_key = f"api:{run_id}"
     runner.memory = _LeaseFencedMemory(
         original_memory,
         lambda: _renew_execution_fence(run_id),
@@ -410,6 +415,13 @@ async def _execute_with_run_lease_fence(
     finally:
         runner.run = original_run
         runner.memory = original_memory
+        if had_finalization_key:
+            runner._finalization_event_key = original_finalization_key
+        else:
+            try:
+                delattr(runner, "_finalization_event_key")
+            except AttributeError:
+                pass
 
 
 # Install persistence and recovery boundaries before the application lifespan is
