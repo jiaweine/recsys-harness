@@ -37,9 +37,18 @@ def install_rate_limit_maintenance(
 
     def cleanup(now: float) -> None:
         nonlocal next_gc_at
+        # A wall-clock jump forward followed by rollback must not strand the
+        # process-local maintenance deadline in the future for months or years.
+        # If the stored deadline is more than one normal interval ahead of the
+        # caller clock, re-arm cleanup immediately.  This changes only storage
+        # hygiene; allowance/counter authority remains in WorkspaceStore.
+        if next_gc_at > now + interval:
+            next_gc_at = now
         if now < next_gc_at:
             return
         with maintenance_lock:
+            if next_gc_at > now + interval:
+                next_gc_at = now
             if now < next_gc_at:
                 return
             try:
