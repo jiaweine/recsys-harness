@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - '.github/workflows/system-stress-hardening.yml'
+      - 'lingjing_harness/api.py'
       - 'lingjing_harness/api_recovery.py'
       - 'lingjing_harness/api_security.py'
       - 'lingjing_harness/api_shutdown.py'
@@ -17,6 +18,7 @@ on:
       - 'lingjing_harness/runtime/optimizer_routing_epoch_fence.py'
       - 'tests/test_api.py'
       - 'tests/test_api_security_boundary.py'
+      - 'tests/test_run_lease_execution_fence.py'
       - 'tests/test_runtime_consistency.py'
       - 'tests/test_startup_recovery_batching.py'
       - 'tests/test_store_fencing_stress.py'
@@ -32,6 +34,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/system-stress-hardening.yml'
+      - 'lingjing_harness/api.py'
       - 'lingjing_harness/api_recovery.py'
       - 'lingjing_harness/api_security.py'
       - 'lingjing_harness/api_shutdown.py'
@@ -45,6 +48,7 @@ on:
       - 'lingjing_harness/runtime/optimizer_routing_epoch_fence.py'
       - 'tests/test_api.py'
       - 'tests/test_api_security_boundary.py'
+      - 'tests/test_run_lease_execution_fence.py'
       - 'tests/test_runtime_consistency.py'
       - 'tests/test_startup_recovery_batching.py'
       - 'tests/test_store_fencing_stress.py'
@@ -79,6 +83,7 @@ jobs:
           for pass in 1 2 3; do
             echo "durable recovery race pass ${pass}/3"
             pytest -q \
+              tests/test_run_lease_execution_fence.py \
               tests/test_store_fencing_stress.py \
               tests/test_graceful_handoff.py \
               tests/test_rate_limit_maintenance.py \
