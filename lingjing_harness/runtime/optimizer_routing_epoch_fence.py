@@ -47,6 +47,46 @@ def _same_epoch_token(
     return left[0] == right[0] and abs(left[1] - right[1]) <= 1e-12
 
 
+def _checkpoint_token(
+    checkpoint: dict[str, Any] | None,
+) -> tuple[str, float, int, int, int, float, float, float]:
+    if not isinstance(checkpoint, dict):
+        return ("", 0.0, 0, 0, 0, 0.0, 0.0, 0.0)
+    try:
+        evidence_seen_count = max(0, int(checkpoint.get("evidence_seen_count", 0) or 0))
+    except (TypeError, ValueError):
+        evidence_seen_count = 0
+    try:
+        evidence_rows = max(0, int(checkpoint.get("evidence_rows", 0) or 0))
+    except (TypeError, ValueError):
+        evidence_rows = 0
+    evidence_epoch, epoch_started_at = _epoch_token(checkpoint)
+    return (
+        str(checkpoint.get("regime") or ""),
+        _finite_float(checkpoint.get("evidence_updated_at")) or 0.0,
+        evidence_seen_count,
+        evidence_rows,
+        evidence_epoch,
+        epoch_started_at,
+        _finite_float(checkpoint.get("decision_at")) or 0.0,
+        _finite_float(checkpoint.get("expires_at")) or 0.0,
+    )
+
+
+def _same_checkpoint_token(
+    left: tuple[str, float, int, int, int, float, float, float],
+    right: tuple[str, float, int, int, int, float, float, float],
+) -> bool:
+    return bool(
+        left[0] == right[0]
+        and abs(left[1] - right[1]) <= 1e-12
+        and left[2:5] == right[2:5]
+        and abs(left[5] - right[5]) <= 1e-12
+        and abs(left[6] - right[6]) <= 1e-12
+        and abs(left[7] - right[7]) <= 1e-12
+    )
+
+
 def _fence_states(registry: Any) -> dict[str, dict[str, Any]]:
     states = getattr(registry, _ROUTING_EPOCH_FENCE_STATE_ATTR, None)
     if not isinstance(states, dict):
@@ -143,16 +183,17 @@ def _read_observation_revision(
 
 
 def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
-    """Fence routing decisions against concurrent epoch or evidence advancement.
+    """Fence routing decisions against concurrent checkpoint or evidence advancement.
 
     The existing optimizer routing checkpoint remains the only durable routing
     state. This layer adds no table, lease, heartbeat, evaluator call, or serving
-    authority. A routing call snapshots both the checkpoint epoch token and the
-    paid-observation history high-water at entry. Any checkpoint write must still
-    observe both values inside the existing SQLite write transaction. The completed
-    routing decision is then revalidated before return. Concurrent epoch advancement
-    or any paid observation commit therefore fails closed to the pre-observation
-    router instead of allowing a stale decision to act on an older evidence view.
+    authority. A routing call snapshots the checkpoint epoch token, the full
+    checkpoint row version, and the paid-observation history high-water at entry.
+    Checkpoint writes must still observe those values inside the existing SQLite
+    write transaction. The completed routing decision is revalidated before return.
+    Concurrent checkpoint retirement, epoch advancement, or any paid observation
+    commit therefore fails closed to the pre-observation router instead of allowing
+    a stale decision to act on an older routing-state or evidence view.
     """
 
     global _INSTALLED
@@ -161,6 +202,7 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
 
     store_cls = checkpoint_runtime.OptimizerRoutingCheckpointStore
     original_record = store_cls.record
+    original_retire_expired = store_cls.retire_expired
 
     def record_with_expected_epoch_fence(
         self: Any,
@@ -228,6 +270,9 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
         expected_token = context.get("expected_token")
         if not isinstance(expected_token, tuple) or len(expected_token) != 2:
             expected_token = (0, 0.0)
+        expected_checkpoint_token = context.get("expected_checkpoint_token")
+        if not isinstance(expected_checkpoint_token, tuple) or len(expected_checkpoint_token) != 8:
+            expected_checkpoint_token = _checkpoint_token(None)
         expected_revision = context.get("expected_observation_revision")
         observation_catalog_key = str(context.get("observation_catalog_key") or "")
         observation_domain = str(context.get("surface") or "")
@@ -244,14 +289,30 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
                 )
                 existing_dict = dict(existing) if existing is not None else None
                 existing_token = _epoch_token(existing_dict)
+                existing_checkpoint_token = _checkpoint_token(existing_dict)
                 if not _same_epoch_token(existing_token, expected_token):
                     context["conflict"] = True
                     context["conflict_reason"] = "concurrent_epoch_advance"
                     context["observed_token"] = existing_token
+                    context["observed_checkpoint_token"] = existing_checkpoint_token
                     connection.commit()
                     return {
                         "recorded": False,
                         "stale_epoch_fence": True,
+                        "stale_observation_revision_fence": False,
+                        **(existing_dict or {}),
+                    }
+                if not _same_checkpoint_token(
+                    existing_checkpoint_token,
+                    expected_checkpoint_token,
+                ):
+                    context["conflict"] = True
+                    context["conflict_reason"] = "concurrent_checkpoint_advance"
+                    context["observed_checkpoint_token"] = existing_checkpoint_token
+                    connection.commit()
+                    return {
+                        "recorded": False,
+                        "stale_epoch_fence": False,
                         "stale_observation_revision_fence": False,
                         **(existing_dict or {}),
                     }
@@ -352,10 +413,53 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
             "stale_observation_revision_fence": False,
             **(dict(row) if row is not None else {}),
         }
+        authorized_checkpoint_token = _checkpoint_token(result)
         context["authorized_token"] = _epoch_token(result)
+        context["expected_checkpoint_token"] = authorized_checkpoint_token
+        context["authorized_checkpoint_token"] = authorized_checkpoint_token
         return result
 
     store_cls.record = record_with_expected_epoch_fence
+
+    def retire_expired_with_expected_checkpoint_fence(
+        self: Any,
+        catalog_key: str,
+        domain: str,
+        *,
+        expected_decision_at: float,
+        expected_expires_at: float,
+        observed_at: float | None = None,
+    ) -> dict[str, Any]:
+        result = original_retire_expired(
+            self,
+            catalog_key,
+            domain,
+            expected_decision_at=expected_decision_at,
+            expected_expires_at=expected_expires_at,
+            observed_at=observed_at,
+        )
+        context = _ROUTING_EPOCH_FENCE_CONTEXT.get()
+        if not isinstance(context, dict) or context.get("store") is not self:
+            return result
+
+        observed_checkpoint_token = _checkpoint_token(result)
+        expected_checkpoint_token = context.get("expected_checkpoint_token")
+        if not isinstance(expected_checkpoint_token, tuple) or len(expected_checkpoint_token) != 8:
+            expected_checkpoint_token = _checkpoint_token(None)
+        if result.get("retired"):
+            context["expected_checkpoint_token"] = observed_checkpoint_token
+            context["authorized_checkpoint_token"] = observed_checkpoint_token
+            context["authorized_token"] = _epoch_token(result)
+        elif not _same_checkpoint_token(
+            observed_checkpoint_token,
+            expected_checkpoint_token,
+        ):
+            context["conflict"] = True
+            context["conflict_reason"] = "concurrent_checkpoint_advance"
+            context["observed_checkpoint_token"] = observed_checkpoint_token
+        return result
+
+    store_cls.retire_expired = retire_expired_with_expected_checkpoint_fence
 
     original_routing_context = optimizer_registry_cls._routing_context
 
@@ -417,6 +521,7 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
             now=checkpoint_runtime.time.time(),
         )
         expected_token = _epoch_token(initial)
+        expected_checkpoint_token = _checkpoint_token(initial)
         context: dict[str, Any] = {
             "store": store,
             "registry": self,
@@ -424,6 +529,9 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
             "expected_token": expected_token,
             "authorized_token": expected_token,
             "observed_token": expected_token,
+            "expected_checkpoint_token": expected_checkpoint_token,
+            "authorized_checkpoint_token": expected_checkpoint_token,
+            "observed_checkpoint_token": expected_checkpoint_token,
             "observation_catalog_key": observation_catalog_key,
             "expected_observation_revision": expected_revision,
             "observed_observation_revision": expected_revision,
@@ -441,6 +549,21 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
             observed_token = _epoch_token(latest)
             authorized_token = context.get("authorized_token", expected_token)
             token_conflict = not _same_epoch_token(observed_token, authorized_token)
+            observed_checkpoint_token = _checkpoint_token(latest)
+            authorized_checkpoint_token = context.get(
+                "authorized_checkpoint_token",
+                expected_checkpoint_token,
+            )
+            if (
+                not isinstance(authorized_checkpoint_token, tuple)
+                or len(authorized_checkpoint_token) != 8
+            ):
+                authorized_checkpoint_token = expected_checkpoint_token
+            checkpoint_conflict = not _same_checkpoint_token(
+                observed_checkpoint_token,
+                authorized_checkpoint_token,
+            )
+            context["observed_checkpoint_token"] = observed_checkpoint_token
 
             observed_observation = _read_observation_revision(self, surface)
             observed_revision = (
@@ -456,8 +579,15 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
                 context["conflict_reason"] = "concurrent_observation_advance"
             elif token_conflict and not context.get("conflict_reason"):
                 context["conflict_reason"] = "concurrent_epoch_advance"
+            elif checkpoint_conflict and not context.get("conflict_reason"):
+                context["conflict_reason"] = "concurrent_checkpoint_advance"
 
-            conflict = bool(context.get("conflict")) or token_conflict or observation_conflict
+            conflict = bool(
+                context.get("conflict")
+                or token_conflict
+                or checkpoint_conflict
+                or observation_conflict
+            )
             states = _fence_states(self)
             if conflict:
                 if isinstance(latest, dict):
@@ -481,7 +611,11 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
                     "status": (
                         "observation_conflict"
                         if reason == "concurrent_observation_advance"
-                        else "epoch_conflict"
+                        else (
+                            "checkpoint_conflict"
+                            if reason == "concurrent_checkpoint_advance"
+                            else "epoch_conflict"
+                        )
                     ),
                     "reason": reason,
                     "action": "pre_observation_fallback",
@@ -524,6 +658,8 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
                 "optimizer_observation_routing_epoch_cas": "transactional_expected_epoch_token",
                 "optimizer_observation_routing_epoch_return_validation": "post_decision_checkpoint_revalidation",
                 "optimizer_observation_routing_epoch_conflict_action": "pre_observation_fallback",
+                "optimizer_observation_routing_checkpoint_version_fence": "full_checkpoint_row_version",
+                "optimizer_observation_routing_checkpoint_conflict_action": "pre_observation_fallback",
                 "optimizer_observation_routing_revision_fence": "history_autoincrement_high_water",
                 "optimizer_observation_routing_revision_scope": "entry_checkpoint_write_and_post_decision_revision_revalidation",
                 "optimizer_observation_routing_revision_conflict_action": "pre_observation_fallback",
