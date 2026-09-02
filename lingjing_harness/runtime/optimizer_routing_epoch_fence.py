@@ -37,6 +37,9 @@ def _epoch_token(checkpoint: dict[str, Any] | None) -> tuple[int, float]:
         0.0,
         _finite_float(checkpoint.get("epoch_started_at")) or 0.0,
     )
+    decision_at = _finite_float(checkpoint.get("decision_at"))
+    if decision_at is not None and decision_at >= 0.0:
+        epoch_started_at = min(epoch_started_at, decision_at)
     return (evidence_epoch, epoch_started_at)
 
 
@@ -61,14 +64,18 @@ def _checkpoint_token(
     except (TypeError, ValueError):
         evidence_rows = 0
     evidence_epoch, epoch_started_at = _epoch_token(checkpoint)
+    decision_at = _finite_float(checkpoint.get("decision_at")) or 0.0
+    evidence_updated_at = _finite_float(checkpoint.get("evidence_updated_at")) or 0.0
+    if decision_at >= 0.0:
+        evidence_updated_at = min(evidence_updated_at, decision_at)
     return (
         str(checkpoint.get("regime") or ""),
-        _finite_float(checkpoint.get("evidence_updated_at")) or 0.0,
+        evidence_updated_at,
         evidence_seen_count,
         evidence_rows,
         evidence_epoch,
         epoch_started_at,
-        _finite_float(checkpoint.get("decision_at")) or 0.0,
+        decision_at,
         _finite_float(checkpoint.get("expires_at")) or 0.0,
     )
 
