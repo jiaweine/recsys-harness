@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 import pytest
 
 import lingjing_harness.store as store_module
@@ -41,8 +39,6 @@ def test_expired_workspace_update_cannot_commit_after_new_run_enters(tmp_path, m
         lease_seconds=30.0,
     ) is True
 
-    # The old updater no longer owns a valid workspace lease. It must not be able
-    # to switch the durable catalog underneath a run that entered after expiry.
     assert updater.commit_workspace_revision("updater", "rev-b") is False
     assert updater.workspace_revision() == "rev-a"
     assert runner.run_status("run-after-expiry") == "running"
@@ -73,8 +69,6 @@ def test_old_run_owner_never_regains_write_authority_after_takeover_lease_expire
     )
     assert [row["run_id"] for row in claimed] == ["run-owner-fence"]
 
-    # Even after the replacement owner's lease expires, authority does not fall
-    # back to the previous owner. A new claim is the only legal ownership transfer.
     clock["now"] = 2_006.0
     stale = {**snapshot, "status": "completed", "answer": "stale", "updated_at": 2_006.0}
     assert old.save_run(
@@ -178,7 +172,7 @@ def test_heartbeat_repairs_legacy_future_skewed_row_clock(tmp_path, monkeypatch)
     with store._lock, store._connect() as connection:  # noqa: SLF001 - corruption fixture
         connection.execute(
             "update runs set updated_at=?,lease_until=? where run_id=?",
-            (legacy_future, legacy_future, "run-legacy-future"),
+            (legacy_future, legacy_future + 5.0, "run-legacy-future"),
         )
         connection.commit()
 
@@ -193,6 +187,99 @@ def test_heartbeat_repairs_legacy_future_skewed_row_clock(tmp_path, monkeypatch)
     assert float(row["lease_until"]) == pytest.approx(5_006.0)
 
 
+def test_recovery_reanchors_dead_legacy_future_lease_before_claiming(tmp_path, monkeypatch):
+    clock = {"now": 7_000.0}
+    monkeypatch.setattr(store_module.time, "time", lambda: clock["now"])
+    path = tmp_path / "legacy-dead-owner-future-lease.db"
+    owner = WorkspaceStore(path)
+    recovery = WorkspaceStore(path)
+    conversation = owner.create_conversation()
+    snapshot = _snapshot("run-dead-future", conversation["id"], now=clock["now"])
+    assert owner.reserve_run(
+        "run-dead-future",
+        conversation["id"],
+        "stress",
+        snapshot,
+        owner_id="dead-owner",
+        lease_seconds=5.0,
+    )
+
+    future = 7_000.0 + 365.0 * 86400.0
+    with owner._lock, owner._connect() as connection:  # noqa: SLF001 - corruption fixture
+        connection.execute(
+            "update runs set updated_at=?,lease_until=? where run_id=?",
+            (future, future + 5.0, "run-dead-future"),
+        )
+        connection.commit()
+
+    clock["now"] = 7_001.0
+    assert recovery.claim_recoverable_runs(
+        owner_id="recovery", lease_seconds=5.0, now=clock["now"]
+    ) == []
+    with recovery._connect() as connection:  # noqa: SLF001 - contract inspection
+        row = connection.execute(
+            "select updated_at,lease_until,owner_id from runs where run_id=?",
+            ("run-dead-future",),
+        ).fetchone()
+    assert float(row["updated_at"]) == pytest.approx(7_001.0)
+    assert float(row["lease_until"]) == pytest.approx(7_006.0)
+    assert row["owner_id"] == "dead-owner"
+
+    clock["now"] = 7_007.0
+    claimed = recovery.claim_recoverable_runs(
+        owner_id="recovery", lease_seconds=5.0, now=clock["now"]
+    )
+    assert [row["run_id"] for row in claimed] == ["run-dead-future"]
+    assert recovery.get_run("run-dead-future")["owner_id"] == "recovery"
+
+
+def test_workspace_update_clock_rollback_preserves_lease_duration_then_recovers(
+    tmp_path, monkeypatch
+):
+    clock = {"now": 8_000.0}
+    monkeypatch.setattr(store_module.time, "time", lambda: clock["now"])
+    path = tmp_path / "workspace-future-lease.db"
+    updater = WorkspaceStore(path)
+    runner = WorkspaceStore(path)
+    assert updater.ensure_workspace_revision("rev-a") == "rev-a"
+    conversation = runner.create_conversation()
+
+    future = 8_000.0 + 365.0 * 86400.0
+    clock["now"] = future
+    assert updater.begin_workspace_update("updater", lease_seconds=5.0) is True
+
+    clock["now"] = 8_000.0
+    assert updater.workspace_update_active(now=clock["now"]) is True
+    with updater._connect() as connection:  # noqa: SLF001 - contract inspection
+        row = connection.execute(
+            "select update_until,updated_at from workspace_state where id=1"
+        ).fetchone()
+    assert float(row["updated_at"]) == pytest.approx(8_000.0)
+    assert float(row["update_until"]) == pytest.approx(8_005.0)
+
+    clock["now"] = 8_001.0
+    assert runner.reserve_run(
+        "run-during-reanchored-update",
+        conversation["id"],
+        "stress",
+        _snapshot("run-during-reanchored-update", conversation["id"], now=clock["now"]),
+        owner_id="runner",
+        lease_seconds=30.0,
+    ) is False
+
+    clock["now"] = 8_006.0
+    assert runner.reserve_run(
+        "run-after-reanchored-update",
+        conversation["id"],
+        "stress",
+        _snapshot("run-after-reanchored-update", conversation["id"], now=clock["now"]),
+        owner_id="runner",
+        lease_seconds=30.0,
+    ) is True
+    assert updater.commit_workspace_revision("updater", "rev-b") is False
+    assert updater.workspace_revision() == "rev-a"
+
+
 def test_rate_limit_clock_rollback_repairs_window_without_resetting_count(tmp_path):
     store = WorkspaceStore(tmp_path / "rate-clock-rollback.db")
     key = "task:clock-skew"
@@ -200,12 +287,9 @@ def test_rate_limit_clock_rollback_repairs_window_without_resetting_count(tmp_pa
     assert store.consume_rate_limit(key, limit=2, window_seconds=60.0, now=6_001.0) is True
     assert store.consume_rate_limit(key, limit=2, window_seconds=60.0, now=6_002.0) is False
 
-    # A forward jump starts a legitimate new window and consumes one slot.
     future = 6_000.0 + 365.0 * 86400.0
     assert store.consume_rate_limit(key, limit=2, window_seconds=60.0, now=future) is True
 
-    # When wall clock returns, preserve that consumed slot but re-anchor the
-    # window locally. The limiter neither fails open nor remains frozen for a year.
     assert store.consume_rate_limit(key, limit=2, window_seconds=60.0, now=6_010.0) is True
     assert store.consume_rate_limit(key, limit=2, window_seconds=60.0, now=6_011.0) is False
     with store._connect() as connection:  # noqa: SLF001 - contract inspection
