@@ -21,6 +21,7 @@ OPTIMIZER_OBSERVATION_READ_BUDGET = 48
 OPTIMIZER_OBSERVATION_RETENTION = 96
 OPTIMIZER_OBSERVATION_HISTORY_RETENTION = 2 * OPTIMIZER_OBSERVATION_RETENTION
 OPTIMIZER_OBSERVATION_HISTORY_READ_BUDGET = OPTIMIZER_OBSERVATION_HISTORY_RETENTION
+OPTIMIZER_OBSERVATION_HISTORY_RETENTION_ORDER = "autoincrement_commit_order"
 _INSTALLED = False
 
 
@@ -240,13 +241,17 @@ def _record_optimizer_observations(
                     OPTIMIZER_OBSERVATION_RETENTION,
                 ),
             )
+            # The routing revision fence uses the per-scope maximum history id as
+            # its commit high-water. Retain by AUTOINCREMENT id, not wall clock, so
+            # a newly committed observation cannot be pruned immediately by clock
+            # rollback or cross-process timestamp skew before the fence can see it.
             conn.execute(
                 """
                 delete from agent_optimizer_observation_history
                 where catalog_key=? and domain=? and id not in (
                   select id from agent_optimizer_observation_history
                   where catalog_key=? and domain=?
-                  order by observed_at desc, id desc limit ?
+                  order by id desc limit ?
                 )
                 """,
                 (
@@ -488,6 +493,7 @@ def install_optimizer_observation_runtime(agent_memory_cls: type, optimizer_regi
                 "optimizer_observation_memory": "evaluator_paid_discovery_rows_only",
                 "optimizer_observation_history": "bounded_same_config_evaluator_history",
                 "optimizer_observation_history_retention": OPTIMIZER_OBSERVATION_HISTORY_RETENTION,
+                "optimizer_observation_history_retention_order": OPTIMIZER_OBSERVATION_HISTORY_RETENTION_ORDER,
                 "optimizer_observation_feasibility": "discovery_robustness_guardrails",
                 "optimizer_observation_authority": "routing_descriptor_only",
                 "optimizer_observation_read_budget": OPTIMIZER_OBSERVATION_READ_BUDGET,
@@ -504,6 +510,7 @@ def install_optimizer_observation_runtime(agent_memory_cls: type, optimizer_regi
 __all__ = [
     "OPTIMIZER_OBSERVATION_HISTORY_READ_BUDGET",
     "OPTIMIZER_OBSERVATION_HISTORY_RETENTION",
+    "OPTIMIZER_OBSERVATION_HISTORY_RETENTION_ORDER",
     "OPTIMIZER_OBSERVATION_READ_BUDGET",
     "OPTIMIZER_OBSERVATION_RETENTION",
     "install_optimizer_observation_runtime",
