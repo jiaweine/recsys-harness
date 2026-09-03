@@ -412,6 +412,22 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
                         and excluded.decision_at
                           >= agent_optimizer_routing_checkpoint.decision_at
                       )
+                      or (
+                        excluded.regime = 'weighted'
+                        and agent_optimizer_routing_checkpoint.regime = 'weighted'
+                        and excluded.evidence_updated_at
+                          = agent_optimizer_routing_checkpoint.evidence_updated_at
+                        and excluded.evidence_seen_count
+                          = agent_optimizer_routing_checkpoint.evidence_seen_count
+                        and excluded.evidence_rows
+                          = agent_optimizer_routing_checkpoint.evidence_rows
+                        and excluded.evidence_epoch
+                          = agent_optimizer_routing_checkpoint.evidence_epoch
+                        and excluded.epoch_started_at
+                          = agent_optimizer_routing_checkpoint.epoch_started_at
+                        and agent_optimizer_routing_checkpoint.decision_at
+                          > excluded.expires_at + 1e-12
+                      )
                     """,
                     (
                         scoped_catalog_key,
