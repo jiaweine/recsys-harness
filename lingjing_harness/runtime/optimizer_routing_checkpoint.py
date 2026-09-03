@@ -332,6 +332,22 @@ class OptimizerRoutingCheckpointStore:
                         and excluded.decision_at
                           >= agent_optimizer_routing_checkpoint.decision_at
                       )
+                      or (
+                        excluded.regime = 'weighted'
+                        and agent_optimizer_routing_checkpoint.regime = 'weighted'
+                        and excluded.evidence_updated_at
+                          = agent_optimizer_routing_checkpoint.evidence_updated_at
+                        and excluded.evidence_seen_count
+                          = agent_optimizer_routing_checkpoint.evidence_seen_count
+                        and excluded.evidence_rows
+                          = agent_optimizer_routing_checkpoint.evidence_rows
+                        and excluded.evidence_epoch
+                          = agent_optimizer_routing_checkpoint.evidence_epoch
+                        and excluded.epoch_started_at
+                          = agent_optimizer_routing_checkpoint.epoch_started_at
+                        and agent_optimizer_routing_checkpoint.decision_at
+                          > excluded.expires_at + 1e-12
+                      )
                     """,
                     (
                         catalog_key,
@@ -626,6 +642,9 @@ def install_optimizer_routing_checkpoint(optimizer_registry_cls: type) -> None:
                 ),
                 "optimizer_observation_regime_checkpoint_clock": (
                     "caller_decision_clock_clamp_and_legacy_future_repair"
+                ),
+                "optimizer_observation_regime_checkpoint_future_decision_repair": (
+                    "same_evidence_weighted_decision_beyond_ttl"
                 ),
                 "optimizer_observation_regime_checkpoint_authority": "routing_hysteresis_only",
                 "optimizer_observation_regime_checkpoint_evaluator_calls": 0,
