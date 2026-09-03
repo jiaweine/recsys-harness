@@ -32,6 +32,9 @@ from .optimizer_observation_drift_confidence import (
     install_optimizer_observation_drift_confidence,
 )
 from .optimizer_observation_memory import install_optimizer_observation_runtime
+from .optimizer_observation_recency_anchor import (
+    install_optimizer_observation_recency_anchor,
+)
 from .optimizer_observation_snapshot import install_optimizer_observation_snapshot
 from .optimizer_observation_weighting import install_optimizer_observation_weighting
 from .optimizer_routing_checkpoint import install_optimizer_routing_checkpoint
@@ -82,6 +85,10 @@ install_optimizer_routing_checkpoint(OptimizerToolRegistry)
 # transaction per routing decision. Drift confidence, weighting, epoch-count and
 # checkpoint layers then reuse one evaluator-paid evidence cohort.
 install_optimizer_observation_snapshot(AgentMemory, OptimizerToolRegistry)
+# Future-skewed paid observation clocks stay fresh when first seen locally, then
+# age from one durable per-commit routing anchor across restarts. Raw ledger clocks
+# and all evaluator/warm-start/promotion authority remain unchanged.
+install_optimizer_observation_recency_anchor(OptimizerToolRegistry)
 # Repeated-evidence counts are lifetime values in the durable latest-row ledger.
 # Scope only the routing-time view to the active/pending change-point epoch so old
 # regimes cannot inflate weighting, drift entry confidence, or checkpoint fencing.
