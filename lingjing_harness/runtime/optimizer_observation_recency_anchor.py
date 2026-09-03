@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import defaultdict, deque
 from math import isfinite
 import time
 from typing import Any
@@ -40,37 +39,6 @@ def _ensure_anchor_table(memory: Any) -> None:
             connection.commit()
         finally:
             memory._close(connection)
-
-
-def _history_clock_rows(
-    memory: Any,
-    *,
-    catalog_key: str,
-    domain: str,
-) -> list[dict[str, Any]]:
-    with memory._lock:
-        connection = memory._connect()
-        try:
-            connection.execute("pragma busy_timeout=10000")
-            rows = connection.execute(
-                """
-                select id,config_key,observed_at
-                from agent_optimizer_observation_history
-                where catalog_key=? and domain=?
-                order by observed_at desc,id desc
-                """,
-                (catalog_key, domain),
-            ).fetchall()
-        finally:
-            memory._close(connection)
-    return [
-        {
-            "observation_id": max(0, int(row["id"])),
-            "config_key": str(row["config_key"]),
-            "observed_at": float(row["observed_at"]),
-        }
-        for row in rows
-    ]
 
 
 def _read_anchors(
@@ -178,6 +146,26 @@ def _persist_future_anchors(
     }
 
 
+def _snapshot_history_clock_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = list(snapshot.get("history_clock_rows") or [])
+    if rows:
+        return [dict(row) for row in rows]
+    result: list[dict[str, Any]] = []
+    for source in list(snapshot.get("history") or []):
+        observation_id = max(0, int(source.get("observation_commit_id", 0) or 0))
+        observed_at = _finite_float(source.get("observed_at"))
+        if observation_id <= 0 or observed_at is None:
+            continue
+        result.append(
+            {
+                "observation_id": observation_id,
+                "config_key": str(source.get("config_key") or ""),
+                "observed_at": observed_at,
+            }
+        )
+    return result
+
+
 def _normalized_snapshot(
     memory: Any,
     *,
@@ -186,42 +174,36 @@ def _normalized_snapshot(
     snapshot: dict[str, Any],
     reference_time: float,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    history_clock_rows = _history_clock_rows(
-        memory,
-        catalog_key=catalog_key,
-        domain=domain,
-    )
-    anchors = _persist_future_anchors(
+    history_clock_rows = _snapshot_history_clock_rows(snapshot)
+    durable_anchors = _read_anchors(memory, catalog_key=catalog_key, domain=domain)
+    effective_anchors = dict(durable_anchors)
+    for row in history_clock_rows:
+        observation_id = max(0, int(row.get("observation_id", 0) or 0))
+        observed_at = _finite_float(row.get("observed_at"))
+        if observation_id <= 0 or observed_at is None:
+            continue
+        if observed_at > reference_time + 1e-12:
+            current = effective_anchors.get(observation_id)
+            effective_anchors[observation_id] = (
+                reference_time if current is None else min(current, reference_time)
+            )
+
+    persisted_anchors = _persist_future_anchors(
         memory,
         catalog_key=catalog_key,
         domain=domain,
         history_rows=history_clock_rows,
-        anchors=_read_anchors(memory, catalog_key=catalog_key, domain=domain),
+        anchors=durable_anchors,
         reference_time=reference_time,
     )
-
-    latest_id_by_config: dict[str, int] = {}
-    history_ids_by_clock: dict[tuple[str, float], deque[int]] = defaultdict(deque)
-    for row in history_clock_rows:
-        observation_id = int(row["observation_id"])
-        config_key = str(row["config_key"])
-        observed_at = float(row["observed_at"])
-        latest_id_by_config[config_key] = max(
-            observation_id,
-            latest_id_by_config.get(config_key, 0),
-        )
-        history_ids_by_clock[(config_key, observed_at)].append(observation_id)
 
     observations: list[dict[str, Any]] = []
     latest_anchored_ids: set[int] = set()
     for source in list(snapshot.get("observations") or []):
         row = dict(source)
-        config_key = str(row.get("config_key") or "")
-        observation_id = latest_id_by_config.get(config_key, 0)
+        observation_id = max(0, int(row.get("observation_commit_id", 0) or 0))
         raw_updated_at = _finite_float(row.get("updated_at"))
-        anchor_at = anchors.get(observation_id)
-        if observation_id > 0:
-            row["observation_commit_id"] = observation_id
+        anchor_at = effective_anchors.get(observation_id)
         if raw_updated_at is not None and anchor_at is not None:
             row["routing_raw_updated_at"] = raw_updated_at
             row["routing_clock_anchor_at"] = anchor_at
@@ -234,16 +216,9 @@ def _normalized_snapshot(
     history_anchored_ids: set[int] = set()
     for source in list(snapshot.get("history") or []):
         row = dict(source)
-        config_key = str(row.get("config_key") or "")
+        observation_id = max(0, int(row.get("observation_commit_id", 0) or 0))
         raw_observed_at = _finite_float(row.get("observed_at"))
-        observation_id = 0
-        if raw_observed_at is not None:
-            ids = history_ids_by_clock.get((config_key, raw_observed_at))
-            if ids:
-                observation_id = int(ids.popleft())
-        anchor_at = anchors.get(observation_id)
-        if observation_id > 0:
-            row["observation_commit_id"] = observation_id
+        anchor_at = effective_anchors.get(observation_id)
         if raw_observed_at is not None and anchor_at is not None:
             row["routing_raw_observed_at"] = raw_observed_at
             row["routing_clock_anchor_at"] = anchor_at
@@ -269,7 +244,14 @@ def _normalized_snapshot(
         "status": "paid_commit_clock_normalized",
         "reference_time": reference_time,
         "retained_history_versions": len(history_clock_rows),
-        "persisted_anchor_versions": len(anchors),
+        "snapshot_identity_versions": len(
+            {
+                int(row.get("observation_id", 0) or 0)
+                for row in history_clock_rows
+                if int(row.get("observation_id", 0) or 0) > 0
+            }
+        ),
+        "persisted_anchor_versions": len(persisted_anchors),
         "latest_anchored_versions": len(latest_anchored_ids),
         "history_anchored_versions": len(history_anchored_ids),
         "latest_raw_newest_at": result["latest_raw_newest_at"],
@@ -338,6 +320,7 @@ def install_optimizer_observation_recency_anchor(optimizer_registry_cls: type) -
             {
                 "optimizer_observation_recency_clock_normalization": "paid_history_commit_first_local_routing_anchor",
                 "optimizer_observation_recency_clock_anchor_scope": "routing_snapshot_only",
+                "optimizer_observation_recency_clock_anchor_identity": "coherent_snapshot_history_autoincrement_id",
                 "optimizer_observation_recency_clock_anchor_repair": "monotone_earlier_caller_clock",
                 "optimizer_observation_recency_clock_anchor_states": (
                     dict(states) if isinstance(states, dict) else {}
