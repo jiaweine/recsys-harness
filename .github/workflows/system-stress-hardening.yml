@@ -31,6 +31,7 @@ on:
       - 'tests/test_optimizer_observation_clock_order.py'
       - 'tests/test_optimizer_observation_future_clock.py'
       - 'tests/test_optimizer_observation_future_recency_anchor.py'
+      - 'tests/test_optimizer_observation_recency_anchor_snapshot_race.py'
       - 'tests/test_optimizer_observation_snapshot.py'
       - 'tests/test_optimizer_observation_feasibility_history.py'
       - 'tests/test_optimizer_routing_epoch.py'
@@ -65,6 +66,7 @@ on:
       - 'tests/test_optimizer_observation_clock_order.py'
       - 'tests/test_optimizer_observation_future_clock.py'
       - 'tests/test_optimizer_observation_future_recency_anchor.py'
+      - 'tests/test_optimizer_observation_recency_anchor_snapshot_race.py'
       - 'tests/test_optimizer_observation_snapshot.py'
       - 'tests/test_optimizer_observation_feasibility_history.py'
       - 'tests/test_optimizer_routing_epoch.py'
@@ -127,6 +129,7 @@ jobs:
               tests/test_optimizer_observation_clock_order.py \
               tests/test_optimizer_observation_future_clock.py \
               tests/test_optimizer_observation_future_recency_anchor.py \
+              tests/test_optimizer_observation_recency_anchor_snapshot_race.py \
               tests/test_optimizer_observation_snapshot.py \
               tests/test_optimizer_observation_feasibility_history.py \
               tests/test_optimizer_routing_epoch.py \
