@@ -151,3 +151,30 @@ def test_rate_limit_counter_is_shared_across_store_instances(tmp_path):
     assert two.consume_rate_limit("login:client", limit=2, window_seconds=60, now=101) is True
     assert one.consume_rate_limit("login:client", limit=2, window_seconds=60, now=102) is False
     assert two.consume_rate_limit("login:client", limit=2, window_seconds=60, now=161) is True
+
+
+def test_basic_workspace_writes_use_process_local_store_lock(tmp_path):
+    store = WorkspaceStore(tmp_path / "basic-writer-lock.db")
+
+    class TrackingLock:
+        def __init__(self, inner):
+            self.inner = inner
+            self.entries = 0
+
+        def __enter__(self):
+            self.inner.acquire()
+            self.entries += 1
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            self.inner.release()
+            return False
+
+    tracking = TrackingLock(store._lock)  # noqa: SLF001 - writer serialization contract
+    store._lock = tracking  # noqa: SLF001 - writer serialization contract
+
+    conversation = store.create_conversation("locked", "audit")
+    assert tracking.entries == 1
+
+    store.add_message(conversation["id"], "assistant", "locked write")
+    assert tracking.entries == 2

@@ -137,7 +137,7 @@ class WorkspaceStore:
     def create_conversation(self, title: str = "新的体验任务", scene: str = "audit") -> dict[str, Any]:
         now = time.time()
         conversation_id = f"cv-{uuid.uuid4().hex[:10]}"
-        with self._connect() as connection:
+        with self._lock, self._connect() as connection:
             connection.execute(
                 "insert into conversations values(?,?,?,?,?)",
                 (conversation_id, title, scene, now, now),
@@ -182,7 +182,7 @@ class WorkspaceStore:
         message_id = f"msg-{uuid.uuid4().hex[:12]}"
         now = time.time()
         payload = payload or {}
-        with self._connect() as connection:
+        with self._lock, self._connect() as connection:
             if role == "user":
                 count = connection.execute(
                     "select count(*) from messages where conversation_id=?",
