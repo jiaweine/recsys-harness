@@ -37,6 +37,9 @@ def _epoch_token(checkpoint: dict[str, Any] | None) -> tuple[int, float]:
         0.0,
         _finite_float(checkpoint.get("epoch_started_at")) or 0.0,
     )
+    decision_at = _finite_float(checkpoint.get("decision_at"))
+    if decision_at is not None and decision_at >= 0.0:
+        epoch_started_at = min(epoch_started_at, decision_at)
     return (evidence_epoch, epoch_started_at)
 
 
@@ -61,14 +64,18 @@ def _checkpoint_token(
     except (TypeError, ValueError):
         evidence_rows = 0
     evidence_epoch, epoch_started_at = _epoch_token(checkpoint)
+    decision_at = _finite_float(checkpoint.get("decision_at")) or 0.0
+    evidence_updated_at = _finite_float(checkpoint.get("evidence_updated_at")) or 0.0
+    if decision_at >= 0.0:
+        evidence_updated_at = min(evidence_updated_at, decision_at)
     return (
         str(checkpoint.get("regime") or ""),
-        _finite_float(checkpoint.get("evidence_updated_at")) or 0.0,
+        evidence_updated_at,
         evidence_seen_count,
         evidence_rows,
         evidence_epoch,
         epoch_started_at,
-        _finite_float(checkpoint.get("decision_at")) or 0.0,
+        decision_at,
         _finite_float(checkpoint.get("expires_at")) or 0.0,
     )
 
@@ -265,6 +272,8 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
             raise ValueError("optimizer routing decision_at must be finite")
         if not isfinite(ttl_seconds) or ttl_seconds <= 0.0:
             raise ValueError("optimizer routing checkpoint ttl_seconds must be finite and > 0")
+        evidence_updated_at = min(evidence_updated_at, decision_at)
+        epoch_started_at = min(epoch_started_at, decision_at)
         expires_at = decision_at + ttl_seconds if regime == "weighted" else decision_at
 
         expected_token = context.get("expected_token")
@@ -340,7 +349,17 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
                         }
 
                 current_epoch = existing_token[0]
-                current_epoch_started_at = existing_token[1]
+                current_epoch_started_at = (
+                    float(existing_dict.get("epoch_started_at", 0.0) or 0.0)
+                    if existing_dict is not None
+                    else 0.0
+                )
+                if (
+                    existing_dict is not None
+                    and current_epoch_started_at > decision_at + 1e-12
+                    and decision_at >= float(existing_dict.get("decision_at", 0.0) or 0.0)
+                ):
+                    current_epoch_started_at = decision_at
                 effective_epoch_started_at = max(
                     current_epoch_started_at,
                     epoch_started_at,
@@ -380,6 +399,18 @@ def install_optimizer_routing_epoch_fence(optimizer_registry_cls: type) -> None:
                         and excluded.evidence_seen_count = agent_optimizer_routing_checkpoint.evidence_seen_count
                         and excluded.evidence_rows = agent_optimizer_routing_checkpoint.evidence_rows
                         and excluded.decision_at >= agent_optimizer_routing_checkpoint.decision_at
+                      )
+                      or (
+                        agent_optimizer_routing_checkpoint.evidence_updated_at
+                          > excluded.decision_at + 1e-12
+                        and excluded.decision_at
+                          >= agent_optimizer_routing_checkpoint.decision_at
+                      )
+                      or (
+                        agent_optimizer_routing_checkpoint.epoch_started_at
+                          > excluded.decision_at + 1e-12
+                        and excluded.decision_at
+                          >= agent_optimizer_routing_checkpoint.decision_at
                       )
                     """,
                     (

@@ -25,6 +25,7 @@ on:
       - 'tests/test_graceful_handoff.py'
       - 'tests/test_rate_limit_maintenance.py'
       - 'tests/test_optimizer_checkpoint_future_clock.py'
+      - 'tests/test_optimizer_checkpoint_canonical_fence.py'
       - 'tests/test_optimizer_observation_clock_order.py'
       - 'tests/test_optimizer_observation_future_clock.py'
       - 'tests/test_optimizer_observation_snapshot.py'
@@ -55,6 +56,7 @@ on:
       - 'tests/test_graceful_handoff.py'
       - 'tests/test_rate_limit_maintenance.py'
       - 'tests/test_optimizer_checkpoint_future_clock.py'
+      - 'tests/test_optimizer_checkpoint_canonical_fence.py'
       - 'tests/test_optimizer_observation_clock_order.py'
       - 'tests/test_optimizer_observation_future_clock.py'
       - 'tests/test_optimizer_observation_snapshot.py'
@@ -114,6 +116,7 @@ jobs:
             echo "optimizer routing race pass ${pass}/3"
             pytest -q \
               tests/test_optimizer_checkpoint_future_clock.py \
+              tests/test_optimizer_checkpoint_canonical_fence.py \
               tests/test_optimizer_observation_clock_order.py \
               tests/test_optimizer_observation_future_clock.py \
               tests/test_optimizer_observation_snapshot.py \
