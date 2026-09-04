@@ -19,6 +19,7 @@ from fastapi import HTTPException
 from . import api_core as _core
 from .api_attachment_integrity import install_attachment_integrity_boundary
 from .api_shutdown import install_shutdown_boundary
+from .api_workspace_transaction import install_workspace_transaction_boundary
 from .online_experiment_api import install_online_experiment_routes
 from .proxy_trust import TRUSTED_PROXY_NETWORKS, client_key as _proxy_client_key
 from .rate_limit_maintenance import install_rate_limit_maintenance
@@ -30,6 +31,11 @@ from .workspace_identity import workspace_fingerprint
 # must reload when the production evidence snapshot changes.
 _core.catalog_fingerprint = workspace_fingerprint
 _core.CATALOG_REVISION = workspace_fingerprint(_core.catalog)
+
+# Catalog publication spans the filesystem and SQLite workspace revision.  Stage
+# imports until the durable revision commits so failed or interrupted imports can
+# never make an uncommitted workspace authoritative.
+install_workspace_transaction_boundary(_core)
 
 # Rate-limit identity is fail-closed behind proxies.  api_core resolves this
 # module global at request time, so replacing it here preserves the stable app
