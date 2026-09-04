@@ -5,9 +5,13 @@ from .store_run_schema_migration import (
     install_workspace_run_schema_migration_guard as _install_workspace_run_schema_migration_guard,
 )
 from .store_workspace_publication import install_workspace_publication_fence as _install_workspace_publication_fence
+from .store_workspace_publication_atomic_fence import (
+    install_workspace_publication_atomic_fence as _install_workspace_publication_atomic_fence,
+)
 
 _install_workspace_run_schema_migration_guard(_store_module)
 _install_workspace_publication_fence(_store_module)
+_install_workspace_publication_atomic_fence(_store_module)
 
 from .adapters import (
     AdapterRecommendationEngine,
