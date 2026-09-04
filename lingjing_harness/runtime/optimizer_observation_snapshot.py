@@ -84,6 +84,40 @@ def _decode_history_rows(rows: list[Any]) -> list[dict[str, Any]]:
     return observations
 
 
+def _same_paid_observation_version(
+    latest: dict[str, Any],
+    history: dict[str, Any],
+) -> bool:
+    """Require the current row to match the exact history version claiming its ID."""
+
+    latest_at = _finite_float(latest.get("updated_at"))
+    history_at = _finite_float(history.get("observed_at"))
+    latest_objective = _finite_float(latest.get("objective"))
+    history_objective = _finite_float(history.get("objective"))
+    if (
+        latest_at is None
+        or history_at is None
+        or latest_objective is None
+        or history_objective is None
+    ):
+        return False
+    if abs(latest_at - history_at) > 1e-12:
+        return False
+    if abs(latest_objective - history_objective) > 1e-12:
+        return False
+    return (
+        str(latest.get("config_key") or "") == str(history.get("config_key") or "")
+        and bool(latest.get("feasible")) == bool(history.get("feasible"))
+        and str(latest.get("source") or "") == str(history.get("source") or "")
+        and int(latest.get("generation", 0) or 0)
+        == int(history.get("generation", 0) or 0)
+        and str(latest.get("feasibility_basis") or "")
+        == str(history.get("feasibility_basis") or "")
+        and dict(latest.get("constraints") or {})
+        == dict(history.get("constraints") or {})
+    )
+
+
 def _read_atomic_snapshot(
     memory: Any,
     catalog_key: str,
@@ -138,16 +172,19 @@ def _read_atomic_snapshot(
 
     observations = _decode_latest_rows(list(latest_rows))
     raw_history = _decode_history_rows(list(history_rows))
-    latest_id_by_config: dict[str, int] = {}
+    latest_history_by_config: dict[str, dict[str, Any]] = {}
     history_clock_rows: list[dict[str, Any]] = []
     for row in raw_history:
         observation_id = max(0, int(row.get("observation_commit_id", 0) or 0))
         config_key = str(row.get("config_key") or "")
         if observation_id > 0:
-            latest_id_by_config[config_key] = max(
-                observation_id,
-                latest_id_by_config.get(config_key, 0),
+            current = latest_history_by_config.get(config_key)
+            current_id = max(
+                0,
+                int((current or {}).get("observation_commit_id", 0) or 0),
             )
+            if observation_id > current_id:
+                latest_history_by_config[config_key] = row
             history_clock_rows.append(
                 {
                     "observation_id": observation_id,
@@ -156,7 +193,18 @@ def _read_atomic_snapshot(
                 }
             )
     for row in observations:
-        observation_id = latest_id_by_config.get(str(row.get("config_key") or ""), 0)
+        history_version = latest_history_by_config.get(
+            str(row.get("config_key") or "")
+        )
+        if history_version is None or not _same_paid_observation_version(
+            row,
+            history_version,
+        ):
+            continue
+        observation_id = max(
+            0,
+            int(history_version.get("observation_commit_id", 0) or 0),
+        )
         if observation_id > 0:
             row["observation_commit_id"] = observation_id
 
@@ -328,6 +376,7 @@ def install_optimizer_observation_snapshot(
                 "optimizer_observation_snapshot_history_scope": "current_latest_config_set",
                 "optimizer_observation_snapshot_history_match": "exact_durable_config_key",
                 "optimizer_observation_snapshot_commit_identity": "history_autoincrement_id_in_same_read_transaction",
+                "optimizer_observation_snapshot_latest_commit_match": "exact_config_key_timestamp_and_evaluator_payload",
                 "optimizer_observation_snapshot_latest_budget": observation_memory.OPTIMIZER_OBSERVATION_READ_BUDGET,
                 "optimizer_observation_snapshot_history_budget": observation_memory.OPTIMIZER_OBSERVATION_HISTORY_READ_BUDGET,
                 "optimizer_observation_snapshot_states": (

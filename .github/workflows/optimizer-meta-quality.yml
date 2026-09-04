@@ -15,6 +15,7 @@ on:
       - 'lingjing_harness/runtime/optimizer_observation_drift_confidence.py'
       - 'lingjing_harness/runtime/optimizer_observation_memory.py'
       - 'lingjing_harness/runtime/optimizer_observation_recency_anchor.py'
+      - 'lingjing_harness/runtime/optimizer_observation_legacy_recency_anchor.py'
       - 'lingjing_harness/runtime/optimizer_observation_snapshot.py'
       - 'lingjing_harness/runtime/optimizer_observation_weighting.py'
       - 'lingjing_harness/runtime/optimizer_routing_checkpoint.py'
@@ -34,6 +35,7 @@ on:
       - 'tests/test_optimizer_observation_feasibility_history.py'
       - 'tests/test_optimizer_observation_future_clock.py'
       - 'tests/test_optimizer_observation_future_recency_anchor.py'
+      - 'tests/test_optimizer_observation_legacy_future_recency_anchor.py'
       - 'tests/test_optimizer_observation_recency_anchor_snapshot_race.py'
       - 'tests/test_optimizer_observation_snapshot.py'
       - 'tests/test_optimizer_routing_epoch.py'
@@ -60,6 +62,7 @@ on:
       - 'lingjing_harness/runtime/optimizer_observation_drift_confidence.py'
       - 'lingjing_harness/runtime/optimizer_observation_memory.py'
       - 'lingjing_harness/runtime/optimizer_observation_recency_anchor.py'
+      - 'lingjing_harness/runtime/optimizer_observation_legacy_recency_anchor.py'
       - 'lingjing_harness/runtime/optimizer_observation_snapshot.py'
       - 'lingjing_harness/runtime/optimizer_observation_weighting.py'
       - 'lingjing_harness/runtime/optimizer_routing_checkpoint.py'
@@ -79,6 +82,7 @@ on:
       - 'tests/test_optimizer_observation_feasibility_history.py'
       - 'tests/test_optimizer_observation_future_clock.py'
       - 'tests/test_optimizer_observation_future_recency_anchor.py'
+      - 'tests/test_optimizer_observation_legacy_future_recency_anchor.py'
       - 'tests/test_optimizer_observation_recency_anchor_snapshot_race.py'
       - 'tests/test_optimizer_observation_snapshot.py'
       - 'tests/test_optimizer_routing_epoch.py'
@@ -121,6 +125,7 @@ jobs:
             lingjing_harness/runtime/optimizer_observation_drift_confidence.py \
             lingjing_harness/runtime/optimizer_observation_memory.py \
             lingjing_harness/runtime/optimizer_observation_recency_anchor.py \
+            lingjing_harness/runtime/optimizer_observation_legacy_recency_anchor.py \
             lingjing_harness/runtime/optimizer_observation_snapshot.py \
             lingjing_harness/runtime/optimizer_observation_weighting.py \
             lingjing_harness/runtime/optimizer_routing_checkpoint.py \
@@ -140,6 +145,7 @@ jobs:
             tests/test_optimizer_observation_feasibility_history.py \
             tests/test_optimizer_observation_future_clock.py \
             tests/test_optimizer_observation_future_recency_anchor.py \
+            tests/test_optimizer_observation_legacy_future_recency_anchor.py \
             tests/test_optimizer_observation_recency_anchor_snapshot_race.py \
             tests/test_optimizer_observation_snapshot.py \
             tests/test_optimizer_routing_epoch.py \
@@ -164,6 +170,7 @@ jobs:
             tests/test_optimizer_observation_feasibility_history.py \
             tests/test_optimizer_observation_future_clock.py \
             tests/test_optimizer_observation_future_recency_anchor.py \
+            tests/test_optimizer_observation_legacy_future_recency_anchor.py \
             tests/test_optimizer_observation_recency_anchor_snapshot_race.py \
             tests/test_optimizer_observation_snapshot.py \
             tests/test_optimizer_routing_epoch.py \
@@ -215,6 +222,11 @@ jobs:
           assert manifest['optimizer_observation_recency_clock_anchor_repair'] == 'monotone_earlier_caller_clock'
           assert manifest['optimizer_observation_recency_clock_anchor_authority'] == 'routing_descriptor_only'
           assert manifest['optimizer_observation_recency_clock_anchor_evaluator_calls'] == 0
+          assert manifest['optimizer_observation_legacy_recency_clock_normalization'] == 'latest_only_first_local_routing_anchor'
+          assert manifest['optimizer_observation_legacy_recency_clock_anchor_identity'] == 'durable_config_key_and_raw_updated_at_without_history_commit'
+          assert manifest['optimizer_observation_legacy_recency_clock_anchor_repair'] == 'monotone_earlier_caller_clock'
+          assert manifest['optimizer_observation_legacy_recency_clock_anchor_authority'] == 'routing_descriptor_only'
+          assert manifest['optimizer_observation_legacy_recency_clock_anchor_evaluator_calls'] == 0
           assert manifest['optimizer_observation_weighting'] == 'recency_half_life_and_log_evidence'
           assert manifest['optimizer_observation_recency_reference_clock'] == 'caller_wall_clock_future_rows_clamped_locally'
           assert manifest['optimizer_observation_confidence'] == 'effective_fresh_rows_and_weight_concentration'
