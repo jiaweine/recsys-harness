@@ -1,5 +1,10 @@
 """Xushu Search & Recommendation Agent Harness."""
 
+from . import store as _store_module
+from .store_workspace_publication import install_workspace_publication_fence as _install_workspace_publication_fence
+
+_install_workspace_publication_fence(_store_module)
+
 from .adapters import (
     AdapterRecommendationEngine,
     AdapterSearchEngine,

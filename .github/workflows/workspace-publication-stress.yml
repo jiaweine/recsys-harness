@@ -1,0 +1,51 @@
+name: Workspace Publication Stress
+
+on:
+  push:
+    paths:
+      - '.github/workflows/workspace-publication-stress.yml'
+      - 'lingjing_harness/__init__.py'
+      - 'lingjing_harness/api.py'
+      - 'lingjing_harness/api_workspace_transaction.py'
+      - 'lingjing_harness/store.py'
+      - 'lingjing_harness/store_workspace_publication.py'
+      - 'tests/test_workspace_import_crash_consistency.py'
+      - 'tests/test_workspace_import_promotion_race.py'
+      - 'tests/test_workspace_import_publication_fence.py'
+  pull_request:
+    paths:
+      - '.github/workflows/workspace-publication-stress.yml'
+      - 'lingjing_harness/__init__.py'
+      - 'lingjing_harness/api.py'
+      - 'lingjing_harness/api_workspace_transaction.py'
+      - 'lingjing_harness/store.py'
+      - 'lingjing_harness/store_workspace_publication.py'
+      - 'tests/test_workspace_import_crash_consistency.py'
+      - 'tests/test_workspace_import_promotion_race.py'
+      - 'tests/test_workspace_import_publication_fence.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  workspace-publication-races:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Repeat workspace publication transaction contracts
+        run: |
+          for pass in 1 2 3; do
+            echo "workspace publication pass ${pass}/3"
+            pytest -q \
+              tests/test_workspace_import_crash_consistency.py \
+              tests/test_workspace_import_promotion_race.py \
+              tests/test_workspace_import_publication_fence.py
+          done
