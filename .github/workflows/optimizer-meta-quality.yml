@@ -34,6 +34,7 @@ on:
       - 'tests/test_optimizer_observation_feasibility_history.py'
       - 'tests/test_optimizer_observation_future_clock.py'
       - 'tests/test_optimizer_observation_future_recency_anchor.py'
+      - 'tests/test_optimizer_observation_recency_anchor_snapshot_race.py'
       - 'tests/test_optimizer_observation_snapshot.py'
       - 'tests/test_optimizer_routing_epoch.py'
       - 'tests/test_optimizer_routing_epoch_fence.py'
@@ -78,6 +79,7 @@ on:
       - 'tests/test_optimizer_observation_feasibility_history.py'
       - 'tests/test_optimizer_observation_future_clock.py'
       - 'tests/test_optimizer_observation_future_recency_anchor.py'
+      - 'tests/test_optimizer_observation_recency_anchor_snapshot_race.py'
       - 'tests/test_optimizer_observation_snapshot.py'
       - 'tests/test_optimizer_routing_epoch.py'
       - 'tests/test_optimizer_routing_epoch_fence.py'
@@ -138,6 +140,7 @@ jobs:
             tests/test_optimizer_observation_feasibility_history.py \
             tests/test_optimizer_observation_future_clock.py \
             tests/test_optimizer_observation_future_recency_anchor.py \
+            tests/test_optimizer_observation_recency_anchor_snapshot_race.py \
             tests/test_optimizer_observation_snapshot.py \
             tests/test_optimizer_routing_epoch.py \
             tests/test_optimizer_routing_epoch_fence.py \
@@ -161,6 +164,7 @@ jobs:
             tests/test_optimizer_observation_feasibility_history.py \
             tests/test_optimizer_observation_future_clock.py \
             tests/test_optimizer_observation_future_recency_anchor.py \
+            tests/test_optimizer_observation_recency_anchor_snapshot_race.py \
             tests/test_optimizer_observation_snapshot.py \
             tests/test_optimizer_routing_epoch.py \
             tests/test_optimizer_routing_epoch_fence.py \
@@ -200,12 +204,14 @@ jobs:
           assert manifest['optimizer_observation_authority'] == 'routing_descriptor_only'
           assert manifest['optimizer_observation_snapshot'] == 'single_sqlite_read_transaction'
           assert manifest['optimizer_observation_snapshot_scope'] == 'one_routing_decision'
+          assert manifest['optimizer_observation_snapshot_commit_identity'] == 'history_autoincrement_id_in_same_read_transaction'
           assert manifest['optimizer_observation_snapshot_latest_budget'] == 48
           assert manifest['optimizer_observation_snapshot_history_budget'] == 192
           assert manifest['optimizer_observation_snapshot_authority'] == 'routing_descriptor_only'
           assert manifest['optimizer_observation_snapshot_evaluator_calls'] == 0
           assert manifest['optimizer_observation_recency_clock_normalization'] == 'paid_history_commit_first_local_routing_anchor'
           assert manifest['optimizer_observation_recency_clock_anchor_scope'] == 'routing_snapshot_only'
+          assert manifest['optimizer_observation_recency_clock_anchor_identity'] == 'coherent_snapshot_history_autoincrement_id'
           assert manifest['optimizer_observation_recency_clock_anchor_repair'] == 'monotone_earlier_caller_clock'
           assert manifest['optimizer_observation_recency_clock_anchor_authority'] == 'routing_descriptor_only'
           assert manifest['optimizer_observation_recency_clock_anchor_evaluator_calls'] == 0

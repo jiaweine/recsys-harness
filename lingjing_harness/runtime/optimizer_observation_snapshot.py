@@ -62,20 +62,25 @@ def _decode_history_rows(rows: list[Any]) -> list[dict[str, Any]]:
             continue
         if not isinstance(config, dict):
             continue
-        observations.append(
-            {
-                "status": "optimizer_observation_history",
-                "config_key": str(row["config_key"]),
-                "config": config,
-                "objective": float(row["score"]),
-                "feasible": bool(row["feasible"]),
-                "source": row["source"],
-                "generation": int(row["generation"]),
-                "feasibility_basis": row["feasibility_basis"],
-                "constraints": constraints if isinstance(constraints, dict) else {},
-                "observed_at": float(row["observed_at"]),
-            }
-        )
+        decoded = {
+            "status": "optimizer_observation_history",
+            "config_key": str(row["config_key"]),
+            "config": config,
+            "objective": float(row["score"]),
+            "feasible": bool(row["feasible"]),
+            "source": row["source"],
+            "generation": int(row["generation"]),
+            "feasibility_basis": row["feasibility_basis"],
+            "constraints": constraints if isinstance(constraints, dict) else {},
+            "observed_at": float(row["observed_at"]),
+        }
+        try:
+            keys = row.keys()
+        except AttributeError:
+            keys = ()
+        if "id" in keys:
+            decoded["observation_commit_id"] = max(0, int(row["id"]))
+        observations.append(decoded)
     return observations
 
 
@@ -91,6 +96,7 @@ def _read_atomic_snapshot(
         return {
             "observations": [],
             "history": [],
+            "history_clock_rows": [],
             "history_rows_read": 0,
             "history_filtered_rows": 0,
             "latest_newest_at": 0.0,
@@ -111,7 +117,7 @@ def _read_atomic_snapshot(
             )
             history_rows = connection.execute(
                 """
-                select config_key,config,score,feasible,source,generation,feasibility_basis,
+                select id,config_key,config,score,feasible,source,generation,feasibility_basis,
                        constraints,observed_at
                 from agent_optimizer_observation_history
                 where catalog_key=? and domain=?
@@ -132,6 +138,28 @@ def _read_atomic_snapshot(
 
     observations = _decode_latest_rows(list(latest_rows))
     raw_history = _decode_history_rows(list(history_rows))
+    latest_id_by_config: dict[str, int] = {}
+    history_clock_rows: list[dict[str, Any]] = []
+    for row in raw_history:
+        observation_id = max(0, int(row.get("observation_commit_id", 0) or 0))
+        config_key = str(row.get("config_key") or "")
+        if observation_id > 0:
+            latest_id_by_config[config_key] = max(
+                observation_id,
+                latest_id_by_config.get(config_key, 0),
+            )
+            history_clock_rows.append(
+                {
+                    "observation_id": observation_id,
+                    "config_key": config_key,
+                    "observed_at": float(row.get("observed_at", 0.0) or 0.0),
+                }
+            )
+    for row in observations:
+        observation_id = latest_id_by_config.get(str(row.get("config_key") or ""), 0)
+        if observation_id > 0:
+            row["observation_commit_id"] = observation_id
+
     latest_config_keys = {
         str(row.get("config_key") or "").strip()
         for row in observations
@@ -145,6 +173,7 @@ def _read_atomic_snapshot(
     return {
         "observations": observations,
         "history": history,
+        "history_clock_rows": history_clock_rows,
         "history_rows_read": len(raw_history),
         "history_filtered_rows": max(0, len(raw_history) - len(history)),
         "latest_newest_at": max(
@@ -298,6 +327,7 @@ def install_optimizer_observation_snapshot(
                 "optimizer_observation_snapshot_scope": "one_routing_decision",
                 "optimizer_observation_snapshot_history_scope": "current_latest_config_set",
                 "optimizer_observation_snapshot_history_match": "exact_durable_config_key",
+                "optimizer_observation_snapshot_commit_identity": "history_autoincrement_id_in_same_read_transaction",
                 "optimizer_observation_snapshot_latest_budget": observation_memory.OPTIMIZER_OBSERVATION_READ_BUDGET,
                 "optimizer_observation_snapshot_history_budget": observation_memory.OPTIMIZER_OBSERVATION_HISTORY_READ_BUDGET,
                 "optimizer_observation_snapshot_states": (
