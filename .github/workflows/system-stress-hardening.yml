@@ -13,6 +13,7 @@ on:
       - 'lingjing_harness/rate_limit_maintenance.py'
       - 'lingjing_harness/runtime/optimizer_observation_memory.py'
       - 'lingjing_harness/runtime/optimizer_observation_recency_anchor.py'
+      - 'lingjing_harness/runtime/optimizer_observation_legacy_recency_anchor.py'
       - 'lingjing_harness/runtime/optimizer_observation_snapshot.py'
       - 'lingjing_harness/runtime/optimizer_routing_checkpoint.py'
       - 'lingjing_harness/runtime/optimizer_routing_epoch.py'
@@ -31,6 +32,7 @@ on:
       - 'tests/test_optimizer_observation_clock_order.py'
       - 'tests/test_optimizer_observation_future_clock.py'
       - 'tests/test_optimizer_observation_future_recency_anchor.py'
+      - 'tests/test_optimizer_observation_legacy_future_recency_anchor.py'
       - 'tests/test_optimizer_observation_recency_anchor_snapshot_race.py'
       - 'tests/test_optimizer_observation_snapshot.py'
       - 'tests/test_optimizer_observation_feasibility_history.py'
@@ -48,6 +50,7 @@ on:
       - 'lingjing_harness/rate_limit_maintenance.py'
       - 'lingjing_harness/runtime/optimizer_observation_memory.py'
       - 'lingjing_harness/runtime/optimizer_observation_recency_anchor.py'
+      - 'lingjing_harness/runtime/optimizer_observation_legacy_recency_anchor.py'
       - 'lingjing_harness/runtime/optimizer_observation_snapshot.py'
       - 'lingjing_harness/runtime/optimizer_routing_checkpoint.py'
       - 'lingjing_harness/runtime/optimizer_routing_epoch.py'
@@ -66,6 +69,7 @@ on:
       - 'tests/test_optimizer_observation_clock_order.py'
       - 'tests/test_optimizer_observation_future_clock.py'
       - 'tests/test_optimizer_observation_future_recency_anchor.py'
+      - 'tests/test_optimizer_observation_legacy_future_recency_anchor.py'
       - 'tests/test_optimizer_observation_recency_anchor_snapshot_race.py'
       - 'tests/test_optimizer_observation_snapshot.py'
       - 'tests/test_optimizer_observation_feasibility_history.py'
@@ -129,6 +133,7 @@ jobs:
               tests/test_optimizer_observation_clock_order.py \
               tests/test_optimizer_observation_future_clock.py \
               tests/test_optimizer_observation_future_recency_anchor.py \
+              tests/test_optimizer_observation_legacy_future_recency_anchor.py \
               tests/test_optimizer_observation_recency_anchor_snapshot_race.py \
               tests/test_optimizer_observation_snapshot.py \
               tests/test_optimizer_observation_feasibility_history.py \
