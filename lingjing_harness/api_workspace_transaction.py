@@ -114,6 +114,40 @@ def install_workspace_transaction_boundary(core: Any) -> None:
         except Exception:
             return False
 
+    def _publication_pending(revision: str) -> bool:
+        pending = getattr(core.store, "workspace_publication_pending", None)
+        if not callable(pending):
+            return False
+        try:
+            return bool(pending(revision))
+        except Exception:
+            return False
+
+    def _begin_sync_cleanup() -> str | None:
+        begin = getattr(core.store, "begin_workspace_update", None)
+        abort = getattr(core.store, "abort_workspace_update", None)
+        if not callable(begin) or not callable(abort):
+            return None
+        owner = f"{core.WORKER_ID}:sync-cleanup"
+        try:
+            acquired = begin(
+                owner,
+                lease_seconds=core.WORKSPACE_UPDATE_LEASE_SECONDS,
+            )
+        except Exception:
+            return None
+        return owner if acquired else None
+
+    def _abort_sync_cleanup(owner: str) -> bool:
+        abort = getattr(core.store, "abort_workspace_update", None)
+        if not callable(abort):
+            return False
+        try:
+            abort(owner)
+            return True
+        except Exception:
+            return False
+
     def _sync_workspace() -> bool:
         shared = core.store.ensure_workspace_revision(core.CATALOG_REVISION)
         if not shared:
@@ -127,26 +161,54 @@ def install_workspace_transaction_boundary(core: Any) -> None:
             if active_revision == shared:
                 if core.CATALOG_REVISION != shared:
                     _install_catalog(active, shared)
-                if not _release_publication(shared):
-                    return False
-                try:
-                    updating = core.store.workspace_update_active()
-                except Exception:
-                    return False
-                if not updating:
+
+                # A matching publication fence is itself exclusive authority over
+                # the global pending path. Remove this publication's staging while
+                # that fence still blocks the next writer, then release it.
+                if _publication_pending(shared):
                     _discard_pending()
-                return True
+                    return _release_publication(shared)
+
+                # Without a publication fence, never perform a check-then-delete.
+                # Acquire a short durable update lease first. If another writer won
+                # the handoff, leave its staging untouched; if we win, cleanup is
+                # exclusive until abort releases the temporary lease.
+                cleanup_owner = _begin_sync_cleanup()
+                if cleanup_owner is not None:
+                    _discard_pending()
+                    if not _abort_sync_cleanup(cleanup_owner):
+                        return False
+                return _release_publication(shared)
 
             pending_revision, pending = _pending_catalog()
             if pending_revision == shared and pending is not None:
-                promoted = _promote_pending(shared, pending)
-                if promoted is None:
+                # Normal protocol recovery keeps publication_revision set, which
+                # gives this synchronizer exclusive filesystem cleanup authority.
+                if _publication_pending(shared):
+                    promoted = _promote_pending(shared, pending)
+                    if promoted is None:
+                        return False
+                    _install_catalog(promoted, shared)
+                    _discard_pending()
+                    return _release_publication(shared)
+
+                # Legacy/manual durable revisions may have no publication fence.
+                # Recover them only after acquiring an equivalent durable lease so
+                # a new writer cannot take ownership of catalog.pending.json while
+                # promotion/cleanup is in progress.
+                cleanup_owner = _begin_sync_cleanup()
+                if cleanup_owner is None:
                     return False
-                _install_catalog(promoted, shared)
-                if not _release_publication(shared):
-                    return False
-                _discard_pending()
-                return True
+                try:
+                    promoted = _promote_pending(shared, pending)
+                    if promoted is None:
+                        return False
+                    _install_catalog(promoted, shared)
+                    _discard_pending()
+                    return True
+                finally:
+                    if not _abort_sync_cleanup(cleanup_owner):
+                        return False
 
             # A writer using this protocol never changes the active file before
             # the durable commit. Therefore an active/durable mismatch without a
@@ -199,6 +261,10 @@ def install_workspace_transaction_boundary(core: Any) -> None:
                     raise RuntimeError("工作区 Catalog 发布失败")
                 _install_catalog(promoted, revision)
 
+            # The publication/update fence is the authority to mutate the single
+            # global pending path. Clean our staging before releasing that fence;
+            # after release, another worker may immediately own this filename.
+            _discard_pending()
             finish_owned = getattr(core.store, "finish_workspace_update", None)
             if callable(finish_owned):
                 finished = finish_owned(core.WORKER_ID, revision)
@@ -206,7 +272,6 @@ def install_workspace_transaction_boundary(core: Any) -> None:
                     pending = getattr(core.store, "workspace_publication_pending", None)
                     if callable(pending) and pending(revision):
                         raise RuntimeError("工作区发布 fence 释放失败")
-            _discard_pending()
             return revision
         except Exception:
             if not committed:
