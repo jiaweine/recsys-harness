@@ -12,6 +12,7 @@ on:
       - 'tests/test_workspace_import_crash_consistency.py'
       - 'tests/test_workspace_import_promotion_race.py'
       - 'tests/test_workspace_import_publication_fence.py'
+      - 'tests/test_workspace_publication_schema_migration_race.py'
   pull_request:
     paths:
       - '.github/workflows/workspace-publication-stress.yml'
@@ -23,6 +24,7 @@ on:
       - 'tests/test_workspace_import_crash_consistency.py'
       - 'tests/test_workspace_import_promotion_race.py'
       - 'tests/test_workspace_import_publication_fence.py'
+      - 'tests/test_workspace_publication_schema_migration_race.py'
   workflow_dispatch:
 
 permissions:
@@ -47,5 +49,6 @@ jobs:
             pytest -q \
               tests/test_workspace_import_crash_consistency.py \
               tests/test_workspace_import_promotion_race.py \
-              tests/test_workspace_import_publication_fence.py
+              tests/test_workspace_import_publication_fence.py \
+              tests/test_workspace_publication_schema_migration_race.py
           done

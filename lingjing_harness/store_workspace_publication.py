@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import time
 from typing import Any
 
@@ -37,9 +38,22 @@ def install_workspace_publication_fence(store_module: Any) -> None:
                 ).fetchall()
             }
             if "publication_revision" not in columns:
-                connection.execute(
-                    "alter table workspace_state add column publication_revision text"
-                )
+                try:
+                    connection.execute(
+                        "alter table workspace_state add column publication_revision text"
+                    )
+                except sqlite3.OperationalError as migration_error:
+                    # ``self._lock`` is process-local. Two workers first opening the
+                    # same legacy DB can both observe the old schema before either
+                    # ALTER commits. If a peer won that DDL race, accept the failed
+                    # ALTER only after directly verifying the required column now
+                    # exists. Any lock/corruption/unrelated failure is re-raised.
+                    try:
+                        connection.execute(
+                            "select publication_revision from workspace_state limit 0"
+                        )
+                    except sqlite3.OperationalError:
+                        raise migration_error
             connection.commit()
 
     def _workspace_update_row(self, connection, now: float):
