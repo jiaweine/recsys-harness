@@ -17,6 +17,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from . import api_core as _core
+from .api_attachment_integrity import install_attachment_integrity_boundary
 from .api_shutdown import install_shutdown_boundary
 from .online_experiment_api import install_online_experiment_routes
 from .proxy_trust import TRUSTED_PROXY_NETWORKS, client_key as _proxy_client_key
@@ -39,6 +40,10 @@ _core.TRUSTED_PROXY_NETWORKS = TRUSTED_PROXY_NETWORKS
 # Keep the shared SQLite rate-limit table bounded on a deterministic maintenance
 # schedule.  Allowance/counter semantics remain owned by WorkspaceStore.
 install_rate_limit_maintenance(_core.store)
+
+# Attachment payload bytes and durable metadata live in separate namespaces, and
+# crash-orphaned raw files are reclaimed without shrinking the public API surface.
+install_attachment_integrity_boundary(_core)
 
 
 # Full run snapshots grow with every action, observation and event.  Persisting
