@@ -53,11 +53,16 @@ def main() -> None:
 
         page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30_000)
         page.locator("#dataMeta", has_text="内容").wait_for(state="visible", timeout=15_000)
+        # ``boot()`` renders history, opens the newest conversation, then renders
+        # history again. Wait for that second render to finish before observing the
+        # run-library module's double-rAF selection hydration.
+        page.locator("body.ready").wait_for(state="attached", timeout=15_000)
         current = page.locator('.history-item[aria-current="page"]')
-        current.first.wait_for(state="attached", timeout=10_000)
-        if current.count() != 1:
-            raise RuntimeError("Workspace Switcher QA expected exactly one current history task")
-        page.wait_for_timeout(300)
+        expected_current = page.locator(
+            f'.history-item[aria-current="page"][data-id="{search["id"]}"]'
+        )
+        expected_current.wait_for(state="attached", timeout=10_000)
+        expect(current).to_have_count(1, timeout=10_000)
 
         if current.get_attribute("data-id") != str(search["id"]):
             raise RuntimeError("Workspace Switcher QA did not start on the newest persisted task")
