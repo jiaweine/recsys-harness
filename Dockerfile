@@ -1,4 +1,4 @@
-FROM python:3.11-slim@sha256:1042b61448fef4ba92d16a8c7eb4996d027568ce64792a7877fd88511e0af7c6 AS builder
+FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534 AS builder
 WORKDIR /build
 COPY pyproject.toml README.md requirements-runtime.txt ./
 COPY scripts/verify_runtime_wheelhouse.py ./verify_runtime_wheelhouse.py
@@ -7,7 +7,7 @@ COPY frontend ./frontend
 RUN pip wheel --no-cache-dir --constraint requirements-runtime.txt --wheel-dir /wheels . \
     && python verify_runtime_wheelhouse.py requirements-runtime.txt /wheels
 
-FROM python:3.11-slim@sha256:1042b61448fef4ba92d16a8c7eb4996d027568ce64792a7877fd88511e0af7c6
+FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     LINGJING_DATA_DIR=/data
