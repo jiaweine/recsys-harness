@@ -9,6 +9,7 @@ on:
       - 'lingjing_harness/api_recovery.py'
       - 'lingjing_harness/api_security.py'
       - 'lingjing_harness/api_shutdown.py'
+      - 'lingjing_harness/api_workspace_transaction.py'
       - 'lingjing_harness/store.py'
       - 'lingjing_harness/store_handoff.py'
       - 'lingjing_harness/rate_limit_maintenance.py'
@@ -22,6 +23,7 @@ on:
       - 'tests/test_api.py'
       - 'tests/test_api_attachment_payload_integrity.py'
       - 'tests/test_api_security_boundary.py'
+      - 'tests/test_workspace_import_crash_consistency.py'
       - 'tests/test_run_lease_execution_fence.py'
       - 'tests/test_runtime_consistency.py'
       - 'tests/test_startup_recovery_batching.py'
@@ -48,6 +50,7 @@ on:
       - 'lingjing_harness/api_recovery.py'
       - 'lingjing_harness/api_security.py'
       - 'lingjing_harness/api_shutdown.py'
+      - 'lingjing_harness/api_workspace_transaction.py'
       - 'lingjing_harness/store.py'
       - 'lingjing_harness/store_handoff.py'
       - 'lingjing_harness/rate_limit_maintenance.py'
@@ -61,6 +64,7 @@ on:
       - 'tests/test_api.py'
       - 'tests/test_api_attachment_payload_integrity.py'
       - 'tests/test_api_security_boundary.py'
+      - 'tests/test_workspace_import_crash_consistency.py'
       - 'tests/test_run_lease_execution_fence.py'
       - 'tests/test_runtime_consistency.py'
       - 'tests/test_startup_recovery_batching.py'
@@ -96,7 +100,7 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: pip install -e . --no-deps
-      - name: Repeat durable fencing, lifecycle, security, attachment, and rollback contracts
+      - name: Repeat durable fencing, lifecycle, security, workspace, attachment, and rollback contracts
         run: |
           for pass in 1 2 3; do
             echo "durable recovery race pass ${pass}/3"
@@ -106,6 +110,7 @@ jobs:
               tests/test_graceful_handoff.py \
               tests/test_rate_limit_maintenance.py \
               tests/test_startup_recovery_batching.py \
+              tests/test_workspace_import_crash_consistency.py \
               tests/test_api_attachment_payload_integrity.py \
               tests/test_api_security_boundary.py
             pytest -q \
