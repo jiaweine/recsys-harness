@@ -6,7 +6,7 @@ from urllib import request
 
 from playwright.sync_api import expect, sync_playwright
 
-from scripts.visual_qa_geometry import meets_min_touch_target
+from visual_qa_geometry import meets_min_touch_target
 
 
 BASE_URL = os.environ.get("RECSYS_CAPTURE_URL", "http://127.0.0.1:8765").rstrip("/")
