@@ -6,6 +6,8 @@ from urllib import request
 
 from playwright.sync_api import expect, sync_playwright
 
+from visual_qa_geometry import meets_min_touch_target
+
 
 BASE_URL = os.environ.get("RECSYS_CAPTURE_URL", "http://127.0.0.1:8765").rstrip("/")
 
@@ -130,7 +132,7 @@ def main() -> None:
         if not mobile_trigger.is_visible():
             raise RuntimeError("Mobile workspace navigation disappeared when no completed run exists")
         box = mobile_trigger.bounding_box()
-        if not box or box["height"] < 44:
+        if not meets_min_touch_target(box):
             raise RuntimeError(f"Mobile workspace navigation lost its 44px touch target: {box}")
 
         mobile_trigger.click()
