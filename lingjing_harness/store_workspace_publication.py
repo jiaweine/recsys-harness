@@ -132,10 +132,14 @@ def install_workspace_publication_fence(store_module: Any) -> None:
             if row and row.get("publication_revision"):
                 connection.rollback()
                 return False
+            # The workspace update lease is a mutex over one global staging path,
+            # not a re-entrant worker lease. A single process can serve multiple
+            # import requests concurrently with the same WORKER_ID; letting an
+            # equal owner re-enter would allow those requests to overwrite each
+            # other's catalog.pending.json before either publication commits.
             if (
                 row
                 and row.get("update_owner")
-                and row.get("update_owner") != owner_id
                 and float(row.get("update_until") or 0.0) > now
             ):
                 connection.rollback()
