@@ -13,10 +13,10 @@ _RUN_SNAPSHOT_RETRIES = 3
 def install_terminal_takeover_execution_fence(core: Any) -> None:
     """Keep a terminal successor from disarming a stale local executor fence.
 
-    ``WorkspaceStore.save_run`` deliberately returns the durable status when an
-    attempted write loses a race.  That is useful for read/state convergence, but
-    an active local executor must treat a durable terminal status as lost
-    authority: the successor that owns the lease has already finished the run.
+    ``WorkspaceStore.save_run`` deliberately accepts an existing terminal row as
+    authoritative and returns its status when a stale writer arrives later.  That
+    is useful for read/state convergence, but an active local executor must treat
+    the transition as lost authority: the successor has already finished the run.
     Otherwise the local row becomes terminal, the normal active-status renewal
     fence is skipped, and the stale executor can enter its next tool side effect.
 
@@ -46,6 +46,15 @@ def install_terminal_takeover_execution_fence(core: Any) -> None:
             and requested_status in core.ACTIVE_RUN_STATUSES
             and persisted_status not in core.ACTIVE_RUN_STATUSES
         ):
+            # api_core catches ordinary Exception values around runner.run() so a
+            # _RunLeaseLost raised from an event sink would otherwise be converted
+            # into its generic failure path before the outer execution-fence layer
+            # can retire the run.  Once durable terminal authority is observed at
+            # this side-effect boundary, remove the stale local executor first;
+            # the raised control signal then unwinds the runner and the generic
+            # handler finds no local row to mutate or persist.
+            with core.RUN_LOCK:
+                core.RUNS.pop(run_id, None)
             persist_meta = getattr(core, "_PERSIST_META", None)
             if isinstance(persist_meta, dict):
                 persist_meta.pop(run_id, None)
@@ -86,8 +95,9 @@ def install_terminal_takeover_execution_fence(core: Any) -> None:
             if persisted_status not in core.ACTIVE_RUN_STATUSES:
                 try:
                     # Return the authoritative terminal payload to the reader, but
-                    # leave the active local executor row untouched.  Its next
-                    # persist/execute boundary must still be able to fail closed.
+                    # leave the active local executor row untouched.  Read-side
+                    # cache convergence cannot safely prove there is no executor
+                    # about to enter its next fenced side-effect boundary.
                     return core.store.get_run(run_id)
                 except KeyError as exc:
                     raise HTTPException(404, "执行任务不存在") from exc
