@@ -14,6 +14,7 @@ from .api_recovery import (
     install_startup_recovery_batching,
 )
 from .api_security import install_api_security_boundary
+from .api_terminal_takeover_fence import install_terminal_takeover_execution_fence
 from .store_handoff import release_interrupted_run
 
 
@@ -154,10 +155,11 @@ def install_shutdown_boundary(core: Any) -> None:
 
     # This installer is the stable late hook invoked after the API wrapper has
     # replaced persistence/recovery functions and installed all routes.  Keep the
-    # browser security and startup recovery layers idempotent and install them
-    # before the graceful-shutdown guard so repeated integration imports cannot
-    # silently lose one of the boundaries.
+    # browser security, terminal-takeover fencing, and startup recovery layers
+    # idempotent and install them before the graceful-shutdown guard so repeated
+    # integration imports cannot silently lose one of the boundaries.
     install_api_security_boundary(core)
+    install_terminal_takeover_execution_fence(core)
     install_startup_recovery_batching(core)
     install_expired_run_recovery_heartbeat(core)
 
