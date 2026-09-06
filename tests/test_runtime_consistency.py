@@ -261,9 +261,15 @@ def test_completed_checkpoint_recovery_finalizes_without_replaying_harness(monke
         conversation["id"],
         snapshot["goal"],
         api_module._compact_run_snapshot(snapshot),
-        owner_id=api_module.WORKER_ID,
+        owner_id="crashed-worker:run:old-session",
         lease_seconds=30,
     )
+    with api_module.store._lock, api_module.store._connect() as connection:  # noqa: SLF001 - crash fixture
+        connection.execute(
+            "update runs set lease_until=? where run_id=?",
+            (now - 1.0, run_id),
+        )
+        connection.commit()
 
     def fail_if_replayed():
         raise AssertionError("completed checkpoint must not fork and replay the harness")
