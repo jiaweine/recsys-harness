@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 
@@ -44,6 +45,7 @@ def install_cancel_execution_fence(core: Any) -> None:
 
     original_persist = core._persist_run
     original_execute = core._execute
+    runner_context = threading.local()
 
     def cancel_requested(run_id: str) -> bool:
         return core.store.run_status(run_id) == "cancel_requested"
@@ -57,16 +59,15 @@ def install_cancel_execution_fence(core: Any) -> None:
         requested_status = str(row.get("status") or "running")
         original_persist(row)
 
-        # Only convert a durable cancel into runner control flow for a task that
-        # is actually executing.  Startup recovery briefly places claimed rows in
-        # RUNS before scheduling them; RUN_TASKS distinguishes that staging state
-        # from a live executor and avoids turning a recovery race into a poison-row
-        # failure.  The normal RunCancelled handler will atomically finalize the
-        # durable row as cancelled and append the public cancel event.
-        run_tasks = getattr(core, "RUN_TASKS", None)
-        executing = isinstance(run_tasks, dict) and run_id in run_tasks
+        # Persisting attachments/perception also happens while the asyncio run
+        # task exists, but before api_core enters its RunCancelled handler.  Fence
+        # only persistence invoked from inside runner.run itself.  The thread-local
+        # marker is set in the executor thread around the runner call, so startup
+        # recovery staging and pre-run perception remain ordinary cooperative
+        # cancellation paths rather than unhandled control-flow exceptions.
+        executing_here = getattr(runner_context, "run_id", None) == run_id
         if (
-            executing
+            executing_here
             and requested_status in core.ACTIVE_RUN_STATUSES
             and str(row.get("status") or "") == "cancel_requested"
         ):
@@ -88,12 +89,23 @@ def install_cancel_execution_fence(core: Any) -> None:
         )
 
         def run_with_completion_cancel_fence(*args: Any, **run_kwargs: Any) -> Any:
-            result = original_run(*args, **run_kwargs)
-            # Runner completion is the last boundary before the API publishes the
-            # assistant message.  A cancel already durable here wins and is
-            # finalized by api_core's existing RunCancelled handler.
-            raise_if_cancel_requested(run_id)
-            return result
+            previous_run_id = getattr(runner_context, "run_id", None)
+            runner_context.run_id = run_id
+            try:
+                result = original_run(*args, **run_kwargs)
+                # Runner completion is the last boundary before the API publishes
+                # the assistant message.  A cancel already durable here wins and
+                # is finalized by api_core's existing RunCancelled handler.
+                raise_if_cancel_requested(run_id)
+                return result
+            finally:
+                if previous_run_id is None:
+                    try:
+                        del runner_context.run_id
+                    except AttributeError:
+                        pass
+                else:
+                    runner_context.run_id = previous_run_id
 
         runner.run = run_with_completion_cancel_fence
         try:
