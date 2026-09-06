@@ -24,6 +24,7 @@ jobs:
           python -m compileall -q \
             lingjing_harness/store.py \
             lingjing_harness/store_handoff.py \
+            lingjing_harness/store_run_recovery.py \
             lingjing_harness/store_run_schema_migration.py \
             lingjing_harness/rate_limit_maintenance.py \
             scripts/stress_smoke.py \
