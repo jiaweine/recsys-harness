@@ -39,6 +39,38 @@ def test_run_lease_prevents_duplicate_recovery_until_expired(tmp_path):
     assert two.get_run("run-lease")["owner_id"] == "worker-two"
 
 
+def test_run_recovery_claim_is_not_reentrant_for_same_owner(tmp_path):
+    import time
+    path = tmp_path / "lease-recovery-reentry.db"
+    store = WorkspaceStore(path)
+    conversation = store.create_conversation()
+    now = time.time()
+    snapshot = {"run_id":"run-reentry","conversation_id":conversation["id"],"goal":"recover","status":"running","events":[],"created_at":now,"updated_at":now}
+    assert store.reserve_run(
+        "run-reentry",
+        conversation["id"],
+        "recover",
+        snapshot,
+        owner_id="worker-one:run:session-a",
+        lease_seconds=2,
+    )
+
+    # Recovery is a takeover operation, not a way for the current executor to
+    # re-enter its own live lease and accidentally schedule duplicate execution.
+    assert store.claim_recoverable_runs(
+        owner_id="worker-one:run:session-a",
+        lease_seconds=2,
+        now=now + .5,
+    ) == []
+
+    claimed = store.claim_recoverable_runs(
+        owner_id="worker-one:run:session-a",
+        lease_seconds=2,
+        now=now + 3,
+    )
+    assert [row["run_id"] for row in claimed] == ["run-reentry"]
+
+
 def test_remote_cancel_wins_over_stale_running_checkpoint(tmp_path):
     import time
     path = tmp_path / "remote-cancel.db"

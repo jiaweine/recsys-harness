@@ -9,7 +9,10 @@ import time
 from typing import Any
 import uuid
 
-from .api_recovery import install_startup_recovery_batching
+from .api_recovery import (
+    install_expired_run_recovery_heartbeat,
+    install_startup_recovery_batching,
+)
 from .api_security import install_api_security_boundary
 from .store_handoff import release_interrupted_run
 
@@ -156,6 +159,7 @@ def install_shutdown_boundary(core: Any) -> None:
     # silently lose one of the boundaries.
     install_api_security_boundary(core)
     install_startup_recovery_batching(core)
+    install_expired_run_recovery_heartbeat(core)
 
     if getattr(core, "_GRACEFUL_SHUTDOWN_INSTALLED", False):
         return
