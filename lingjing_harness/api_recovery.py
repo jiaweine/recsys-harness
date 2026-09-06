@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from typing import Any
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def install_startup_recovery_batching(core: Any) -> None:
@@ -69,8 +73,15 @@ def install_startup_recovery_batching(core: Any) -> None:
     core._STARTUP_RECOVERY_BATCHING_INSTALLED = True
 
 
-async def run_lease_heartbeat_iteration(core: Any) -> None:
-    """Renew local execution leases, then recover newly claimable durable runs."""
+async def run_lease_heartbeat_iteration(core: Any) -> bool:
+    """Renew local leases, then best-effort recover newly claimable durable runs.
+
+    Recovery is deliberately fail-soft here.  A malformed checkpoint, transient
+    storage failure, or lease race while recovering peer work must not terminate
+    the coroutine that keeps this process's already-running jobs leased.  Direct
+    startup recovery still propagates errors normally; only the periodic sweep is
+    isolated.  Task cancellation remains authoritative and is never swallowed.
+    """
 
     with core.RUN_LOCK:
         active_ids = [
@@ -89,7 +100,14 @@ async def run_lease_heartbeat_iteration(core: Any) -> None:
     # hardened startup recovery repeatedly therefore cannot duplicate this
     # process's own live runs, while ownerless or expired peer runs become
     # recoverable as soon as a heartbeat observes them.
-    await core._recover_on_startup()
+    try:
+        await core._recover_on_startup()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        _LOGGER.exception("expired run recovery sweep failed")
+        return False
+    return True
 
 
 def install_expired_run_recovery_heartbeat(core: Any) -> None:
