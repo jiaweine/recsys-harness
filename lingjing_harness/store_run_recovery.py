@@ -13,8 +13,10 @@ def install_run_recovery_claim_fence(store_module: Any) -> None:
     already executing.  Only ownerless, lease-less, or genuinely expired active
     rows are recoverable.
 
-    Keep the existing transaction, future-clock repair, ordering, snapshot shape,
-    and lease-duration semantics unchanged.
+    ``now`` is the recovery eligibility clock.  Callers that intentionally anchor
+    one sweep may pass a separate ``lease_now`` so a later claim still receives a
+    fresh lease starting when that claim actually happens.  Omitting ``lease_now``
+    preserves the historical single-clock behavior for every existing caller.
     """
 
     cls = store_module.WorkspaceStore
@@ -28,12 +30,16 @@ def install_run_recovery_claim_fence(store_module: Any) -> None:
         lease_seconds: float,
         limit: int = 20,
         now: float | None = None,
+        lease_now: float | None = None,
     ) -> list[dict[str, Any]]:
-        now = time.time() if now is None else float(now)
-        lease_until = now + max(1.0, float(lease_seconds))
+        eligibility_now = time.time() if now is None else float(now)
+        lease_started_at = (
+            eligibility_now if lease_now is None else float(lease_now)
+        )
+        lease_until = lease_started_at + max(1.0, float(lease_seconds))
         with self._lock, self._connect() as connection:
             connection.execute("begin immediate")
-            self._repair_future_run_leases(connection, now)
+            self._repair_future_run_leases(connection, eligibility_now)
             rows = connection.execute(
                 """
                 select run_id,conversation_id,goal,status,snapshot
@@ -43,7 +49,7 @@ def install_run_recovery_claim_fence(store_module: Any) -> None:
                 order by updated_at desc
                 limit ?
                 """,
-                (now, limit),
+                (eligibility_now, limit),
             ).fetchall()
             claimed = []
             for row in rows:
@@ -54,7 +60,7 @@ def install_run_recovery_claim_fence(store_module: Any) -> None:
                       and status in ('running','interrupted','cancel_requested')
                       and (owner_id is null or lease_until is null or lease_until<?)
                     """,
-                    (owner_id, lease_until, row["run_id"], now),
+                    (owner_id, lease_until, row["run_id"], eligibility_now),
                 )
                 if cursor.rowcount != 1:
                     continue
