@@ -151,13 +151,18 @@ class WorkspaceStore:
         }
 
     def get_conversation(self, conversation_id: str) -> dict[str, Any]:
-        with self._connect() as connection:
-            row = connection.execute(
-                "select * from conversations where id=?", (conversation_id,)
-            ).fetchone()
-        if not row:
-            raise KeyError(conversation_id)
-        return {**dict(row), "messages": self.list_messages(conversation_id)}
+        # This is a composite read across two short-lived SQLite connections. Keep
+        # the process-local writer mutex for the full read so this store instance's
+        # high-frequency message commits cannot repeatedly reacquire the database
+        # writer lock between the conversation row and its message snapshot.
+        with self._lock:
+            with self._connect() as connection:
+                row = connection.execute(
+                    "select * from conversations where id=?", (conversation_id,)
+                ).fetchone()
+            if not row:
+                raise KeyError(conversation_id)
+            return {**dict(row), "messages": self.list_messages(conversation_id)}
 
     def list_messages(self, conversation_id: str) -> list[dict[str, Any]]:
         with self._connect() as connection:

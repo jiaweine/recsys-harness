@@ -178,3 +178,31 @@ def test_basic_workspace_writes_use_process_local_store_lock(tmp_path):
 
     store.add_message(conversation["id"], "assistant", "locked write")
     assert tracking.entries == 2
+
+
+def test_get_conversation_uses_process_local_store_lock(tmp_path):
+    store = WorkspaceStore(tmp_path / "composite-reader-lock.db")
+    conversation = store.create_conversation("reader", "audit")
+    store.add_message(conversation["id"], "assistant", "visible")
+
+    class TrackingLock:
+        def __init__(self, inner):
+            self.inner = inner
+            self.entries = 0
+
+        def __enter__(self):
+            self.inner.acquire()
+            self.entries += 1
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            self.inner.release()
+            return False
+
+    tracking = TrackingLock(store._lock)  # noqa: SLF001 - reader serialization contract
+    store._lock = tracking  # noqa: SLF001 - reader serialization contract
+
+    loaded = store.get_conversation(conversation["id"])
+
+    assert tracking.entries == 1
+    assert loaded["messages"][-1]["content"] == "visible"
