@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 import threading
 import time
 
 import pytest
 
 import lingjing_harness.api as api_module
+from lingjing_harness.api_shutdown import install_run_owner_session
 from lingjing_harness.store import WorkspaceStore
+from lingjing_harness.store_handoff import release_interrupted_run
 
 
 def _run_snapshot(run_id: str, conversation_id: str) -> dict:
@@ -102,6 +105,78 @@ def _assert_stale_worker_retired(store: WorkspaceStore, run_id: str) -> None:
         assert run_id not in api_module.RUNS
     assert api_module._PERSIST_META.get(run_id) is None
     assert store.assistant_for_job(store.get_run(run_id)["conversation_id"], run_id) is None
+
+
+def test_same_worker_label_gets_distinct_run_session_fences(tmp_path):
+    worker_a = SimpleNamespace(WORKER_ID="shared-worker")
+    worker_b = SimpleNamespace(WORKER_ID="shared-worker")
+    owner_a = install_run_owner_session(worker_a)
+    owner_b = install_run_owner_session(worker_b)
+
+    assert worker_a.WORKER_LABEL == worker_b.WORKER_LABEL == "shared-worker"
+    assert owner_a == worker_a.RUN_OWNER_ID == worker_a.WORKER_ID
+    assert owner_b == worker_b.RUN_OWNER_ID == worker_b.WORKER_ID
+    assert owner_a != owner_b
+    assert install_run_owner_session(worker_a) == owner_a
+
+    path = tmp_path / "same-worker-label.db"
+    old_worker = WorkspaceStore(path)
+    new_worker = WorkspaceStore(path)
+    conversation = old_worker.create_conversation("same worker label", "search")
+    run_id = "run-same-worker-label"
+    snapshot = _run_snapshot(run_id, conversation["id"])
+
+    assert old_worker.reserve_run(
+        run_id,
+        conversation["id"],
+        snapshot["goal"],
+        snapshot,
+        owner_id=owner_a,
+        lease_seconds=30,
+    )
+    leased = old_worker.get_run(run_id)
+    lease_until = float(leased["lease_until"])
+
+    # A second process with the same configured label must still be a distinct
+    # durable executor and cannot re-enter an unexpired run lease.
+    assert new_worker.claim_recoverable_runs(
+        owner_id=owner_b,
+        lease_seconds=30,
+        now=lease_until - 1.0,
+    ) == []
+    assert new_worker.renew_run_lease(run_id, owner_b, 30) is False
+
+    claimed = new_worker.claim_recoverable_runs(
+        owner_id=owner_b,
+        lease_seconds=30,
+        now=lease_until + 1.0,
+    )
+    assert [row["run_id"] for row in claimed] == [run_id]
+    assert new_worker.get_run(run_id)["owner_id"] == owner_b
+
+    # Once the successor session wins after expiry, every old-session mutation
+    # path must fail closed even though both processes share one worker label.
+    assert old_worker.renew_run_lease(run_id, owner_a, 30) is False
+    stale = {**snapshot, "status": "completed", "updated_at": lease_until + 2.0}
+    assert old_worker.save_run(
+        run_id,
+        conversation["id"],
+        snapshot["goal"],
+        "completed",
+        stale,
+        owner_id=owner_a,
+        lease_seconds=30,
+    ) == "running"
+    assert release_interrupted_run(
+        old_worker,
+        run_id,
+        owner_a,
+        {**snapshot, "status": "interrupted"},
+        now=lease_until + 2.0,
+    ) is False
+    current = new_worker.get_run(run_id)
+    assert current["status"] == "running"
+    assert current["owner_id"] == owner_b
 
 
 def test_takeover_fences_stale_worker_before_execute_side_effect(monkeypatch, tmp_path):
