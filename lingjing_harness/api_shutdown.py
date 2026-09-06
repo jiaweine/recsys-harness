@@ -9,6 +9,7 @@ import time
 from typing import Any
 import uuid
 
+from .api_cancel_execution_fence import install_cancel_execution_fence
 from .api_recovery import (
     install_expired_run_recovery_heartbeat,
     install_startup_recovery_batching,
@@ -145,7 +146,7 @@ def _handoff_run(core: Any, run_id: str) -> bool:
 
 
 def install_shutdown_boundary(core: Any) -> None:
-    """Install late-stage API lifecycle, security, and handoff hardening."""
+    """Install late-stage API lifecycle, security, cancellation, and handoff hardening."""
 
     # Configure the process-session run fencing identity before any lifespan can
     # reserve, recover, renew, persist, execute, or hand off durable runs.  All of
@@ -155,11 +156,12 @@ def install_shutdown_boundary(core: Any) -> None:
 
     # This installer is the stable late hook invoked after the API wrapper has
     # replaced persistence/recovery functions and installed all routes.  Keep the
-    # browser security, terminal-takeover fencing, and startup recovery layers
-    # idempotent and install them before the graceful-shutdown guard so repeated
-    # integration imports cannot silently lose one of the boundaries.
+    # browser security, execution fencing, and startup recovery layers idempotent
+    # and install them before the graceful-shutdown guard so repeated integration
+    # imports cannot silently lose one of the boundaries.
     install_api_security_boundary(core)
     install_terminal_takeover_execution_fence(core)
+    install_cancel_execution_fence(core)
     install_startup_recovery_batching(core)
     install_expired_run_recovery_heartbeat(core)
 
