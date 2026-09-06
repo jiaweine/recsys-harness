@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import threading
 from types import SimpleNamespace
 
@@ -122,6 +123,44 @@ def test_heartbeat_iteration_renews_local_runs_before_recovery_sweep():
         _recover_on_startup=recover,
     )
 
-    asyncio.run(run_lease_heartbeat_iteration(core))
-
+    assert asyncio.run(run_lease_heartbeat_iteration(core)) is True
     assert recoveries == ["sweep"]
+
+
+def test_recovery_sweep_failure_does_not_break_future_lease_heartbeats(caplog):
+    class RecordingStore:
+        def __init__(self):
+            self.renewals = []
+
+        def renew_run_lease(self, run_id, owner_id, lease_seconds):
+            self.renewals.append((run_id, owner_id, lease_seconds))
+            return True
+
+    store = RecordingStore()
+    recovery_attempts = []
+
+    async def recover():
+        recovery_attempts.append(len(recovery_attempts) + 1)
+        if len(recovery_attempts) == 1:
+            raise RuntimeError("malformed recovered checkpoint")
+
+    core = SimpleNamespace(
+        store=store,
+        RUN_LOCK=threading.RLock(),
+        RUNS={"local-run": {"status": "running"}},
+        ACTIVE_RUN_STATUSES={"running", "interrupted", "cancel_requested"},
+        WORKER_ID="worker-a:run:new",
+        RUN_LEASE_SECONDS=30.0,
+        _recover_on_startup=recover,
+    )
+
+    with caplog.at_level(logging.ERROR, logger="lingjing_harness.api_recovery"):
+        assert asyncio.run(run_lease_heartbeat_iteration(core)) is False
+        assert asyncio.run(run_lease_heartbeat_iteration(core)) is True
+
+    assert recovery_attempts == [1, 2]
+    assert store.renewals == [
+        ("local-run", "worker-a:run:new", 30.0),
+        ("local-run", "worker-a:run:new", 30.0),
+    ]
+    assert "expired run recovery sweep failed" in caplog.text
