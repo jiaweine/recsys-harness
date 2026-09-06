@@ -20,10 +20,10 @@ def install_startup_recovery_batching(core: Any) -> None:
     lease expiry and starve healthy work indefinitely.
 
     Preserve the durable claim transaction and hardened per-run recovery path,
-    but expose at most one row to each invocation of that path.  A failed row is
-    left durably fenced until its lease expires, while the next claim can proceed
-    to other recoverable work immediately.  Claim/infrastructure failures still
-    propagate because no row was successfully isolated in that case.
+    but expose at most one row to each invocation of that path.  Eligibility is
+    anchored once for the sweep so work that was live at the start does not become
+    claimable halfway through it.  Each individual claim gets a fresh lease clock,
+    so a long sweep cannot hand later rows leases that started in the past.
     """
 
     if getattr(core, "_STARTUP_RECOVERY_BATCHING_INSTALLED", False):
@@ -45,13 +45,20 @@ def install_startup_recovery_batching(core: Any) -> None:
             lease_seconds: float,
             limit: int = 20,
             now: float | None = None,
+            lease_now: float | None = None,
         ) -> list[dict[str, Any]]:
             nonlocal claimed_this_attempt, claim_returned
+            eligibility_now = anchored_now if now is None else float(now)
+            actual_lease_now = max(
+                eligibility_now,
+                time.time() if lease_now is None else float(lease_now),
+            )
             rows = original_claim(
                 owner_id=owner_id,
                 lease_seconds=lease_seconds,
                 limit=1,
-                now=anchored_now if now is None else float(now),
+                now=eligibility_now,
+                lease_now=actual_lease_now,
             )
             claimed_this_attempt = list(rows)
             claim_returned = True
