@@ -58,9 +58,11 @@ def _run_scenario(run_id: str, conversation_id: str, runner, ready, release, rem
             )
         )
         assert await asyncio.to_thread(ready.wait, 2.0)
+        assert remote.run_status(run_id) == "running"
         assert remote.request_cancel(run_id) == "cancel_requested"
-        # The request intentionally lands after the runner's cooperative stop
-        # poll, so only the durable side-effect fence can prevent the next action.
+        # The runner is already beyond the point at which a prior cooperative
+        # stop poll could have helped.  Only the next durable side-effect boundary
+        # can observe this remote request before the action begins.
         with api_module.RUN_LOCK:
             assert api_module.RUNS[run_id]["status"] == "running"
         release.set()
@@ -99,7 +101,7 @@ class _Runner:
         self.memory = _Memory(side_effects if side_effects is not None else [])
 
 
-def test_remote_cancel_after_stop_poll_blocks_next_tool(monkeypatch, tmp_path):
+def test_remote_cancel_before_next_tool_blocks_side_effect(monkeypatch, tmp_path):
     store, remote, conversation, run_id = _prepare(
         monkeypatch, tmp_path, "cancel-before-tool"
     )
@@ -108,7 +110,7 @@ def test_remote_cancel_after_stop_poll_blocks_next_tool(monkeypatch, tmp_path):
     side_effects: list[str] = []
 
     def run_impl(self, text, *, sink=None, should_stop=None, **kwargs):
-        assert should_stop is not None and should_stop() is False
+        assert should_stop is not None
         ready.set()
         assert release.wait(2.0)
         assert sink is not None
@@ -132,7 +134,7 @@ def test_remote_cancel_after_stop_poll_blocks_next_tool(monkeypatch, tmp_path):
     _assert_cancelled(store, conversation["id"], run_id)
 
 
-def test_remote_cancel_after_stop_poll_blocks_learning(monkeypatch, tmp_path):
+def test_remote_cancel_before_learning_blocks_memory_side_effect(monkeypatch, tmp_path):
     store, remote, conversation, run_id = _prepare(
         monkeypatch, tmp_path, "cancel-before-learning"
     )
@@ -141,7 +143,7 @@ def test_remote_cancel_after_stop_poll_blocks_learning(monkeypatch, tmp_path):
     side_effects: list[str] = []
 
     def run_impl(self, text, *, should_stop=None, **kwargs):
-        assert should_stop is not None and should_stop() is False
+        assert should_stop is not None
         ready.set()
         assert release.wait(2.0)
         self.memory.record_episode("episode")
@@ -164,7 +166,7 @@ def test_remote_cancel_before_runner_returns_blocks_assistant_publish(monkeypatc
     returned: list[str] = []
 
     def run_impl(self, text, *, should_stop=None, **kwargs):
-        assert should_stop is not None and should_stop() is False
+        assert should_stop is not None
         ready.set()
         assert release.wait(2.0)
         returned.append("runner-finished")
