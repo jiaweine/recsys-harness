@@ -5,6 +5,7 @@ import threading
 from fastapi import HTTPException
 
 import lingjing_harness.api as api_module
+import lingjing_harness.store_workspace_publication as publication_store_module
 from lingjing_harness.domain import Catalog
 from lingjing_harness.sample_data import build_sample_catalog
 from lingjing_harness.store import WorkspaceStore
@@ -35,12 +36,15 @@ class _PeerPromotingStore:
     def __init__(self, pending_file: Path, catalog_file: Path) -> None:
         self.pending_file = pending_file
         self.catalog_file = catalog_file
+        self.owner = None
         self.finished = None
 
     def begin_workspace_update(self, owner_id, *, lease_seconds):
+        self.owner = owner_id
         return True
 
     def commit_workspace_revision_for_publication(self, owner_id, revision):
+        assert owner_id == self.owner
         # Model another worker observing the newly committed revision and
         # completing pending -> active promotion before the original writer
         # reaches its own promotion step.
@@ -48,6 +52,7 @@ class _PeerPromotingStore:
         return True
 
     def finish_workspace_update(self, owner_id, revision):
+        assert owner_id == self.owner
         self.finished = (owner_id, revision)
         return True
 
@@ -85,7 +90,8 @@ def test_activate_catalog_accepts_peer_completed_post_commit_promotion(monkeypat
     assert api_module.CATALOG_REVISION == incoming_revision
     assert api_module.catalog_fingerprint(api_module.catalog) == incoming_revision
     assert api_module.catalog_fingerprint(api_module._load_catalog()) == incoming_revision
-    assert peer_store.finished == (api_module.WORKER_ID, incoming_revision)
+    assert peer_store.owner.startswith(f"{api_module.WORKER_ID}:workspace:")
+    assert peer_store.finished == (peer_store.owner, incoming_revision)
     assert not pending_file.exists()
 
 
@@ -155,9 +161,9 @@ def test_same_worker_concurrent_imports_do_not_share_workspace_lease(
     first_worker.start()
     assert first_acquired.wait(timeout=10)
 
-    # Both requests run inside the same process and therefore present the same
-    # WORKER_ID to the durable store. The second request must still be rejected:
-    # sharing owner identity must never imply shared ownership of pending staging.
+    # Both requests run inside the same process and therefore share WORKER_ID, but
+    # each import now presents a distinct operation token to the durable store.
+    # The second request must still be rejected while the first lease is active.
     second_worker.start()
     second_worker.join(timeout=15)
     assert not second_worker.is_alive()
@@ -174,6 +180,107 @@ def test_same_worker_concurrent_imports_do_not_share_workspace_lease(
     assert api_module.catalog_fingerprint(api_module._load_catalog()) == first_revision
     assert store.workspace_revision() == first_revision
     assert store.workspace_publication_pending() is False
+    assert not pending_file.exists()
+
+
+def test_expired_writer_cannot_commit_or_delete_successor_staging(
+    monkeypatch, tmp_path
+):
+    previous = build_sample_catalog()
+    first = _changed_catalog()
+    second = _next_catalog()
+    previous_revision = api_module.catalog_fingerprint(previous)
+    first_revision = api_module.catalog_fingerprint(first)
+    second_revision = api_module.catalog_fingerprint(second)
+    catalog_file = tmp_path / "catalog.json"
+    pending_file = tmp_path / "catalog.pending.json"
+    store = WorkspaceStore(tmp_path / "workspace-expired-owner.db")
+    assert store.ensure_workspace_revision(previous_revision) == previous_revision
+
+    monkeypatch.setattr(api_module, "CATALOG_FILE", catalog_file)
+    monkeypatch.setattr(api_module, "CATALOG_PENDING_FILE", pending_file)
+    monkeypatch.setattr(api_module, "catalog", previous)
+    monkeypatch.setattr(
+        api_module,
+        "harness",
+        api_module.AgentHarness(previous, memory=api_module.memory),
+    )
+    monkeypatch.setattr(api_module, "CATALOG_REVISION", previous_revision)
+    monkeypatch.setattr(api_module, "RUNS", {})
+    monkeypatch.setattr(api_module, "store", store)
+    monkeypatch.setattr(api_module, "WORKSPACE_UPDATE_LEASE_SECONDS", 5.0)
+    _write_catalog(catalog_file, previous)
+
+    clock = [1_000.0]
+    monkeypatch.setattr(publication_store_module.time, "time", lambda: clock[0])
+
+    original_commit = store.commit_workspace_revision_for_publication
+    first_at_commit = threading.Event()
+    second_at_commit = threading.Event()
+    release_first_commit = threading.Event()
+    release_second_commit = threading.Event()
+
+    def commit_with_handoff(owner_id: str, revision: str) -> bool:
+        if revision == first_revision:
+            first_at_commit.set()
+            assert release_first_commit.wait(timeout=10)
+        elif revision == second_revision:
+            second_at_commit.set()
+            assert release_second_commit.wait(timeout=10)
+        return original_commit(owner_id, revision)
+
+    monkeypatch.setattr(
+        store,
+        "commit_workspace_revision_for_publication",
+        commit_with_handoff,
+    )
+
+    revisions: dict[str, str] = {}
+    errors: dict[str, BaseException] = {}
+
+    def activate(label: str, candidate: Catalog) -> None:
+        try:
+            revisions[label] = api_module._activate_catalog(candidate)
+        except BaseException as exc:  # noqa: BLE001 - surface the fencing failure
+            errors[label] = exc
+
+    first_worker = threading.Thread(target=activate, args=("first", first))
+    first_worker.start()
+    assert first_at_commit.wait(timeout=10)
+    assert api_module._workspace_pending_catalog()[0] == first_revision
+
+    # Let the first writer's lease expire, then allow a successor request from the
+    # same process/WORKER_ID to acquire a fresh operation-scoped lease and replace
+    # the global staging file. Hold the successor before commit so the stale writer
+    # resumes while the successor owns both the lease and pending staging.
+    clock[0] = 1_010.0
+    second_worker = threading.Thread(target=activate, args=("second", second))
+    second_worker.start()
+    assert second_at_commit.wait(timeout=10)
+    assert api_module._workspace_pending_catalog()[0] == second_revision
+
+    release_first_commit.set()
+    first_worker.join(timeout=15)
+    assert not first_worker.is_alive()
+    assert set(errors) == {"first"}
+    assert isinstance(errors["first"], RuntimeError)
+    assert "revision 提交失败" in str(errors["first"])
+
+    # Failed-writer cleanup must not erase the successor's staging after lease
+    # ownership moved. This is the second half of the fencing contract.
+    assert pending_file.exists()
+    assert api_module._workspace_pending_catalog()[0] == second_revision
+
+    release_second_commit.set()
+    second_worker.join(timeout=15)
+    assert not second_worker.is_alive()
+
+    assert revisions == {"second": second_revision}
+    assert set(errors) == {"first"}
+    assert store.workspace_revision() == second_revision
+    assert store.workspace_publication_pending() is False
+    assert api_module.CATALOG_REVISION == second_revision
+    assert api_module.catalog_fingerprint(api_module._load_catalog()) == second_revision
     assert not pending_file.exists()
 
 
