@@ -5,6 +5,22 @@ import lingjing_harness.store as store_module
 from lingjing_harness.store import WorkspaceStore
 
 
+def test_workspace_update_lease_is_not_reentrant_for_same_owner(tmp_path):
+    path = tmp_path / "workspace-non-reentrant.db"
+    store = WorkspaceStore(path)
+
+    assert store.ensure_workspace_revision("rev-a") == "rev-a"
+    assert store.begin_workspace_update("writer-a", lease_seconds=30) is True
+
+    # One WORKER_ID may serve multiple concurrent import requests. The durable
+    # update lease protects a single global catalog.pending.json path, so equal
+    # owner IDs must not turn that mutex into a re-entrant lease.
+    assert store.begin_workspace_update("writer-a", lease_seconds=30) is False
+
+    store.abort_workspace_update("writer-a")
+    assert store.begin_workspace_update("writer-a", lease_seconds=30) is True
+
+
 def test_publication_commit_holds_workspace_lease_until_catalog_is_published(tmp_path):
     path = tmp_path / "workspace-publication-fence.db"
     writer = WorkspaceStore(path)
