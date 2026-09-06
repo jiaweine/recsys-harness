@@ -12,7 +12,7 @@ from lingjing_harness.sample_data import build_sample_catalog
 from lingjing_harness.workspace_identity import workspace_fingerprint
 
 
-def test_terminal_run_read_replaces_stale_active_snapshot_with_full_durable_result():
+def test_terminal_run_read_returns_full_durable_result_without_mutating_active_local_executor():
     conversation = api_module.store.create_conversation("coherent run", "search")
     run_id = "job-terminal-coherence"
     now = time.time()
@@ -57,7 +57,11 @@ def test_terminal_run_read_replaces_stale_active_snapshot_with_full_durable_resu
     assert row["status"] == "completed"
     assert row["result"]["multimodal"]["context_used"] is True
     with api_module.RUN_LOCK:
-        assert api_module.RUNS[run_id]["result"] == row["result"]
+        # A read may converge the response to durable terminal state, but it must
+        # not silently turn a possibly-live local executor terminal.  That would
+        # disarm its next active lease fence before a tool side effect.
+        assert api_module.RUNS[run_id]["status"] == "running"
+        assert api_module.RUNS[run_id]["result"] is None
         api_module.RUNS.pop(run_id, None)
     api_module.store.delete_run(run_id)
 
