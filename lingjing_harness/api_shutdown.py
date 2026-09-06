@@ -7,6 +7,7 @@ import os
 import threading
 import time
 from typing import Any
+import uuid
 
 from .api_recovery import install_startup_recovery_batching
 from .api_security import install_api_security_boundary
@@ -24,6 +25,33 @@ def _grace_seconds() -> float:
     except (TypeError, ValueError) as exc:
         raise RuntimeError("LINGJING_SHUTDOWN_GRACE_SECONDS must be a number") from exc
     return max(1.0, min(value, 120.0))
+
+
+def install_run_owner_session(core: Any) -> str:
+    """Give this process a unique durable run-owner fencing identity.
+
+    ``LINGJING_WORKER_ID`` is an operator-facing worker label and may be reused
+    across a rolling replacement or accidentally shared by two processes.  Run
+    leases need a stricter identity: if two live executors present the same
+    durable owner value, lease renewal and execution fences cannot distinguish a
+    stale executor from its replacement.
+
+    Preserve the configured label separately and make ``WORKER_ID`` the
+    process-session fencing token used by the existing run lifecycle call sites.
+    The installer is idempotent so repeated stable-API imports cannot rotate an
+    active process token underneath its runs.
+    """
+
+    existing = str(getattr(core, "RUN_OWNER_ID", "") or "")
+    if existing:
+        return existing
+
+    label = str(getattr(core, "WORKER_LABEL", "") or getattr(core, "WORKER_ID", "") or "worker")
+    owner_id = f"{label}:run:{uuid.uuid4().hex[:12]}"
+    core.WORKER_LABEL = label
+    core.RUN_OWNER_ID = owner_id
+    core.WORKER_ID = owner_id
+    return owner_id
 
 
 def guard_runner_for_shutdown(runner: Any, shutdown_event: threading.Event):
@@ -114,6 +142,12 @@ def _handoff_run(core: Any, run_id: str) -> bool:
 
 def install_shutdown_boundary(core: Any) -> None:
     """Install late-stage API lifecycle, security, and handoff hardening."""
+
+    # Configure the process-session run fencing identity before any lifespan can
+    # reserve, recover, renew, persist, execute, or hand off durable runs.  All of
+    # those existing paths resolve core.WORKER_ID at runtime, so one installation
+    # keeps their owner token coherent without duplicating run-owner plumbing.
+    install_run_owner_session(core)
 
     # This installer is the stable late hook invoked after the API wrapper has
     # replaced persistence/recovery functions and installed all routes.  Keep the
