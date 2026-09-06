@@ -4,6 +4,7 @@ from contextlib import suppress
 import json
 from pathlib import Path
 from typing import Any
+import uuid
 
 
 def install_workspace_transaction_boundary(core: Any) -> None:
@@ -128,7 +129,10 @@ def install_workspace_transaction_boundary(core: Any) -> None:
         abort = getattr(core.store, "abort_workspace_update", None)
         if not callable(begin) or not callable(abort):
             return None
-        owner = f"{core.WORKER_ID}:sync-cleanup"
+        # Cleanup leases are operation-scoped too. A configured WORKER_ID can be
+        # shared by overlapping processes during restarts; a unique token prevents
+        # an expired cleanup attempt from mistaking a successor's lease for its own.
+        owner = f"{core.WORKER_ID}:sync-cleanup:{uuid.uuid4().hex[:12]}"
         try:
             acquired = begin(
                 owner,
@@ -147,6 +151,28 @@ def install_workspace_transaction_boundary(core: Any) -> None:
             return True
         except Exception:
             return False
+
+    def _cleanup_uncommitted_pending(owner: str) -> None:
+        """Remove failed staging only after reacquiring exclusive cleanup authority.
+
+        An import may lose its timed lease before it fails. Its pending filename is
+        global, so deleting that file merely because the request once owned the
+        lease can erase a successor writer's staging. Release only this operation's
+        exact owner token, then reacquire a fresh cleanup lease. If another writer
+        won the handoff, leave the pending file untouched for that writer.
+        """
+
+        abort = getattr(core.store, "abort_workspace_update", None)
+        if callable(abort):
+            with suppress(Exception):
+                abort(owner)
+        cleanup_owner = _begin_sync_cleanup()
+        if cleanup_owner is None:
+            return
+        try:
+            _discard_pending()
+        finally:
+            _abort_sync_cleanup(cleanup_owner)
 
     def _sync_workspace() -> bool:
         shared = core.store.ensure_workspace_revision(core.CATALOG_REVISION)
@@ -226,8 +252,13 @@ def install_workspace_transaction_boundary(core: Any) -> None:
                     "仍有任务在执行，请停止或等待完成后再更换工作区数据",
                 )
 
+        # WORKER_ID identifies a process, not one import attempt. A timed lease can
+        # expire while a request is stalled; if a successor request reuses the same
+        # process ID, the stale request must not be able to commit under the fresh
+        # lease. Give every workspace update its own fencing identity instead.
+        update_owner = f"{core.WORKER_ID}:workspace:{uuid.uuid4().hex[:12]}"
         if not core.store.begin_workspace_update(
-            core.WORKER_ID,
+            update_owner,
             lease_seconds=core.WORKSPACE_UPDATE_LEASE_SECONDS,
         ):
             raise core.HTTPException(
@@ -244,12 +275,12 @@ def install_workspace_transaction_boundary(core: Any) -> None:
                 core.store, "commit_workspace_revision_for_publication", None
             )
             if callable(commit_for_publication):
-                committed_ok = commit_for_publication(core.WORKER_ID, revision)
+                committed_ok = commit_for_publication(update_owner, revision)
             else:
                 # Compatibility for narrow test doubles and legacy stores. The
                 # production WorkspaceStore installs the publication-specific API.
                 committed_ok = core.store.commit_workspace_revision(
-                    core.WORKER_ID, revision
+                    update_owner, revision
                 )
             if not committed_ok:
                 raise RuntimeError("工作区 revision 提交失败")
@@ -267,7 +298,7 @@ def install_workspace_transaction_boundary(core: Any) -> None:
             _discard_pending()
             finish_owned = getattr(core.store, "finish_workspace_update", None)
             if callable(finish_owned):
-                finished = finish_owned(core.WORKER_ID, revision)
+                finished = finish_owned(update_owner, revision)
                 if not finished:
                     pending = getattr(core.store, "workspace_publication_pending", None)
                     if callable(pending) and pending(revision):
@@ -275,8 +306,10 @@ def install_workspace_transaction_boundary(core: Any) -> None:
             return revision
         except Exception:
             if not committed:
-                _discard_pending()
-                core.store.abort_workspace_update(core.WORKER_ID)
+                # The timed lease may already belong to a successor. Never delete
+                # the global pending path under stale historical ownership; exact
+                # owner tokens plus a fresh cleanup lease make this handoff safe.
+                _cleanup_uncommitted_pending(update_owner)
             # Once the durable revision committed, never erase the matching
             # pending file or roll the SQLite revision backward. A later sync can
             # safely complete publication using the fingerprint + DB phase fence.

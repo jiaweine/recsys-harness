@@ -42,7 +42,7 @@ def _install_workspace(monkeypatch, tmp_path: Path, catalog: Catalog) -> tuple[P
 
 class _FailingCommitStore:
     def __init__(self) -> None:
-        self.aborted = 0
+        self.aborted: list[str] = []
 
     def begin_workspace_update(self, owner_id, *, lease_seconds):
         return True
@@ -51,7 +51,7 @@ class _FailingCommitStore:
         return False
 
     def abort_workspace_update(self, owner_id):
-        self.aborted += 1
+        self.aborted.append(owner_id)
 
     def workspace_update_active(self):
         return False
@@ -73,7 +73,9 @@ def test_activate_catalog_commit_failure_preserves_previous_workspace(monkeypatc
     assert api_module.catalog_fingerprint(api_module.catalog) == previous_revision
     assert api_module.CATALOG_REVISION == previous_revision
     assert api_module.catalog.items[0].title == previous.items[0].title
-    assert failing_store.aborted == 1
+    assert len(failing_store.aborted) == 2
+    assert failing_store.aborted[0].startswith(f"{api_module.WORKER_ID}:workspace:")
+    assert failing_store.aborted[1].startswith(f"{api_module.WORKER_ID}:sync-cleanup:")
     assert not pending_file.exists()
     assert catalog_file.exists()
 
