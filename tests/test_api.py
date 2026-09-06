@@ -125,17 +125,26 @@ def test_same_conversation_rejects_parallel_run_but_other_conversation_is_allowe
         await asyncio.sleep(.2)
 
     monkeypatch.setattr(api_module, '_execute', slow_execute)
-    with TestClient(app) as c:
-        one=c.post('/api/conversations',json={"scene":"search","title":"one"}).json()
-        two=c.post('/api/conversations',json={"scene":"recommend","title":"two"}).json()
-        first=c.post(f"/api/conversations/{one['id']}/messages",json={"content":"检查搜索体验"})
-        assert first.status_code==200
-        active=c.get(f"/api/conversations/{one['id']}").json()
-        assert active['active_run']['run_id']==first.json()['run_id']
-        duplicate=c.post(f"/api/conversations/{one['id']}/messages",json={"content":"再检查一次"})
-        assert duplicate.status_code==409
-        parallel=c.post(f"/api/conversations/{two['id']}/messages",json={"content":"检查推荐体验"})
-        assert parallel.status_code==200
+    created_run_ids = []
+    try:
+        with TestClient(app) as c:
+            one=c.post('/api/conversations',json={"scene":"search","title":"one"}).json()
+            two=c.post('/api/conversations',json={"scene":"recommend","title":"two"}).json()
+            first=c.post(f"/api/conversations/{one['id']}/messages",json={"content":"检查搜索体验"})
+            assert first.status_code==200
+            created_run_ids.append(first.json()['run_id'])
+            active=c.get(f"/api/conversations/{one['id']}").json()
+            assert active['active_run']['run_id']==first.json()['run_id']
+            duplicate=c.post(f"/api/conversations/{one['id']}/messages",json={"content":"再检查一次"})
+            assert duplicate.status_code==409
+            parallel=c.post(f"/api/conversations/{two['id']}/messages",json={"content":"检查推荐体验"})
+            assert parallel.status_code==200
+            created_run_ids.append(parallel.json()['run_id'])
+    finally:
+        for run_id in created_run_ids:
+            with api_module.RUN_LOCK:
+                api_module.RUNS.pop(run_id, None)
+            api_module.store.delete_run(run_id)
 
 
 def test_status_and_capabilities_expose_autonomous_runtime():
@@ -235,7 +244,7 @@ def test_workspace_import_is_blocked_while_a_run_is_active():
 
 def test_orphan_attachment_is_collected_after_ttl():
     with TestClient(app) as c:
-        uploaded = c.post('/api/attachments', files={'file':('orphan.txt', b'orphan', 'text/plain')}).json()
+        uploaded=c.post('/api/attachments',files={'file':('orphan.txt', b'orphan', 'text/plain')}).json()
     meta_path = api_module._attachment_meta_path(uploaded['id'])
     meta = api_module.json.loads(meta_path.read_text(encoding='utf-8'))
     meta['created_at'] = time.time() - api_module.ATTACHMENT_ORPHAN_TTL_SECONDS - 2
@@ -254,9 +263,9 @@ def test_stop_request_does_not_wait_for_slow_perception(monkeypatch):
 
     monkeypatch.setattr(api_module.perception, 'build_context', slow_perception)
     with TestClient(app) as c:
-        uploaded = c.post('/api/attachments', files={'file':('slow.txt', b'context', 'text/plain')}).json()
-        conv = c.post('/api/conversations', json={'scene':'search','title':'perception stop'}).json()
-        accepted = c.post(
+        uploaded=c.post('/api/attachments',files={'file':('slow.txt', b'context', 'text/plain')}).json()
+        conv=c.post('/api/conversations', json={'scene':'search','title':'perception stop'}).json()
+        accepted=c.post(
             f"/api/conversations/{conv['id']}/messages",
             json={'content':'检查附件并停止','attachments':[uploaded['id']]},
         ).json()
