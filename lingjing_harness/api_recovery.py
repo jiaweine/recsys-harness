@@ -10,17 +10,20 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def install_startup_recovery_batching(core: Any) -> None:
-    """Make one startup recovery pass cover every currently claimable run.
+    """Recover every claimable run without letting one bad row poison the batch.
 
     ``WorkspaceStore.claim_recoverable_runs`` deliberately accepts a bounded
-    ``limit``.  The API recovery layer historically called it once with 16, so a
-    busy durable store could leave older recoverable runs untouched forever if
-    every restart kept seeing the same newer cohort first.
+    ``limit``.  Recovery historically claimed many rows in one transaction and
+    then processed them serially.  If the first claimed run raised while being
+    restored, every later row was already leased to this worker but never got a
+    chance to run.  Repeating the sweep could hit the same poison row again after
+    lease expiry and starve healthy work indefinitely.
 
-    Preserve the store contract and fencing semantics: repeatedly ask for a
-    larger prefix at one anchored clock value, de-duplicate by run id, then hand
-    the complete unique snapshot to the existing hardened recovery function once.
-    No extra worker, table, state machine, or execution authority is introduced.
+    Preserve the durable claim transaction and hardened per-run recovery path,
+    but expose at most one row to each invocation of that path.  A failed row is
+    left durably fenced until its lease expires, while the next claim can proceed
+    to other recoverable work immediately.  Claim/infrastructure failures still
+    propagate because no row was successfully isolated in that case.
     """
 
     if getattr(core, "_STARTUP_RECOVERY_BATCHING_INSTALLED", False):
@@ -32,37 +35,65 @@ def install_startup_recovery_batching(core: Any) -> None:
     original_instance_claim = vars(core.store).get("claim_recoverable_runs")
 
     async def recover_without_batch_starvation() -> None:
-        def claim_all_currently_recoverable(
+        anchored_now = time.time()
+        claimed_this_attempt: list[dict[str, Any]] = []
+        claim_returned = False
+
+        def claim_one_currently_recoverable(
             *,
             owner_id: str,
             lease_seconds: float,
             limit: int = 20,
             now: float | None = None,
         ) -> list[dict[str, Any]]:
-            anchored_now = time.time() if now is None else float(now)
-            request_limit = max(1, int(limit))
-            unique: dict[str, dict[str, Any]] = {}
+            nonlocal claimed_this_attempt, claim_returned
+            rows = original_claim(
+                owner_id=owner_id,
+                lease_seconds=lease_seconds,
+                limit=1,
+                now=anchored_now if now is None else float(now),
+            )
+            claimed_this_attempt = list(rows)
+            claim_returned = True
+            return rows
 
-            while True:
-                rows = original_claim(
-                    owner_id=owner_id,
-                    lease_seconds=lease_seconds,
-                    limit=request_limit,
-                    now=anchored_now,
-                )
-                for row in rows:
-                    run_id = str(row.get("run_id") or "")
-                    if run_id and run_id not in unique:
-                        unique[run_id] = row
-                if len(rows) < request_limit:
-                    break
-                request_limit *= 2
+        def discard_failed_local_recovery(run_id: str) -> None:
+            runs = getattr(core, "RUNS", None)
+            run_lock = getattr(core, "RUN_LOCK", None)
+            if isinstance(runs, dict) and run_lock is not None:
+                with run_lock:
+                    runs.pop(run_id, None)
+            persist_meta = getattr(core, "_PERSIST_META", None)
+            if isinstance(persist_meta, dict):
+                persist_meta.pop(run_id, None)
 
-            return list(unique.values())
-
-        core.store.claim_recoverable_runs = claim_all_currently_recoverable
+        core.store.claim_recoverable_runs = claim_one_currently_recoverable
         try:
-            await original_recover()
+            while True:
+                claimed_this_attempt = []
+                claim_returned = False
+                try:
+                    await original_recover()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    # If claim itself failed (or recovery raised before/after an
+                    # empty claim), this is not an isolated poison row.  Keep the
+                    # startup/infrastructure failure visible to the caller.
+                    if not claim_returned or not claimed_this_attempt:
+                        raise
+                    failed_run_id = str(claimed_this_attempt[0].get("run_id") or "")
+                    discard_failed_local_recovery(failed_run_id)
+                    _LOGGER.exception(
+                        "durable run recovery failed for %s; continuing with remaining work",
+                        failed_run_id,
+                    )
+                    continue
+
+                # Some tests and alternate recovery implementations intentionally
+                # do no durable claiming.  Preserve their single-call behavior.
+                if not claim_returned or not claimed_this_attempt:
+                    break
         finally:
             if store_had_instance_claim:
                 core.store.claim_recoverable_runs = original_instance_claim
@@ -79,8 +110,9 @@ async def run_lease_heartbeat_iteration(core: Any) -> bool:
     Recovery is deliberately fail-soft here.  A malformed checkpoint, transient
     storage failure, or lease race while recovering peer work must not terminate
     the coroutine that keeps this process's already-running jobs leased.  Direct
-    startup recovery still propagates errors normally; only the periodic sweep is
-    isolated.  Task cancellation remains authoritative and is never swallowed.
+    startup recovery still propagates infrastructure errors normally; isolated
+    per-run failures are logged by the batching boundary.  Task cancellation
+    remains authoritative and is never swallowed.
     """
 
     with core.RUN_LOCK:
