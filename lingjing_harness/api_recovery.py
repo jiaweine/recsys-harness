@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -66,3 +67,49 @@ def install_startup_recovery_batching(core: Any) -> None:
 
     core._recover_on_startup = recover_without_batch_starvation
     core._STARTUP_RECOVERY_BATCHING_INSTALLED = True
+
+
+async def run_lease_heartbeat_iteration(core: Any) -> None:
+    """Renew local execution leases, then recover newly claimable durable runs."""
+
+    with core.RUN_LOCK:
+        active_ids = [
+            run_id
+            for run_id, row in core.RUNS.items()
+            if row.get("status") in core.ACTIVE_RUN_STATUSES
+        ]
+    for run_id in active_ids:
+        core.store.renew_run_lease(
+            run_id,
+            core.WORKER_ID,
+            core.RUN_LEASE_SECONDS,
+        )
+
+    # Recovery claims are non-reentrant at the store boundary.  Calling the
+    # hardened startup recovery repeatedly therefore cannot duplicate this
+    # process's own live runs, while ownerless or expired peer runs become
+    # recoverable as soon as a heartbeat observes them.
+    await core._recover_on_startup()
+
+
+def install_expired_run_recovery_heartbeat(core: Any) -> None:
+    """Reuse the existing lease heartbeat as the expired-run recovery cadence."""
+
+    if getattr(core, "_EXPIRED_RUN_RECOVERY_HEARTBEAT_INSTALLED", False):
+        return
+
+    async def lease_heartbeat_with_recovery() -> None:
+        interval = max(1.0, core.RUN_LEASE_SECONDS / 3.0)
+        while True:
+            await asyncio.sleep(interval)
+            await run_lease_heartbeat_iteration(core)
+
+    core._lease_heartbeat_loop = lease_heartbeat_with_recovery
+    core._EXPIRED_RUN_RECOVERY_HEARTBEAT_INSTALLED = True
+
+
+__all__ = [
+    "install_expired_run_recovery_heartbeat",
+    "install_startup_recovery_batching",
+    "run_lease_heartbeat_iteration",
+]
