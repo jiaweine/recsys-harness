@@ -215,3 +215,42 @@ def test_terminal_get_does_not_disarm_stale_executor_fence(monkeypatch, tmp_path
     assert durable["status"] == "completed"
     assert durable["result"]["answer"] == "successor result"
     takeover.delete_run(run_id)
+
+
+def test_terminal_takeover_at_final_fence_converges_successor_payload(monkeypatch, tmp_path):
+    store, conversation, run_id = _prepare_owned_run(
+        monkeypatch,
+        tmp_path,
+        "terminal-at-final-fence",
+    )
+    started = threading.Event()
+    release = threading.Event()
+
+    def stale_run(self, text, **kwargs):
+        started.set()
+        assert release.wait(2.0)
+        return {"answer": "stale runner result"}
+
+    monkeypatch.setattr(api_module.AgentHarness, "run", stale_run)
+    runner = api_module.harness.fork()
+    thread, errors = _execute_in_thread(run_id, conversation["id"], runner)
+    assert started.wait(2.0)
+
+    takeover = _take_over_and_complete(store, run_id)
+    release.set()
+    thread.join(3.0)
+
+    assert not thread.is_alive()
+    assert errors == []
+    with api_module.RUN_LOCK:
+        local = dict(api_module.RUNS[run_id])
+    assert local["status"] == "completed"
+    assert local["result"]["answer"] == "successor result"
+    assert "error" not in local
+    assert api_module._PERSIST_META.get(run_id) is None
+
+    visible = api_module.get_run(run_id)
+    assert visible["status"] == "completed"
+    assert visible["result"]["answer"] == "successor result"
+    assert "error" not in visible
+    takeover.delete_run(run_id)
