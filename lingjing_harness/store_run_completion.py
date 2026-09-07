@@ -124,6 +124,16 @@ def install_run_completion_publication_fence(core: Any) -> None:
             connection.commit()
         return "completed", message
 
+    def discard_stale_local_run(run_id: str) -> None:
+        runs = getattr(core, "RUNS", None)
+        run_lock = getattr(core, "RUN_LOCK", None)
+        if isinstance(runs, dict) and run_lock is not None:
+            with run_lock:
+                runs.pop(run_id, None)
+        persist_meta = getattr(core, "_PERSIST_META", None)
+        if isinstance(persist_meta, dict):
+            persist_meta.pop(run_id, None)
+
     def add_message_with_run_completion(
         self,
         conversation_id: str,
@@ -150,6 +160,14 @@ def install_run_completion_publication_fence(core: Any) -> None:
             return message
         if status == "cancel_requested":
             raise core.RunCancelled(f"run cancel requested before assistant publish: {run_id}")
+
+        # ``api_core`` catches ordinary Exception values around execution and
+        # translates them into its generic failure path.  A publication-time
+        # lease loss is authority control flow, not a failed run.  Retire the
+        # stale local row before raising so that generic handler has nothing to
+        # rewrite into a terminal-but-stale local snapshot.  The next GET then
+        # reads the successor's authoritative durable payload directly.
+        discard_stale_local_run(run_id)
         raise core._RunLeaseLost(
             f"run lease lost before assistant publish: {run_id} ({status})"
         )
