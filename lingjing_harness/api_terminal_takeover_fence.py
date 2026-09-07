@@ -67,7 +67,6 @@ def install_terminal_takeover_execution_fence(core: Any) -> None:
                 persist_meta.pop(run_id, None)
             raise core._RunLeaseLost(f"run lease lost after terminal takeover: {run_id}")
 
-    @staticmethod
     def terminal_payload_signature(row: dict[str, Any]) -> tuple[Any, ...]:
         return (
             str(row.get("status") or ""),
