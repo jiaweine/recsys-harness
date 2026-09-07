@@ -3,6 +3,8 @@ from __future__ import annotations
 import threading
 from typing import Any
 
+from .store_run_completion import install_run_completion_publication_fence
+
 
 class _CancelFencedMemory:
     """Refuse learning side effects once a durable stop request has won."""
@@ -35,13 +37,15 @@ def install_cancel_execution_fence(core: Any) -> None:
 
     Cancellation is deliberately separate from lease ownership.  Heartbeats may
     keep a cancel-requested run leased while its current bounded tool finishes;
-    only a new side-effect boundary is refused.  A cancel that lands after a
-    boundary has linearized therefore stops after the already-authorized current
-    action, matching the public stop semantics.
+    only a new side-effect boundary is refused.  Assistant publication is the one
+    boundary that must also atomically terminalize the durable run so a successful
+    stop request can never linearize between publication and completion.
     """
 
     if getattr(core, "_CANCEL_EXECUTION_FENCE_INSTALLED", False):
         return
+
+    install_run_completion_publication_fence(core)
 
     original_persist = core._persist_run
     original_execute = core._execute
@@ -93,9 +97,10 @@ def install_cancel_execution_fence(core: Any) -> None:
             runner_context.run_id = run_id
             try:
                 result = original_run(*args, **run_kwargs)
-                # Runner completion is the last boundary before the API publishes
-                # the assistant message.  A cancel already durable here wins and
-                # is finalized by api_core's existing RunCancelled handler.
+                # Catch a cancel already durable when the runner returns.  The
+                # later assistant publication transaction performs the final
+                # cancel-vs-complete linearization immediately before the message
+                # can become visible.
                 raise_if_cancel_requested(run_id)
                 return result
             finally:
