@@ -25,12 +25,19 @@ def install_terminal_takeover_execution_fence(core: Any) -> None:
     local executor row with that terminal snapshot.  Keeping the local row active
     lets the next durable execution boundary observe the terminal takeover and
     retire the stale executor before side effects.
+
+    A final lease fence can also lose after ``runner.run`` returns.  ``api_core``
+    catches ordinary exceptions around the runner and may then converge only the
+    local status through a failed persistence attempt.  Once the executor has
+    fully returned, no side-effect fence remains to protect, so reconcile any
+    semantically different terminal local payload with the durable terminal row.
     """
 
     if getattr(core, "_TERMINAL_TAKEOVER_EXECUTION_FENCE_INSTALLED", False):
         return
 
     original_persist = core._persist_run
+    original_execute = core._execute
 
     def persist_with_terminal_takeover_fence(row: dict[str, Any]) -> None:
         run_id = str(row.get("run_id") or "")
@@ -59,6 +66,53 @@ def install_terminal_takeover_execution_fence(core: Any) -> None:
             if isinstance(persist_meta, dict):
                 persist_meta.pop(run_id, None)
             raise core._RunLeaseLost(f"run lease lost after terminal takeover: {run_id}")
+
+    @staticmethod
+    def terminal_payload_signature(row: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            str(row.get("status") or ""),
+            row.get("result"),
+            row.get("message"),
+            row.get("error"),
+        )
+
+    async def execute_with_terminal_convergence(
+        run_id: str,
+        cid: str,
+        text: str,
+        runner: Any,
+        **kwargs: Any,
+    ) -> None:
+        await original_execute(run_id, cid, text, runner, **kwargs)
+
+        # It is unsafe to rewrite an active local row while its executor may still
+        # enter another fenced side-effect boundary.  This wrapper runs only after
+        # the wrapped executor has returned, so a terminal durable row is now the
+        # canonical cache payload rather than an execution-authority signal.
+        with core.RUN_LOCK:
+            local = core.RUNS.get(run_id)
+            if local is None or local.get("status") in core.ACTIVE_RUN_STATUSES:
+                return
+            local_signature = terminal_payload_signature(local)
+
+        try:
+            durable = core.store.get_run(run_id)
+        except KeyError:
+            return
+        if durable.get("status") in core.ACTIVE_RUN_STATUSES:
+            return
+        if terminal_payload_signature(durable) == local_signature:
+            return
+
+        with core.RUN_LOCK:
+            current = core.RUNS.get(run_id)
+            if current is None or current.get("status") in core.ACTIVE_RUN_STATUSES:
+                return
+            current.clear()
+            current.update(copy.deepcopy(durable))
+        persist_meta = getattr(core, "_PERSIST_META", None)
+        if isinstance(persist_meta, dict):
+            persist_meta.pop(run_id, None)
 
     def snapshot_in_memory_run(run_id: str) -> dict[str, Any] | None:
         for attempt in range(_RUN_SNAPSHOT_RETRIES):
@@ -105,6 +159,7 @@ def install_terminal_takeover_execution_fence(core: Any) -> None:
         return snapshot
 
     core._persist_run = persist_with_terminal_takeover_fence
+    core._execute = execute_with_terminal_convergence
 
     for route in list(core.app.router.routes):
         if (
