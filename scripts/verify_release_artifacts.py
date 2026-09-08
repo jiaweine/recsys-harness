@@ -3,13 +3,20 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import tarfile
+import tomllib
 import zipfile
-
-from scripts.check_release_contract import project_version
 
 
 PROJECT_NAME = "xushu-recsys-harness"
 DIST_NAME = "xushu_recsys_harness"
+
+
+def project_version(root: Path) -> str:
+    data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    try:
+        return str(data["project"]["version"]).strip()
+    except (KeyError, TypeError) as exc:
+        raise ValueError("pyproject.toml must declare project.version") from exc
 
 
 def _metadata_value(text: str, key: str) -> str | None:
