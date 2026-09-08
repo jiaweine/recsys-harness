@@ -69,12 +69,17 @@ jobs:
         shell: bash
         run: |
           rm -rf /tmp/xushu-release-wheel /tmp/xushu-release-sdist
-          python -m pip install dist/*.whl --no-deps --target /tmp/xushu-release-wheel
-          python -m pip install dist/*.tar.gz --no-deps --no-build-isolation --target /tmp/xushu-release-sdist
-          for target in /tmp/xushu-release-wheel /tmp/xushu-release-sdist; do
+          python -m venv /tmp/xushu-release-wheel
+          python -m venv /tmp/xushu-release-sdist
+          for envdir in /tmp/xushu-release-wheel /tmp/xushu-release-sdist; do
+            "$envdir/bin/python" -m pip install -r requirements-runtime.txt
+          done
+          /tmp/xushu-release-wheel/bin/python -m pip install dist/*.whl --no-deps
+          /tmp/xushu-release-sdist/bin/python -m pip install dist/*.tar.gz --no-deps --no-build-isolation
+          for envdir in /tmp/xushu-release-wheel /tmp/xushu-release-sdist; do
             (
               cd /tmp
-              PYTHONPATH="$target" python - <<'PY'
+              "$envdir/bin/python" - <<'PY'
           from fastapi.testclient import TestClient
           from lingjing_harness.api import app
 
@@ -89,6 +94,7 @@ jobs:
           assert ready.status_code == 200 and ready.json()['status'] == 'ready'
           assert app_js.status_code == 200
           PY
+              "$envdir/bin/xushu-harness" '做一次全局体检' > /dev/null
             )
           done
 
