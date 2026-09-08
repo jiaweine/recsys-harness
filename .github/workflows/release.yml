@@ -1,0 +1,175 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "pyproject.toml"
+      - "requirements*.txt"
+      - "CHANGELOG.md"
+      - "docs/RELEASING.md"
+      - "scripts/check_release_contract.py"
+      - "scripts/verify_release_artifacts.py"
+      - "tests/test_release_contract.py"
+      - ".github/workflows/release.yml"
+  push:
+    tags:
+      - "v*"
+
+# Repository code is built and tested with read-only access. Only the publish job,
+# which executes no repository code, receives permission to create the release.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install release verification dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate version and release notes
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            python scripts/check_release_contract.py --tag "$GITHUB_REF_NAME"
+          else
+            python scripts/check_release_contract.py
+          fi
+
+      - name: Run release acceptance suite
+        run: |
+          python -m compileall -q lingjing_harness tests scripts
+          pytest -q
+          python scripts/demo_smoke.py > /dev/null
+          python scripts/probe_harness_contract.py > /dev/null
+          xushu-harness '做一次全局体检' > /dev/null
+
+      - name: Build wheel and source distribution
+        run: |
+          rm -rf build dist *.egg-info
+          python -m build --sdist --wheel --outdir dist
+          python scripts/verify_release_artifacts.py dist
+          (cd dist && sha256sum *.whl *.tar.gz > SHA256SUMS)
+          (cd dist && sha256sum -c SHA256SUMS)
+
+      - name: Verify clean installs from both release formats
+        shell: bash
+        run: |
+          rm -rf /tmp/xushu-release-wheel /tmp/xushu-release-sdist /tmp/xushu-release-data-8871 /tmp/xushu-release-data-8872
+          python -m venv /tmp/xushu-release-wheel
+          python -m venv /tmp/xushu-release-sdist
+          for envdir in /tmp/xushu-release-wheel /tmp/xushu-release-sdist; do
+            "$envdir/bin/python" -m pip install -r requirements-runtime.txt
+          done
+          /tmp/xushu-release-wheel/bin/python -m pip install dist/*.whl --no-deps
+          /tmp/xushu-release-sdist/bin/python -m pip install dist/*.tar.gz --no-deps --no-build-isolation
+
+          port=8871
+          for envdir in /tmp/xushu-release-wheel /tmp/xushu-release-sdist; do
+            (
+              cd /tmp
+              export LINGJING_DATA_DIR="/tmp/xushu-release-data-${port}"
+              rm -rf "$LINGJING_DATA_DIR"
+              "$envdir/bin/python" -m uvicorn lingjing_harness.api:app \
+                --host 127.0.0.1 --port "$port" --no-proxy-headers \
+                >"/tmp/xushu-release-${port}.log" 2>&1 &
+              server_pid=$!
+              cleanup() {
+                kill "$server_pid" 2>/dev/null || true
+                wait "$server_pid" 2>/dev/null || true
+              }
+              trap cleanup EXIT
+
+              XUSHU_RELEASE_PORT="$port" "$envdir/bin/python" - <<'PY'
+          import json
+          import os
+          import time
+          from urllib.error import URLError
+          from urllib.request import urlopen
+
+          base = f"http://127.0.0.1:{os.environ['XUSHU_RELEASE_PORT']}"
+          deadline = time.monotonic() + 12.0
+          while True:
+              try:
+                  with urlopen(f"{base}/health/live", timeout=1.0) as response:
+                      if response.status == 200:
+                          live = json.loads(response.read().decode("utf-8"))
+                          if live.get("status") == "ok":
+                              break
+              except (OSError, URLError, json.JSONDecodeError):
+                  pass
+              if time.monotonic() >= deadline:
+                  raise RuntimeError("release smoke server did not become live")
+              time.sleep(0.2)
+
+          with urlopen(f"{base}/", timeout=2.0) as response:
+              assert response.status == 200
+              page = response.read().decode("utf-8")
+          with urlopen(f"{base}/health/ready", timeout=2.0) as response:
+              ready = json.loads(response.read().decode("utf-8"))
+              assert response.status == 200 and ready.get("status") == "ready"
+          with urlopen(f"{base}/assets/app.js", timeout=2.0) as response:
+              assert response.status == 200 and response.read()
+
+          assert "序枢" in page
+          PY
+
+              "$envdir/bin/xushu-harness" '做一次全局体检' > /dev/null
+              cleanup
+              trap - EXIT
+            )
+            port=$((port + 1))
+          done
+
+      - name: Upload verified release bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build-and-verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-dist
+          path: /tmp/xushu-release
+
+      - name: Verify downloaded release bundle
+        run: cd /tmp/xushu-release && sha256sum -c SHA256SUMS
+
+      - name: Publish immutable GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          test "$GITHUB_REF_TYPE" = "tag"
+          gh release create "$GITHUB_REF_NAME" \
+            /tmp/xushu-release/*.whl \
+            /tmp/xushu-release/*.tar.gz \
+            /tmp/xushu-release/SHA256SUMS \
+            --verify-tag \
+            --title "Xushu ${GITHUB_REF_NAME}" \
+            --generate-notes
