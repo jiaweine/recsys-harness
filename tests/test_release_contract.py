@@ -72,6 +72,8 @@ def test_release_workflow_keeps_write_token_out_of_build_job():
     assert "--verify-tag" in workflow
     assert "python scripts/check_release_contract.py --tag" in workflow
     assert "python scripts/verify_release_artifacts.py dist" in workflow
+    assert "sha256sum *.whl *.tar.gz > SHA256SUMS" in workflow
+    assert workflow.count("sha256sum -c SHA256SUMS") >= 2
 
     # All reusable actions are immutable SHA pins, matching the repository's
     # existing supply-chain policy for workflows that execute repository code.
