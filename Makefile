@@ -25,6 +25,8 @@ release-build: release-check
 	rm -rf build dist *.egg-info
 	python -m build --sdist --wheel --outdir dist
 	python scripts/verify_release_artifacts.py dist
+	cd dist && sha256sum *.whl *.tar.gz > SHA256SUMS
+	cd dist && sha256sum -c SHA256SUMS
 
 clean:
 	rm -rf .pytest_cache data build dist *.egg-info __pycache__ */__pycache__ */*/__pycache__
