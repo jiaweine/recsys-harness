@@ -75,6 +75,13 @@ def test_release_workflow_keeps_write_token_out_of_build_job():
     assert "sha256sum *.whl *.tar.gz > SHA256SUMS" in workflow
     assert workflow.count("sha256sum -c SHA256SUMS") >= 2
 
+    # A release artifact is not accepted merely because metadata exists: both
+    # formats must install into clean virtual environments and expose the real CLI.
+    assert "python -m venv /tmp/xushu-release-wheel" in workflow
+    assert "python -m venv /tmp/xushu-release-sdist" in workflow
+    assert '"$envdir/bin/python" -m pip install -r requirements-runtime.txt' in workflow
+    assert '"$envdir/bin/xushu-harness"' in workflow
+
     # All reusable actions are immutable SHA pins, matching the repository's
     # existing supply-chain policy for workflows that execute repository code.
     assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in workflow
