@@ -14,6 +14,7 @@ from .api_recovery import (
     install_expired_run_recovery_heartbeat,
     install_startup_recovery_batching,
 )
+from .api_request_body_limit import install_request_body_limit
 from .api_security import install_api_security_boundary
 from .api_terminal_takeover_fence import install_terminal_takeover_execution_fence
 from .store_handoff import release_interrupted_run
@@ -153,6 +154,11 @@ def install_shutdown_boundary(core: Any) -> None:
     # those existing paths resolve core.WORKER_ID at runtime, so one installation
     # keeps their owner token coherent without duplicating run-owner plumbing.
     install_run_owner_session(core)
+
+    # Request-size accounting must sit outside FastAPI's body/model parsing. Add it
+    # before the security middleware so the later security layer remains the
+    # outermost browser/host boundary while body reads are still bounded beneath it.
+    install_request_body_limit(core)
 
     # This installer is the stable late hook invoked after the API wrapper has
     # replaced persistence/recovery functions and installed all routes.  Keep the
