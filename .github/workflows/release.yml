@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+# Repository code is built and tested with read-only access. Only the publish job,
+# which executes no repository code, receives permission to create the release.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install release verification dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate version and release notes
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            python scripts/check_release_contract.py --tag "$GITHUB_REF_NAME"
+          else
+            python scripts/check_release_contract.py
+          fi
+
+      - name: Run release acceptance suite
+        run: |
+          python -m compileall -q lingjing_harness tests scripts
+          pytest -q
+          python scripts/demo_smoke.py > /dev/null
+          python scripts/probe_harness_contract.py > /dev/null
+          xushu-harness '做一次全局体检' > /dev/null
+
+      - name: Build wheel and source distribution
+        run: |
+          rm -rf build dist *.egg-info
+          python -m build --sdist --wheel --outdir dist
+          python scripts/verify_release_artifacts.py dist
+          sha256sum dist/* > dist/SHA256SUMS
+
+      - name: Verify clean installs from both release formats
+        shell: bash
+        run: |
+          rm -rf /tmp/xushu-release-wheel /tmp/xushu-release-sdist
+          python -m pip install dist/*.whl --no-deps --target /tmp/xushu-release-wheel
+          python -m pip install dist/*.tar.gz --no-deps --no-build-isolation --target /tmp/xushu-release-sdist
+          for target in /tmp/xushu-release-wheel /tmp/xushu-release-sdist; do
+            (
+              cd /tmp
+              PYTHONPATH="$target" python - <<'PY'
+          from fastapi.testclient import TestClient
+          from lingjing_harness.api import app
+
+          with TestClient(app) as client:
+              page = client.get('/')
+              live = client.get('/health/live')
+              ready = client.get('/health/ready')
+              app_js = client.get('/assets/app.js')
+
+          assert page.status_code == 200 and '序枢' in page.text
+          assert live.status_code == 200 and live.json()['status'] == 'ok'
+          assert ready.status_code == 200 and ready.json()['status'] == 'ready'
+          assert app_js.status_code == 200
+          PY
+            )
+          done
+
+      - name: Upload verified release bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build-and-verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-dist
+          path: /tmp/xushu-release
+
+      - name: Publish immutable GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          test "$GITHUB_REF_TYPE" = "tag"
+          gh release create "$GITHUB_REF_NAME" \
+            /tmp/xushu-release/*.whl \
+            /tmp/xushu-release/*.tar.gz \
+            /tmp/xushu-release/SHA256SUMS \
+            --verify-tag \
+            --title "Xushu ${GITHUB_REF_NAME}" \
+            --generate-notes
