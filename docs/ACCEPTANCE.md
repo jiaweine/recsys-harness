@@ -93,14 +93,32 @@
 - 不提交 build / dist / egg-info 等生成源码副本；
 - 压力测试脚本只在验收时临时运行，不写入仓库。
 
+## Release delivery
+
+- `pyproject.toml` 的 `project.version` 是发布版本单一来源；
+- release tag 必须严格等于 `v<project.version>`；
+- `CHANGELOG.md` 必须存在匹配版本的发布章节；
+- release-infrastructure PR 必须实际运行只读 release dry-run，而不是只做 YAML 静态检查；
+- wheel 与 sdist 必须由同一已验证 commit 构建；
+- wheel 与 sdist 的 Name / Version 元数据必须与项目契约一致；
+- 两种分发格式都必须包含后端 runtime 与真实 frontend 产品文件；
+- wheel 与 sdist 都必须能在独立路径 clean install 后提供首页、liveness、readiness 与前端资源；
+- 发布 bundle 必须包含 SHA-256 checksum；
+- 执行仓库代码的 build job 只授予 `contents: read`，创建 Release 的 write 权限只存在于依赖验证产物的独立 publish job；
+- 非 tag 的 PR / manual dry-run 不得创建 GitHub Release；
+- 可利用的安全问题不得要求通过公开 Issue 披露，仓库必须提供私密报告指引。
+
 ## Engineering gates
 
-- `python -m compileall -q lingjing_harness tests`；
+- `python -m compileall -q lingjing_harness tests scripts`；
 - `node --check frontend/app.js`；
 - `pytest -q`；
 - `make demo`；
 - CLI smoke；
 - wheel build + clean install；
-- 从安装后的 wheel 加载真实 Web 首页；
+- sdist build + clean install；
+- 从安装后的 wheel / sdist 加载真实 Web 首页与 health endpoints；
+- release artifact metadata / contents / checksums verification；
 - GitHub CI；
+- Release dry-run（release-infrastructure 变更时）；
 - Chromium desktop + mobile real-product workflow。
