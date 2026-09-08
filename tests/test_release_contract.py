@@ -31,23 +31,27 @@ def test_repository_release_contract_matches_declared_version():
 
 
 def test_release_contract_rejects_tag_version_mismatch(tmp_path):
+    release_version = "1.2.3"
+    mismatched_version = "1.2.4"
     _write_minimal_release_repo(
         tmp_path,
-        version="1.2.3",
-        changelog="# Changelog\n\n## [1.2.3]\n\nReady.\n",
+        version=release_version,
+        changelog=f"# Changelog\n\n## [{release_version}]\n\nReady.\n",
     )
     with pytest.raises(ReleaseContractError, match="does not match project version"):
-        validate_release_contract(tmp_path, tag="v1.2.4")
+        validate_release_contract(tmp_path, tag="v" + mismatched_version)
 
 
 def test_release_contract_requires_matching_changelog_section(tmp_path):
+    release_version = "1.2.3"
+    old_version = "1.2.2"
     _write_minimal_release_repo(
         tmp_path,
-        version="1.2.3",
-        changelog="# Changelog\n\n## [1.2.2]\n\nOld release.\n",
+        version=release_version,
+        changelog=f"# Changelog\n\n## [{old_version}]\n\nOld release.\n",
     )
     with pytest.raises(ReleaseContractError, match="CHANGELOG.md"):
-        validate_release_contract(tmp_path, tag="v1.2.3")
+        validate_release_contract(tmp_path, tag="v" + release_version)
 
 
 def test_release_workflow_keeps_write_token_out_of_build_job():
