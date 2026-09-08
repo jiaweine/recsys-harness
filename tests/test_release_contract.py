@@ -82,6 +82,13 @@ def test_release_workflow_keeps_write_token_out_of_build_job():
     assert '"$envdir/bin/python" -m pip install -r requirements-runtime.txt' in workflow
     assert '"$envdir/bin/xushu-harness"' in workflow
 
+    # The clean-install web smoke must use only production runtime dependencies.
+    # In particular it starts the installed Uvicorn server and probes it with the
+    # standard library rather than pulling a TestClient-only dependency into runtime.
+    assert "fastapi.testclient" not in workflow
+    assert '"$envdir/bin/python" -m uvicorn lingjing_harness.api:app' in workflow
+    assert "from urllib.request import urlopen" in workflow
+
     # All reusable actions are immutable SHA pins, matching the repository's
     # existing supply-chain policy for workflows that execute repository code.
     assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in workflow
