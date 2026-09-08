@@ -4,15 +4,8 @@ on:
   push:
     paths:
       - '.github/workflows/system-stress-hardening.yml'
-      - 'lingjing_harness/api.py'
-      - 'lingjing_harness/api_attachment_integrity.py'
-      - 'lingjing_harness/api_recovery.py'
-      - 'lingjing_harness/api_security.py'
-      - 'lingjing_harness/api_shutdown.py'
-      - 'lingjing_harness/api_workspace_transaction.py'
-      - 'lingjing_harness/store.py'
-      - 'lingjing_harness/store_handoff.py'
-      - 'lingjing_harness/store_run_recovery.py'
+      - 'lingjing_harness/api*.py'
+      - 'lingjing_harness/store*.py'
       - 'lingjing_harness/rate_limit_maintenance.py'
       - 'lingjing_harness/runtime/optimizer_observation_memory.py'
       - 'lingjing_harness/runtime/optimizer_observation_recency_anchor.py'
@@ -26,6 +19,13 @@ on:
       - 'tests/test_api_security_boundary.py'
       - 'tests/test_workspace_import_crash_consistency.py'
       - 'tests/test_run_lease_execution_fence.py'
+      - 'tests/test_run_recovery_claim_clock.py'
+      - 'tests/test_cancel_side_effect_fence.py'
+      - 'tests/test_terminal_takeover_execution_fence.py'
+      - 'tests/test_assistant_publish_cancel_linearization.py'
+      - 'tests/test_assistant_publish_terminal_takeover.py'
+      - 'tests/test_run_completion_linearization_stress.py'
+      - 'tests/test_system_stress_contract.py'
       - 'tests/test_runtime_consistency.py'
       - 'tests/test_startup_recovery_batching.py'
       - 'tests/test_store_fencing_stress.py'
@@ -46,15 +46,8 @@ on:
   pull_request:
     paths:
       - '.github/workflows/system-stress-hardening.yml'
-      - 'lingjing_harness/api.py'
-      - 'lingjing_harness/api_attachment_integrity.py'
-      - 'lingjing_harness/api_recovery.py'
-      - 'lingjing_harness/api_security.py'
-      - 'lingjing_harness/api_shutdown.py'
-      - 'lingjing_harness/api_workspace_transaction.py'
-      - 'lingjing_harness/store.py'
-      - 'lingjing_harness/store_handoff.py'
-      - 'lingjing_harness/store_run_recovery.py'
+      - 'lingjing_harness/api*.py'
+      - 'lingjing_harness/store*.py'
       - 'lingjing_harness/rate_limit_maintenance.py'
       - 'lingjing_harness/runtime/optimizer_observation_memory.py'
       - 'lingjing_harness/runtime/optimizer_observation_recency_anchor.py'
@@ -68,6 +61,13 @@ on:
       - 'tests/test_api_security_boundary.py'
       - 'tests/test_workspace_import_crash_consistency.py'
       - 'tests/test_run_lease_execution_fence.py'
+      - 'tests/test_run_recovery_claim_clock.py'
+      - 'tests/test_cancel_side_effect_fence.py'
+      - 'tests/test_terminal_takeover_execution_fence.py'
+      - 'tests/test_assistant_publish_cancel_linearization.py'
+      - 'tests/test_assistant_publish_terminal_takeover.py'
+      - 'tests/test_run_completion_linearization_stress.py'
+      - 'tests/test_system_stress_contract.py'
       - 'tests/test_runtime_consistency.py'
       - 'tests/test_startup_recovery_batching.py'
       - 'tests/test_store_fencing_stress.py'
@@ -108,6 +108,13 @@ jobs:
             echo "durable recovery race pass ${pass}/3"
             pytest -q \
               tests/test_run_lease_execution_fence.py \
+              tests/test_run_recovery_claim_clock.py \
+              tests/test_cancel_side_effect_fence.py \
+              tests/test_terminal_takeover_execution_fence.py \
+              tests/test_assistant_publish_cancel_linearization.py \
+              tests/test_assistant_publish_terminal_takeover.py \
+              tests/test_run_completion_linearization_stress.py \
+              tests/test_system_stress_contract.py \
               tests/test_store_fencing_stress.py \
               tests/test_graceful_handoff.py \
               tests/test_rate_limit_maintenance.py \
