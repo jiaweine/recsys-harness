@@ -62,7 +62,8 @@ jobs:
           rm -rf build dist *.egg-info
           python -m build --sdist --wheel --outdir dist
           python scripts/verify_release_artifacts.py dist
-          sha256sum dist/* > dist/SHA256SUMS
+          (cd dist && sha256sum *.whl *.tar.gz > SHA256SUMS)
+          (cd dist && sha256sum -c SHA256SUMS)
 
       - name: Verify clean installs from both release formats
         shell: bash
@@ -112,6 +113,9 @@ jobs:
         with:
           name: release-dist
           path: /tmp/xushu-release
+
+      - name: Verify downloaded release bundle
+        run: cd /tmp/xushu-release && sha256sum -c SHA256SUMS
 
       - name: Publish immutable GitHub release
         shell: bash
