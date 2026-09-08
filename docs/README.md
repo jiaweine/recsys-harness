@@ -1,6 +1,6 @@
 # Xushu Documentation
 
-This directory contains the technical contracts behind **Xushu · Recsys Harness**. The root `README.md` explains the product and quick start; the documents here go deeper into runtime behavior, data, evaluation, evolution, experimentation, operations, and acceptance criteria.
+This directory contains the technical contracts behind **Xushu · Recsys Harness**. The root `README.md` explains the product and quick start; the documents here go deeper into runtime behavior, data, evaluation, evolution, experimentation, operations, release engineering, and acceptance criteria.
 
 ## Start here
 
@@ -12,6 +12,7 @@ This directory contains the technical contracts behind **Xushu · Recsys Harness
 | [`COUNTERFACTUAL_EXPERIMENTS.md`](COUNTERFACTUAL_EXPERIMENTS.md) | Explicit IPS / SNIPS / DR off-policy evaluation, overlap diagnostics and controlled-experiment eligibility gates. |
 | [`VERTICAL_EVOLUTION.md`](VERTICAL_EVOLUTION.md) | Search / Recommendation strategy genome, evaluation, response surfaces, routing, holdout and trust flow. |
 | [`OPERATIONS.md`](OPERATIONS.md) | Production liveness/readiness semantics, workspace convergence and container probe behavior. |
+| [`RELEASING.md`](RELEASING.md) | Version/tag contract, release dry-run, wheel/sdist verification, checksums and immutable GitHub release flow. |
 | [`ACCEPTANCE.md`](ACCEPTANCE.md) | Verifiable acceptance criteria for runtime, product, evaluation, recovery and integration behavior. |
 | [`DESIGN.md`](DESIGN.md) | Product and interaction design principles for the task-first workspace. |
 
@@ -37,6 +38,13 @@ This directory contains the technical contracts behind **Xushu · Recsys Harness
 2. Use `/health/live` for process liveness and `/health/ready` for traffic readiness.
 3. Keep `/api/status` behind the product authentication boundary rather than reusing it as an infrastructure probe.
 4. Use [`ARCHITECTURE.md`](ARCHITECTURE.md) when reasoning about multi-worker durable state and recovery.
+
+### I want to cut a release
+
+1. Read [`RELEASING.md`](RELEASING.md).
+2. Update `project.version` and the matching `CHANGELOG.md` section together.
+3. Dry-run the Release workflow or run the documented local release checks.
+4. Publish only from an immutable `v<version>` tag after the release commit is green on `main`.
 
 ### I want to evaluate a candidate policy with explicit counterfactual evidence
 
@@ -84,4 +92,4 @@ Permissioned Activation
 Revalidation / Retirement
 ```
 
-The runtime, evaluation, data, experimentation, operations, and UI layers should preserve that evidence chain rather than creating separate sources of truth.
+The runtime, evaluation, data, experimentation, operations, release, and UI layers should preserve that evidence chain rather than creating separate sources of truth.
