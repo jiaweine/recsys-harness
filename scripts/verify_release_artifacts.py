@@ -9,6 +9,7 @@ import zipfile
 
 PROJECT_NAME = "xushu-recsys-harness"
 DIST_NAME = "xushu_recsys_harness"
+CONSOLE_ENTRY = "xushu-harness = lingjing_harness.cli:main"
 
 
 def project_version(root: Path) -> str:
@@ -27,6 +28,12 @@ def _metadata_value(text: str, key: str) -> str | None:
     return None
 
 
+def _require_console_entry(text: str, *, artifact: str) -> None:
+    normalized = {line.strip() for line in text.splitlines() if line.strip()}
+    if "[console_scripts]" not in normalized or CONSOLE_ENTRY not in normalized:
+        raise ValueError(f"{artifact} is missing the {CONSOLE_ENTRY!r} console entry point")
+
+
 def verify_release_artifacts(dist: Path, root: Path) -> tuple[Path, Path]:
     version = project_version(root)
     wheels = sorted(dist.glob(f"{DIST_NAME}-{version}-*.whl"))
@@ -41,9 +48,13 @@ def verify_release_artifacts(dist: Path, root: Path) -> tuple[Path, Path]:
     with zipfile.ZipFile(wheel) as archive:
         names = set(archive.namelist())
         metadata_names = [name for name in names if name.endswith(".dist-info/METADATA")]
+        entry_point_names = [name for name in names if name.endswith(".dist-info/entry_points.txt")]
         if len(metadata_names) != 1:
             raise ValueError(f"wheel metadata is ambiguous: {metadata_names}")
+        if len(entry_point_names) != 1:
+            raise ValueError(f"wheel entry-point metadata is ambiguous: {entry_point_names}")
         metadata = archive.read(metadata_names[0]).decode("utf-8")
+        entry_points = archive.read(entry_point_names[0]).decode("utf-8")
         required = {
             "lingjing_harness/__init__.py",
             "lingjing_harness/api.py",
@@ -66,6 +77,7 @@ def verify_release_artifacts(dist: Path, root: Path) -> tuple[Path, Path]:
             raise ValueError("wheel project name does not match pyproject.toml contract")
         if _metadata_value(metadata, "Version") != version:
             raise ValueError("wheel version does not match pyproject.toml contract")
+        _require_console_entry(entry_points, artifact="wheel")
 
     prefix = f"{DIST_NAME}-{version}/"
     with tarfile.open(sdist, mode="r:gz") as archive:
@@ -83,19 +95,30 @@ def verify_release_artifacts(dist: Path, root: Path) -> tuple[Path, Path]:
         if missing:
             raise ValueError(f"sdist is missing source/product files: {missing}")
         pkg_info = f"{prefix}{DIST_NAME}.egg-info/PKG-INFO"
+        entry_points_name = f"{prefix}{DIST_NAME}.egg-info/entry_points.txt"
         if pkg_info not in names:
             alternatives = [name for name in names if name.endswith("/PKG-INFO")]
             if len(alternatives) != 1:
                 raise ValueError(f"sdist metadata is ambiguous: {alternatives}")
             pkg_info = alternatives[0]
+        if entry_points_name not in names:
+            alternatives = [name for name in names if name.endswith(".egg-info/entry_points.txt")]
+            if len(alternatives) != 1:
+                raise ValueError(f"sdist entry-point metadata is ambiguous: {alternatives}")
+            entry_points_name = alternatives[0]
         extracted = archive.extractfile(pkg_info)
+        entry_points_file = archive.extractfile(entry_points_name)
         if extracted is None:
             raise ValueError("sdist PKG-INFO could not be read")
+        if entry_points_file is None:
+            raise ValueError("sdist entry_points.txt could not be read")
         metadata = extracted.read().decode("utf-8")
+        entry_points = entry_points_file.read().decode("utf-8")
         if _metadata_value(metadata, "Name") != PROJECT_NAME:
             raise ValueError("sdist project name does not match pyproject.toml contract")
         if _metadata_value(metadata, "Version") != version:
             raise ValueError("sdist version does not match pyproject.toml contract")
+        _require_console_entry(entry_points, artifact="sdist")
 
     return wheel, sdist
 
