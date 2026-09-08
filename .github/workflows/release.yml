@@ -68,7 +68,7 @@ jobs:
       - name: Verify clean installs from both release formats
         shell: bash
         run: |
-          rm -rf /tmp/xushu-release-wheel /tmp/xushu-release-sdist
+          rm -rf /tmp/xushu-release-wheel /tmp/xushu-release-sdist /tmp/xushu-release-data-8871 /tmp/xushu-release-data-8872
           python -m venv /tmp/xushu-release-wheel
           python -m venv /tmp/xushu-release-sdist
           for envdir in /tmp/xushu-release-wheel /tmp/xushu-release-sdist; do
@@ -76,26 +76,62 @@ jobs:
           done
           /tmp/xushu-release-wheel/bin/python -m pip install dist/*.whl --no-deps
           /tmp/xushu-release-sdist/bin/python -m pip install dist/*.tar.gz --no-deps --no-build-isolation
+
+          port=8871
           for envdir in /tmp/xushu-release-wheel /tmp/xushu-release-sdist; do
             (
               cd /tmp
-              "$envdir/bin/python" - <<'PY'
-          from fastapi.testclient import TestClient
-          from lingjing_harness.api import app
+              export LINGJING_DATA_DIR="/tmp/xushu-release-data-${port}"
+              rm -rf "$LINGJING_DATA_DIR"
+              "$envdir/bin/python" -m uvicorn lingjing_harness.api:app \
+                --host 127.0.0.1 --port "$port" --no-proxy-headers \
+                >"/tmp/xushu-release-${port}.log" 2>&1 &
+              server_pid=$!
+              cleanup() {
+                kill "$server_pid" 2>/dev/null || true
+                wait "$server_pid" 2>/dev/null || true
+              }
+              trap cleanup EXIT
 
-          with TestClient(app) as client:
-              page = client.get('/')
-              live = client.get('/health/live')
-              ready = client.get('/health/ready')
-              app_js = client.get('/assets/app.js')
+              XUSHU_RELEASE_PORT="$port" "$envdir/bin/python" - <<'PY'
+          import json
+          import os
+          import time
+          from urllib.error import URLError
+          from urllib.request import urlopen
 
-          assert page.status_code == 200 and '序枢' in page.text
-          assert live.status_code == 200 and live.json()['status'] == 'ok'
-          assert ready.status_code == 200 and ready.json()['status'] == 'ready'
-          assert app_js.status_code == 200
+          base = f"http://127.0.0.1:{os.environ['XUSHU_RELEASE_PORT']}"
+          deadline = time.monotonic() + 12.0
+          while True:
+              try:
+                  with urlopen(f"{base}/health/live", timeout=1.0) as response:
+                      if response.status == 200:
+                          live = json.loads(response.read().decode("utf-8"))
+                          if live.get("status") == "ok":
+                              break
+              except (OSError, URLError, json.JSONDecodeError):
+                  pass
+              if time.monotonic() >= deadline:
+                  raise RuntimeError("release smoke server did not become live")
+              time.sleep(0.2)
+
+          with urlopen(f"{base}/", timeout=2.0) as response:
+              assert response.status == 200
+              page = response.read().decode("utf-8")
+          with urlopen(f"{base}/health/ready", timeout=2.0) as response:
+              ready = json.loads(response.read().decode("utf-8"))
+              assert response.status == 200 and ready.get("status") == "ready"
+          with urlopen(f"{base}/assets/app.js", timeout=2.0) as response:
+              assert response.status == 200 and response.read()
+
+          assert "序枢" in page
           PY
+
               "$envdir/bin/xushu-harness" '做一次全局体检' > /dev/null
+              cleanup
+              trap - EXIT
             )
+            port=$((port + 1))
           done
 
       - name: Upload verified release bundle
