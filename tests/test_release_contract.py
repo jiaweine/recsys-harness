@@ -54,7 +54,10 @@ def test_release_workflow_keeps_write_token_out_of_build_job():
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
 
     assert "workflow_dispatch:" in workflow
+    assert "pull_request:" in workflow
     assert 'tags:\n      - "v*"' in workflow
+    assert '".github/workflows/release.yml"' in workflow
+    assert '"scripts/check_release_contract.py"' in workflow
     assert "permissions:\n  contents: read" in workflow
     assert "publish:" in workflow
     assert "contents: write" in workflow
