@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 
 from fastapi.testclient import TestClient
 
@@ -17,8 +16,15 @@ def test_installed_limits_bound_public_auth_and_import_before_model_parsing() ->
     assert api_module.REQUEST_BODY_PATH_LIMITS["/api/attachments"] > api_module.MAX_ATTACHMENT_BYTES
     assert api_module.REQUEST_BODY_PATH_LIMITS["/api/data/import-file"] > api_module.MAX_IMPORT_BYTES
 
+    wrapped = {
+        str(getattr(route, "path", "")): getattr(route, "_xushu_max_body_size", None)
+        for route in api_module.app.router.routes
+        if str(getattr(route, "path", "")) in api_module.REQUEST_BODY_PATH_LIMITS
+    }
+    assert wrapped == api_module.REQUEST_BODY_PATH_LIMITS
+
     # A declared oversize is rejected before JSON/Pydantic parsing. The tiny
-    # physical body keeps this regression fast while proving the installed path
+    # physical body keeps this regression fast while proving the installed route
     # policy is consulted before the endpoint sees LoginRequest/ImportPayload.
     login = client.post(
         "/api/auth/login",
@@ -29,7 +35,7 @@ def test_installed_limits_bound_public_auth_and_import_before_model_parsing() ->
         },
     )
     assert login.status_code == 413
-    assert login.json()["detail"] == "请求体过大"
+    assert login.text == "Content Too Large"
 
     inline_import = client.post(
         "/api/data/import",
@@ -40,14 +46,14 @@ def test_installed_limits_bound_public_auth_and_import_before_model_parsing() ->
         },
     )
     assert inline_import.status_code == 413
-    assert inline_import.json()["detail"] == "请求体过大"
+    assert inline_import.text == "Content Too Large"
 
     # Ordinary bounded requests retain their previous endpoint semantics.
     normal_login = client.post("/api/auth/login", json={"access_key": "x"})
     assert normal_login.status_code == 200
 
 
-def _run_stream_case(headers: list[tuple[bytes, bytes]]) -> list[dict]:
+def _run_stream_case(headers: list[tuple[bytes, bytes]]) -> tuple[list[dict], list[bytes]]:
     seen_by_downstream: list[bytes] = []
 
     async def downstream(scope, receive, send):
@@ -58,17 +64,16 @@ def _run_stream_case(headers: list[tuple[bytes, bytes]]) -> list[dict]:
             seen_by_downstream.append(message.get("body") or b"")
             if not message.get("more_body", False):
                 break
-        body = json.dumps({"ok": True}).encode("utf-8")
         await send(
             {
                 "type": "http.response.start",
                 "status": 200,
-                "headers": [(b"content-length", str(len(body)).encode("ascii"))],
+                "headers": [(b"content-length", b"2")],
             }
         )
-        await send({"type": "http.response.body", "body": body})
+        await send({"type": "http.response.body", "body": b"{}"})
 
-    middleware = RequestBodyLimitMiddleware(downstream, default_limit=8)
+    middleware = RequestBodyLimitMiddleware(downstream, max_body_size=8)
     frames = iter(
         [
             {"type": "http.request", "body": b"12345", "more_body": True},
@@ -90,35 +95,33 @@ def _run_stream_case(headers: list[tuple[bytes, bytes]]) -> list[dict]:
         "headers": headers,
     }
     asyncio.run(middleware(scope, receive, send))
-
-    # The first bounded chunk may be delivered; the chunk crossing the limit is
-    # stopped before downstream code can observe or parse it.
-    assert seen_by_downstream == [b"12345"]
-    return sent
+    return sent, seen_by_downstream
 
 
 def test_streaming_limit_rejects_chunked_body_without_content_length() -> None:
-    sent = _run_stream_case([])
+    sent, seen = _run_stream_case([])
+    assert seen == [b"12345"]
     assert sent[0]["type"] == "http.response.start"
     assert sent[0]["status"] == 413
-    assert json.loads(sent[1]["body"])["detail"] == "请求体过大"
+    assert sent[1]["body"] == b"Content Too Large"
 
 
 def test_streaming_limit_does_not_trust_dishonest_content_length() -> None:
-    sent = _run_stream_case([(b"content-length", b"1")])
+    sent, seen = _run_stream_case([(b"content-length", b"1")])
+    assert seen == [b"12345"]
     assert sent[0]["status"] == 413
 
 
-def test_non_body_methods_are_not_subject_to_request_body_accounting() -> None:
+def test_bodyless_get_remains_unaffected() -> None:
     async def downstream(scope, receive, send):
         await send({"type": "http.response.start", "status": 204, "headers": []})
         await send({"type": "http.response.body", "body": b""})
 
-    middleware = RequestBodyLimitMiddleware(downstream, default_limit=1)
+    middleware = RequestBodyLimitMiddleware(downstream, max_body_size=1)
     sent: list[dict] = []
 
     async def receive():
-        raise AssertionError("GET body should not be consumed by this boundary")
+        raise AssertionError("bodyless GET should not need to consume receive")
 
     async def send(message):
         sent.append(message)
