@@ -55,21 +55,29 @@ def test_release_contract_requires_matching_changelog_section(tmp_path):
         validate_release_contract(tmp_path, tag="v" + release_version)
 
 
-def test_release_artifact_dependency_guard_requires_starlette_floor():
+def test_release_artifact_dependency_guard_requires_exact_starlette_floor():
     _require_starlette_runtime_floor(
         "Requires-Dist: fastapi<1,>=0.115\nRequires-Dist: starlette<2,>=1.6\n",
         artifact="fixture",
     )
-    with pytest.raises(ValueError, match="Starlette dependency"):
-        _require_starlette_runtime_floor(
-            "Requires-Dist: fastapi<1,>=0.115\nRequires-Dist: starlette<2,>=0.47\n",
-            artifact="fixture",
-        )
+
+    bad_metadata = (
+        "Requires-Dist: fastapi<1,>=0.115\n"
+        "Requires-Dist: starlette<2,>=0.47\n"
+    )
+    with pytest.raises(ValueError, match="exact specifiers"):
+        _require_starlette_runtime_floor(bad_metadata, artifact="fixture")
+
+    misleading_name = (
+        "Requires-Dist: fastapi<1,>=0.115\n"
+        "Requires-Dist: starlette-context<2,>=1.6\n"
+    )
     with pytest.raises(ValueError, match="exactly one Starlette"):
-        _require_starlette_runtime_floor(
-            "Requires-Dist: fastapi<1,>=0.115\n",
-            artifact="fixture",
-        )
+        _require_starlette_runtime_floor(misleading_name, artifact="fixture")
+
+    misleading_upper_bound = "Requires-Dist: starlette<20,>=1.6\n"
+    with pytest.raises(ValueError, match="exact specifiers"):
+        _require_starlette_runtime_floor(misleading_upper_bound, artifact="fixture")
 
 
 def test_release_workflow_keeps_write_token_out_of_build_job():
