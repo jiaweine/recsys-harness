@@ -2,6 +2,9 @@
 
 from . import online_experiment_store as _online_experiment_store_module
 from . import store as _store_module
+from .api_message_start import (
+    install_message_store_fast_paths as _install_message_store_fast_paths,
+)
 from .store_assistant_lookup import (
     install_fresh_run_assistant_lookup_gate as _install_fresh_run_assistant_lookup_gate,
 )
@@ -18,6 +21,7 @@ from .store_workspace_publication_atomic_fence import (
 )
 
 _install_workspace_run_schema_migration_guard(_store_module)
+_install_message_store_fast_paths(_store_module)
 _install_fresh_run_assistant_lookup_gate(_store_module)
 _install_run_recovery_claim_fence(_store_module)
 _install_workspace_publication_fence(_store_module)
