@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 
 from lingjing_harness.store import WorkspaceStore
@@ -62,12 +63,39 @@ def test_recovery_lookup_keeps_legacy_published_message_fallback(tmp_path, monke
         events=[{"phase": "complete", "progress": 100}],
         checkpoint={"status": "completed", "result": {"answer": "legacy answer"}},
     )
-    expected = store.add_message(
-        conversation["id"],
-        "assistant",
-        "legacy answer",
-        {"job_id": run_id, "answer": "legacy answer"},
-    )
+
+    # Reproduce the durable state left by a pre-atomic publisher: the assistant
+    # row exists while the run is still active.  Do not call add_message(), which
+    # is intentionally wrapped by the current completion fence after api import.
+    created_at = time.time()
+    payload = {"job_id": run_id, "answer": "legacy answer"}
+    expected = {
+        "id": "msg-legacy-published",
+        "conversation_id": conversation["id"],
+        "role": "assistant",
+        "content": "legacy answer",
+        "payload": payload,
+        "created_at": created_at,
+    }
+    with store._lock, store._connect() as connection:  # noqa: SLF001 - legacy DB fixture
+        connection.execute(
+            "update conversations set updated_at=? where id=?",
+            (created_at, conversation["id"]),
+        )
+        connection.execute(
+            """
+            insert into messages(id,conversation_id,role,content,payload,created_at)
+            values(?,?,?,?,?,?)
+            """,
+            (
+                expected["id"],
+                conversation["id"],
+                "assistant",
+                "legacy answer",
+                json.dumps(payload, ensure_ascii=False),
+                created_at,
+            ),
+        )
 
     original_list_messages = store.list_messages
     scans = 0
