@@ -156,6 +156,19 @@ def install_api_security_boundary(core: Any) -> None:
         ):
             return JSONResponse({"detail": "Origin is not allowed"}, status_code=403)
 
+        # Conversation rows are durable and intentionally have no automatic
+        # retention.  Keep creation on the shared SQLite limiter so a tight client
+        # loop cannot bypass the existing task/import/attachment budgets and grow
+        # the workspace database without bound.  The stable API installs this
+        # boundary after hardening ``core._client_key`` for trusted proxies.
+        if request.method.upper() == "POST" and request.url.path == "/api/conversations":
+            if not core.store.consume_rate_limit(
+                f"conversation:{core._client_key(request)}",
+                limit=30,
+                window_seconds=60,
+            ):
+                return JSONResponse({"detail": "请求过于频繁，请稍后重试"}, status_code=429)
+
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
