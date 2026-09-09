@@ -289,7 +289,12 @@ def install_online_experiment_routes(
             raise HTTPException(400, str(exc)) from exc
 
     @router.get("/{experiment_id}/evaluation")
-    def evaluate(experiment_id: str):
+    def evaluate(experiment_id: str, request: Request):
+        # Evaluation materializes every observation and reruns the statistical
+        # decision pipeline. Bound this full-scan read separately from cheap
+        # metadata reads so a small authenticated GET cannot repeatedly amplify
+        # into unbounded SQLite/Python CPU and memory work as evidence grows.
+        limit(request, "evaluate", requests=30, window=60)
         try:
             return registry.evaluate(experiment_id)
         except KeyError as exc:
