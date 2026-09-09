@@ -26,7 +26,18 @@ def _secured_app(monkeypatch, *, hosts=None, origins=None):
     def mutate():
         return {"ok": True}
 
-    core = SimpleNamespace(app=app)
+    @app.post("/api/conversations")
+    def create_conversation():
+        return {"ok": True}
+
+    store = SimpleNamespace(
+        consume_rate_limit=lambda scope_key, *, limit, window_seconds: True,
+    )
+    core = SimpleNamespace(
+        app=app,
+        store=store,
+        _client_key=lambda request: "test-client",
+    )
     install_api_security_boundary(core)
     return app, core
 
@@ -169,3 +180,19 @@ def test_explicit_host_allowlist_is_authoritative_for_ip_literals(monkeypatch):
         "/api/status",
         headers={"host": "10.20.30.40:8080"},
     ).status_code == 200
+
+
+def test_conversation_creation_uses_shared_durable_rate_limit(monkeypatch):
+    app, core = _secured_app(monkeypatch)
+    calls = []
+
+    def deny_conversation(scope_key, *, limit, window_seconds):
+        calls.append((scope_key, limit, window_seconds))
+        return False
+
+    core.store.consume_rate_limit = deny_conversation
+    response = TestClient(app).post("/api/conversations", json={})
+
+    assert response.status_code == 429
+    assert response.json()["detail"] == "请求过于频繁，请稍后重试"
+    assert calls == [("conversation:test-client", 30, 60)]
