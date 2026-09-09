@@ -26,6 +26,12 @@ def install_attachment_integrity_boundary(core: Any) -> None:
         records: list[tuple[float, str, Path, Path]] = []
         managed_targets: set[str] = set()
 
+        def file_size(path: Path) -> int:
+            try:
+                return int(path.stat().st_size)
+            except OSError:
+                return 0
+
         with core.ATTACHMENT_LOCK:
             for temp in core.ATTACHMENT_DIR.glob("*.tmp"):
                 try:
@@ -86,20 +92,26 @@ def install_attachment_integrity_boundary(core: Any) -> None:
                     path.unlink(missing_ok=True)
                     removed += 1
 
+            # Quota eviction used to rescan the whole attachment directory after
+            # every deleted record.  Cache the first observed total and subtract
+            # the exact payload/metadata sizes we reclaim; one final scan still
+            # observes concurrent filesystem changes before the upload decision.
             total = core._attachment_storage_bytes()
             if total > core.MAX_ATTACHMENT_STORAGE_BYTES:
                 for _, attachment_id, target, meta_path in sorted(records):
                     if attachment_id in referenced:
                         continue
+                    reclaimed = file_size(target) + file_size(meta_path)
                     target.unlink(missing_ok=True)
                     meta_path.unlink(missing_ok=True)
                     removed += 1
-                    total = core._attachment_storage_bytes()
+                    total = max(0, total - reclaimed)
                     if total <= core.MAX_ATTACHMENT_STORAGE_BYTES:
                         break
 
+            final_total = core._attachment_storage_bytes()
             return {
-                "bytes": core._attachment_storage_bytes(),
+                "bytes": final_total,
                 "removed": removed,
                 "referenced": len(referenced),
             }
