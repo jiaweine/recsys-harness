@@ -68,17 +68,36 @@ jobs:
       - name: Verify clean installs from both release formats
         shell: bash
         run: |
-          rm -rf /tmp/xushu-release-wheel /tmp/xushu-release-sdist /tmp/xushu-release-data-8871 /tmp/xushu-release-data-8872
+          rm -rf \
+            /tmp/xushu-release-wheel \
+            /tmp/xushu-release-sdist \
+            /tmp/xushu-release-wheel-resolved \
+            /tmp/xushu-release-data-8871 \
+            /tmp/xushu-release-data-8872 \
+            /tmp/xushu-release-data-8873
           python -m venv /tmp/xushu-release-wheel
           python -m venv /tmp/xushu-release-sdist
+          python -m venv /tmp/xushu-release-wheel-resolved
+
+          # Locked production environments validate the reproducible deployment
+          # contract independently of package dependency resolution.
           for envdir in /tmp/xushu-release-wheel /tmp/xushu-release-sdist; do
             "$envdir/bin/python" -m pip install -r requirements-runtime.txt
           done
           /tmp/xushu-release-wheel/bin/python -m pip install dist/*.whl --no-deps
           /tmp/xushu-release-sdist/bin/python -m pip install dist/*.tar.gz --no-deps --no-build-isolation
 
+          # A third truly clean environment validates the public wheel contract:
+          # no runtime lock is preinstalled and pip must resolve Requires-Dist.
+          /tmp/xushu-release-wheel-resolved/bin/python -m pip install dist/*.whl
+
           port=8871
-          for envdir in /tmp/xushu-release-wheel /tmp/xushu-release-sdist; do
+          for envdir in \
+            /tmp/xushu-release-wheel \
+            /tmp/xushu-release-sdist \
+            /tmp/xushu-release-wheel-resolved; do
+            "$envdir/bin/python" -m pip check
+            "$envdir/bin/python" -c "from starlette.middleware.body_limit import RequestBodyLimitMiddleware"
             (
               cd /tmp
               export LINGJING_DATA_DIR="/tmp/xushu-release-data-${port}"

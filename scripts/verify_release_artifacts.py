@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import re
 import tarfile
 import tomllib
 import zipfile
@@ -10,6 +11,9 @@ import zipfile
 PROJECT_NAME = "xushu-recsys-harness"
 DIST_NAME = "xushu_recsys_harness"
 CONSOLE_ENTRY = "xushu-harness = lingjing_harness.cli:main"
+STARLETTE_MINIMUM = ">=1.6"
+STARLETTE_MAXIMUM = "<2"
+_REQUIREMENT_NAME = re.compile(r"^([a-z0-9][a-z0-9._-]*)(.*)$")
 
 
 def project_version(root: Path) -> str:
@@ -26,6 +30,41 @@ def _metadata_value(text: str, key: str) -> str | None:
         if line.startswith(prefix):
             return line[len(prefix) :].strip()
     return None
+
+
+def _metadata_values(text: str, key: str) -> list[str]:
+    prefix = f"{key}: "
+    return [
+        line[len(prefix) :].strip()
+        for line in text.splitlines()
+        if line.startswith(prefix)
+    ]
+
+
+def _runtime_requirement(value: str) -> tuple[str, set[str]] | None:
+    normalized = str(value or "").lower().replace(" ", "").split(";", 1)[0]
+    match = _REQUIREMENT_NAME.fullmatch(normalized)
+    if match is None:
+        return None
+    name = match.group(1).replace("_", "-")
+    spec = match.group(2)
+    return name, {token for token in spec.split(",") if token}
+
+
+def _require_starlette_runtime_floor(text: str, *, artifact: str) -> None:
+    parsed = [
+        row
+        for value in _metadata_values(text, "Requires-Dist")
+        if (row := _runtime_requirement(value)) is not None and row[0] == "starlette"
+    ]
+    if len(parsed) != 1:
+        raise ValueError(f"{artifact} must declare exactly one Starlette runtime dependency")
+    _, specifiers = parsed[0]
+    if STARLETTE_MINIMUM not in specifiers or STARLETTE_MAXIMUM not in specifiers:
+        raise ValueError(
+            f"{artifact} Starlette dependency must include exact specifiers "
+            f"{STARLETTE_MINIMUM} and {STARLETTE_MAXIMUM}"
+        )
 
 
 def _require_console_entry(text: str, *, artifact: str) -> None:
@@ -77,6 +116,7 @@ def verify_release_artifacts(dist: Path, root: Path) -> tuple[Path, Path]:
             raise ValueError("wheel project name does not match pyproject.toml contract")
         if _metadata_value(metadata, "Version") != version:
             raise ValueError("wheel version does not match pyproject.toml contract")
+        _require_starlette_runtime_floor(metadata, artifact="wheel")
         _require_console_entry(entry_points, artifact="wheel")
 
     prefix = f"{DIST_NAME}-{version}/"
@@ -118,6 +158,7 @@ def verify_release_artifacts(dist: Path, root: Path) -> tuple[Path, Path]:
             raise ValueError("sdist project name does not match pyproject.toml contract")
         if _metadata_value(metadata, "Version") != version:
             raise ValueError("sdist version does not match pyproject.toml contract")
+        _require_starlette_runtime_floor(metadata, artifact="sdist")
         _require_console_entry(entry_points, artifact="sdist")
 
     return wheel, sdist
