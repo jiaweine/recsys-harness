@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import threading
+import time
 from typing import Any
 
 from .store_run_completion import install_run_completion_publication_fence
+
+
+PERCEPTION_DURABLE_CANCEL_POLL_SECONDS = 0.5
 
 
 class _CancelFencedMemory:
@@ -28,16 +32,23 @@ class _CancelFencedMemory:
 def install_cancel_execution_fence(core: Any) -> None:
     """Linearize durable user cancellation at side-effect boundaries.
 
-    ``should_stop`` remains the cheap cooperative path between runner actions, but
-    a remote cancel can land after that poll and before the next tool, learning,
-    or assistant-publish side effect.  ``save_run`` already preserves a durable
+    ``should_stop`` remains the cooperative path between runner actions, but a
+    remote cancel can land after that poll and before the next tool, learning, or
+    assistant-publish side effect. ``save_run`` already preserves a durable
     ``cancel_requested`` row against later running/interrupted checkpoints; this
     boundary turns that durable state into ``RunCancelled`` before the caller is
     allowed to proceed.
 
-    Cancellation is deliberately separate from lease ownership.  Heartbeats may
+    Perception is different from a side-effect boundary: api_core waits on one
+    bounded perception task and polls the same durable stop callback every 100ms.
+    That callback opens a fresh SQLite connection, so an 18-second perception can
+    otherwise create roughly 180 status reads while no cancellation is happening.
+    Bound only that waiting-loop poll to twice per second. Runner, learning,
+    persistence, and publication fences keep their full durable checks unchanged.
+
+    Cancellation is deliberately separate from lease ownership. Heartbeats may
     keep a cancel-requested run leased while its current bounded tool finishes;
-    only a new side-effect boundary is refused.  Assistant publication is the one
+    only a new side-effect boundary is refused. Assistant publication is the one
     boundary that must also atomically terminalize the durable run so a successful
     stop request can never linearize between publication and completion.
     """
@@ -49,6 +60,7 @@ def install_cancel_execution_fence(core: Any) -> None:
 
     original_persist = core._persist_run
     original_execute = core._execute
+    original_perceive = core._perceive_with_cancel
     runner_context = threading.local()
 
     def cancel_requested(run_id: str) -> bool:
@@ -58,14 +70,48 @@ def install_cancel_execution_fence(core: Any) -> None:
         if cancel_requested(run_id):
             raise core.RunCancelled(f"run cancel requested: {run_id}")
 
+    async def perceive_with_bounded_cancel_poll(
+        rows: list[dict[str, Any]],
+        should_stop,
+    ) -> tuple[str, list[dict[str, Any]]]:
+        last_checked = float("-inf")
+        stopped = False
+        poll_lock = threading.Lock()
+
+        def bounded_should_stop() -> bool:
+            nonlocal last_checked, stopped
+            if stopped:
+                return True
+            now = time.monotonic()
+            with poll_lock:
+                if stopped:
+                    return True
+                if now - last_checked < PERCEPTION_DURABLE_CANCEL_POLL_SECONDS:
+                    return False
+                last_checked = now
+                stopped = bool(should_stop())
+                return stopped
+
+        result = await original_perceive(rows, bounded_should_stop)
+
+        # Do not let a cancel that landed between the last bounded poll and
+        # perception completion leak a newly observed context into the next phase.
+        # This final exact check also keeps short perception tasks cancellation-safe.
+        if stopped or should_stop():
+            return "", [
+                core._public_attachment(row, perception_status="cancelled")
+                for row in rows
+            ]
+        return result
+
     def persist_with_cancel_fence(row: dict[str, Any]) -> None:
         run_id = str(row.get("run_id") or "")
         requested_status = str(row.get("status") or "running")
         original_persist(row)
 
         # Persisting attachments/perception also happens while the asyncio run
-        # task exists, but before api_core enters its RunCancelled handler.  Fence
-        # only persistence invoked from inside runner.run itself.  The thread-local
+        # task exists, but before api_core enters its RunCancelled handler. Fence
+        # only persistence invoked from inside runner.run itself. The thread-local
         # marker is set in the executor thread around the runner call, so startup
         # recovery staging and pre-run perception remain ordinary cooperative
         # cancellation paths rather than unhandled control-flow exceptions.
@@ -97,7 +143,7 @@ def install_cancel_execution_fence(core: Any) -> None:
             runner_context.run_id = run_id
             try:
                 result = original_run(*args, **run_kwargs)
-                # Catch a cancel already durable when the runner returns.  The
+                # Catch a cancel already durable when the runner returns. The
                 # later assistant publication transaction performs the final
                 # cancel-vs-complete linearization immediately before the message
                 # can become visible.
@@ -119,9 +165,13 @@ def install_cancel_execution_fence(core: Any) -> None:
             runner.run = original_run
             runner.memory = original_memory
 
+    core._perceive_with_cancel = perceive_with_bounded_cancel_poll
     core._persist_run = persist_with_cancel_fence
     core._execute = execute_with_cancel_fence
     core._CANCEL_EXECUTION_FENCE_INSTALLED = True
 
 
-__all__ = ["install_cancel_execution_fence"]
+__all__ = [
+    "PERCEPTION_DURABLE_CANCEL_POLL_SECONDS",
+    "install_cancel_execution_fence",
+]
