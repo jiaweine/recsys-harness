@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import re
 import tarfile
 import tomllib
 import zipfile
@@ -12,6 +13,7 @@ DIST_NAME = "xushu_recsys_harness"
 CONSOLE_ENTRY = "xushu-harness = lingjing_harness.cli:main"
 STARLETTE_MINIMUM = ">=1.6"
 STARLETTE_MAXIMUM = "<2"
+_REQUIREMENT_NAME = re.compile(r"^([a-z0-9][a-z0-9._-]*)(.*)$")
 
 
 def project_version(root: Path) -> str:
@@ -39,15 +41,29 @@ def _metadata_values(text: str, key: str) -> list[str]:
     ]
 
 
+def _runtime_requirement(value: str) -> tuple[str, set[str]] | None:
+    normalized = str(value or "").lower().replace(" ", "").split(";", 1)[0]
+    match = _REQUIREMENT_NAME.fullmatch(normalized)
+    if match is None:
+        return None
+    name = match.group(1).replace("_", "-")
+    spec = match.group(2)
+    return name, {token for token in spec.split(",") if token}
+
+
 def _require_starlette_runtime_floor(text: str, *, artifact: str) -> None:
-    requirements = [value.lower().replace(" ", "") for value in _metadata_values(text, "Requires-Dist")]
-    matches = [value for value in requirements if value.startswith("starlette")]
-    if len(matches) != 1:
+    parsed = [
+        row
+        for value in _metadata_values(text, "Requires-Dist")
+        if (row := _runtime_requirement(value)) is not None and row[0] == "starlette"
+    ]
+    if len(parsed) != 1:
         raise ValueError(f"{artifact} must declare exactly one Starlette runtime dependency")
-    requirement = matches[0]
-    if STARLETTE_MINIMUM not in requirement or STARLETTE_MAXIMUM not in requirement:
+    _, specifiers = parsed[0]
+    if STARLETTE_MINIMUM not in specifiers or STARLETTE_MAXIMUM not in specifiers:
         raise ValueError(
-            f"{artifact} Starlette dependency must include {STARLETTE_MINIMUM} and {STARLETTE_MAXIMUM}"
+            f"{artifact} Starlette dependency must include exact specifiers "
+            f"{STARLETTE_MINIMUM} and {STARLETTE_MAXIMUM}"
         )
 
 
