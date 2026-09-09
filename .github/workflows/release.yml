@@ -4,6 +4,11 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
+      # Every source tree shipped in the wheel/sdist must trigger the installed-
+      # artifact acceptance path. Otherwise a new runtime import or packaged web
+      # regression could bypass public dependency resolution and clean-install QA.
+      - "lingjing_harness/**"
+      - "frontend/**"
       - "pyproject.toml"
       - "requirements*.txt"
       - "CHANGELOG.md"
