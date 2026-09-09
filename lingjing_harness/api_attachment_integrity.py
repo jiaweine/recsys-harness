@@ -21,10 +21,11 @@ def install_attachment_integrity_boundary(core: Any) -> None:
 
     def gc_attachments(now: float | None = None) -> dict[str, int]:
         now = time.time() if now is None else float(now)
-        referenced = core.store.referenced_attachment_ids()
+        referenced: set[str] = set()
         removed = 0
-        records: list[tuple[float, str, Path, Path]] = []
+        records: list[tuple[float, str, Path, Path, bool]] = []
         managed_targets: set[str] = set()
+        has_stale_managed = False
 
         def file_size(path: Path) -> int:
             try:
@@ -59,20 +60,15 @@ def install_attachment_integrity_boundary(core: Any) -> None:
                     continue
 
                 managed_targets.add(target.name)
-                if (
-                    attachment_id not in referenced
-                    and now - created_at > core.ATTACHMENT_ORPHAN_TTL_SECONDS
-                ):
-                    target.unlink(missing_ok=True)
-                    meta_path.unlink(missing_ok=True)
-                    managed_targets.discard(target.name)
-                    removed += 1
-                    continue
-                records.append((created_at, attachment_id, target, meta_path))
+                stale = now - created_at > core.ATTACHMENT_ORPHAN_TTL_SECONDS
+                has_stale_managed = has_stale_managed or stale
+                records.append((created_at, attachment_id, target, meta_path, stale))
 
             # A process can die after the raw payload is atomically installed but
-            # before its metadata file is committed.  Recent files are preserved
-            # for the normal upload window; stale unmatched payloads are reclaimable.
+            # before its metadata file is committed. Recent files are preserved
+            # for the normal upload window; stale unmatched payloads are reclaimable
+            # without consulting durable message/run history because no valid
+            # metadata remains through which the attachment can be loaded.
             for path in core.ATTACHMENT_DIR.iterdir():
                 if not path.is_file() or path.name.endswith(".tmp"):
                     continue
@@ -92,27 +88,51 @@ def install_attachment_integrity_boundary(core: Any) -> None:
                     path.unlink(missing_ok=True)
                     removed += 1
 
-            # Quota eviction used to rescan the whole attachment directory after
-            # every deleted record.  Cache the first observed total and subtract
-            # the exact payload/metadata sizes we reclaim; one final scan still
-            # observes concurrent filesystem changes before the upload decision.
+            # Reference discovery scans historical message payloads and run
+            # snapshots, then recursively decodes every matching JSON row. That
+            # history read is only required when GC may actually delete a managed
+            # attachment. Keep the common recent + under-quota upload path entirely
+            # filesystem-local, while preserving the same conservative reference
+            # protection whenever TTL or quota eviction is possible.
             total = core._attachment_storage_bytes()
-            if total > core.MAX_ATTACHMENT_STORAGE_BYTES:
-                for _, attachment_id, target, meta_path in sorted(records):
-                    if attachment_id in referenced:
+            if has_stale_managed or total > core.MAX_ATTACHMENT_STORAGE_BYTES:
+                referenced = core.store.referenced_attachment_ids()
+
+                retained: list[tuple[float, str, Path, Path, bool]] = []
+                for created_at, attachment_id, target, meta_path, stale in records:
+                    if stale and attachment_id not in referenced:
+                        reclaimed = file_size(target) + file_size(meta_path)
+                        target.unlink(missing_ok=True)
+                        meta_path.unlink(missing_ok=True)
+                        removed += 1
+                        total = max(0, total - reclaimed)
                         continue
-                    reclaimed = file_size(target) + file_size(meta_path)
-                    target.unlink(missing_ok=True)
-                    meta_path.unlink(missing_ok=True)
-                    removed += 1
-                    total = max(0, total - reclaimed)
-                    if total <= core.MAX_ATTACHMENT_STORAGE_BYTES:
-                        break
+                    retained.append((created_at, attachment_id, target, meta_path, stale))
+                records = retained
+
+                # Quota eviction used to rescan the whole attachment directory
+                # after every deleted record. Keep the cached total from the first
+                # scan and subtract exact reclaimed bytes; one final scan below
+                # still observes concurrent filesystem changes before upload.
+                if total > core.MAX_ATTACHMENT_STORAGE_BYTES:
+                    for _, attachment_id, target, meta_path, _ in sorted(records):
+                        if attachment_id in referenced:
+                            continue
+                        reclaimed = file_size(target) + file_size(meta_path)
+                        target.unlink(missing_ok=True)
+                        meta_path.unlink(missing_ok=True)
+                        removed += 1
+                        total = max(0, total - reclaimed)
+                        if total <= core.MAX_ATTACHMENT_STORAGE_BYTES:
+                            break
 
             final_total = core._attachment_storage_bytes()
             return {
                 "bytes": final_total,
                 "removed": removed,
+                # This diagnostic count is populated only when a deletion decision
+                # required durable-reference discovery; callers use `bytes` for
+                # quota enforcement and do not depend on an eager history count.
                 "referenced": len(referenced),
             }
 
@@ -135,7 +155,7 @@ def install_attachment_integrity_boundary(core: Any) -> None:
         if not re.fullmatch(r"\.[a-z0-9]{1,9}", suffix or ""):
             suffix = ".bin"
 
-        # `.payload` is structural, not user-controlled.  It makes every payload
+        # `.payload` is structural, not user-controlled. It makes every payload
         # filename disjoint from the durable `att-<id>.json` metadata namespace.
         stored_name = f"{attachment_id}.payload{suffix}"
         target = core.ATTACHMENT_DIR / stored_name
