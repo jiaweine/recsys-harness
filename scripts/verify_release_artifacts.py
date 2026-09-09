@@ -10,6 +10,8 @@ import zipfile
 PROJECT_NAME = "xushu-recsys-harness"
 DIST_NAME = "xushu_recsys_harness"
 CONSOLE_ENTRY = "xushu-harness = lingjing_harness.cli:main"
+STARLETTE_MINIMUM = ">=1.6"
+STARLETTE_MAXIMUM = "<2"
 
 
 def project_version(root: Path) -> str:
@@ -26,6 +28,27 @@ def _metadata_value(text: str, key: str) -> str | None:
         if line.startswith(prefix):
             return line[len(prefix) :].strip()
     return None
+
+
+def _metadata_values(text: str, key: str) -> list[str]:
+    prefix = f"{key}: "
+    return [
+        line[len(prefix) :].strip()
+        for line in text.splitlines()
+        if line.startswith(prefix)
+    ]
+
+
+def _require_starlette_runtime_floor(text: str, *, artifact: str) -> None:
+    requirements = [value.lower().replace(" ", "") for value in _metadata_values(text, "Requires-Dist")]
+    matches = [value for value in requirements if value.startswith("starlette")]
+    if len(matches) != 1:
+        raise ValueError(f"{artifact} must declare exactly one Starlette runtime dependency")
+    requirement = matches[0]
+    if STARLETTE_MINIMUM not in requirement or STARLETTE_MAXIMUM not in requirement:
+        raise ValueError(
+            f"{artifact} Starlette dependency must include {STARLETTE_MINIMUM} and {STARLETTE_MAXIMUM}"
+        )
 
 
 def _require_console_entry(text: str, *, artifact: str) -> None:
@@ -77,6 +100,7 @@ def verify_release_artifacts(dist: Path, root: Path) -> tuple[Path, Path]:
             raise ValueError("wheel project name does not match pyproject.toml contract")
         if _metadata_value(metadata, "Version") != version:
             raise ValueError("wheel version does not match pyproject.toml contract")
+        _require_starlette_runtime_floor(metadata, artifact="wheel")
         _require_console_entry(entry_points, artifact="wheel")
 
     prefix = f"{DIST_NAME}-{version}/"
@@ -118,6 +142,7 @@ def verify_release_artifacts(dist: Path, root: Path) -> tuple[Path, Path]:
             raise ValueError("sdist project name does not match pyproject.toml contract")
         if _metadata_value(metadata, "Version") != version:
             raise ValueError("sdist version does not match pyproject.toml contract")
+        _require_starlette_runtime_floor(metadata, artifact="sdist")
         _require_console_entry(entry_points, artifact="sdist")
 
     return wheel, sdist
