@@ -86,6 +86,12 @@ def test_release_workflow_keeps_write_token_out_of_build_job():
     assert "workflow_dispatch:" in workflow
     assert "pull_request:" in workflow
     assert 'tags:\n      - "v*"' in workflow
+
+    # Every source tree included in the built distribution must trigger Release
+    # acceptance. A runtime/frontend-only PR can introduce an undeclared import,
+    # broken package data, or installed-app regression just as pyproject can.
+    assert '- "lingjing_harness/**"' in workflow
+    assert '- "frontend/**"' in workflow
     assert '".github/workflows/release.yml"' in workflow
     assert '"scripts/check_release_contract.py"' in workflow
     assert "permissions:\n  contents: read" in workflow
