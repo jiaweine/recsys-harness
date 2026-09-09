@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 
 _MUTATION_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+_OPEN_API_PATHS = frozenset({"/api/auth/status", "/api/auth/login", "/api/auth/logout"})
 _DEFAULT_ALLOWED_HOSTS = ("localhost", "127.0.0.1", "::1", "testserver")
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 _CSP = (
@@ -156,12 +157,27 @@ def install_api_security_boundary(core: Any) -> None:
         ):
             return JSONResponse({"detail": "Origin is not allowed"}, status_code=403)
 
+        path = request.url.path
+        if (
+            bool(getattr(core, "AUTH_REQUIRED", False))
+            and path.startswith("/api/")
+            and path not in _OPEN_API_PATHS
+        ):
+            session_valid = getattr(core, "_session_valid", None)
+            if not callable(session_valid) or not session_valid(request):
+                # This boundary is installed outside api_core's historical access
+                # middleware. Reject unauthenticated protected requests here so
+                # they cannot consume IP-scoped task/import/attachment quotas in
+                # the inner middleware and deny service to authenticated peers on
+                # a shared NAT/proxy identity.
+                return JSONResponse({"detail": "需要访问授权"}, status_code=401)
+
         # Conversation rows are durable and intentionally have no automatic
         # retention.  Keep creation on the shared SQLite limiter so a tight client
         # loop cannot bypass the existing task/import/attachment budgets and grow
-        # the workspace database without bound.  The stable API installs this
-        # boundary after hardening ``core._client_key`` for trusted proxies.
-        if request.method.upper() == "POST" and request.url.path == "/api/conversations":
+        # the workspace database without bound.  Authentication above ensures an
+        # unauthenticated peer cannot exhaust this quota for a shared client key.
+        if request.method.upper() == "POST" and path == "/api/conversations":
             if not core.store.consume_rate_limit(
                 f"conversation:{core._client_key(request)}",
                 limit=30,
