@@ -1,6 +1,10 @@
 """Xushu Search & Recommendation Agent Harness."""
 
+from . import online_experiment_store as _online_experiment_store_module
 from . import store as _store_module
+from .store_online_experiment_listing import (
+    install_online_experiment_list_aggregation as _install_online_experiment_list_aggregation,
+)
 from .store_run_recovery import install_run_recovery_claim_fence as _install_run_recovery_claim_fence
 from .store_run_schema_migration import (
     install_workspace_run_schema_migration_guard as _install_workspace_run_schema_migration_guard,
@@ -14,6 +18,7 @@ _install_workspace_run_schema_migration_guard(_store_module)
 _install_run_recovery_claim_fence(_store_module)
 _install_workspace_publication_fence(_store_module)
 _install_workspace_publication_atomic_fence(_store_module)
+_install_online_experiment_list_aggregation(_online_experiment_store_module)
 
 from .adapters import (
     AdapterRecommendationEngine,
