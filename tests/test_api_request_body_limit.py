@@ -1,11 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
+import tomllib
 
 from fastapi.testclient import TestClient
 
 import lingjing_harness.api as api_module
 from lingjing_harness.api_request_body_limit import RequestBodyLimitMiddleware
+
+
+def test_project_dependency_declares_starlette_body_limit_floor() -> None:
+    pyproject = tomllib.loads(
+        (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    dependencies = set(pyproject["project"]["dependencies"])
+    assert "starlette>=1.6,<2" in dependencies
 
 
 def test_installed_limits_bound_public_auth_and_import_before_model_parsing() -> None:
