@@ -10,6 +10,7 @@ from scripts.check_release_contract import (
     project_version,
     validate_release_contract,
 )
+from scripts.verify_release_artifacts import _require_starlette_runtime_floor
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,6 +55,23 @@ def test_release_contract_requires_matching_changelog_section(tmp_path):
         validate_release_contract(tmp_path, tag="v" + release_version)
 
 
+def test_release_artifact_dependency_guard_requires_starlette_floor():
+    _require_starlette_runtime_floor(
+        "Requires-Dist: fastapi<1,>=0.115\nRequires-Dist: starlette<2,>=1.6\n",
+        artifact="fixture",
+    )
+    with pytest.raises(ValueError, match="Starlette dependency"):
+        _require_starlette_runtime_floor(
+            "Requires-Dist: fastapi<1,>=0.115\nRequires-Dist: starlette<2,>=0.47\n",
+            artifact="fixture",
+        )
+    with pytest.raises(ValueError, match="exactly one Starlette"):
+        _require_starlette_runtime_floor(
+            "Requires-Dist: fastapi<1,>=0.115\n",
+            artifact="fixture",
+        )
+
+
 def test_release_workflow_keeps_write_token_out_of_build_job():
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
 
@@ -75,16 +93,22 @@ def test_release_workflow_keeps_write_token_out_of_build_job():
     assert "sha256sum *.whl *.tar.gz > SHA256SUMS" in workflow
     assert workflow.count("sha256sum -c SHA256SUMS") >= 2
 
-    # A release artifact is not accepted merely because metadata exists: both
-    # formats must install into clean virtual environments and expose the real CLI.
+    # Reproducible deployment installs stay pinned, but a separate clean wheel
+    # environment must resolve public Requires-Dist without the runtime lock.
     assert "python -m venv /tmp/xushu-release-wheel" in workflow
     assert "python -m venv /tmp/xushu-release-sdist" in workflow
+    assert "python -m venv /tmp/xushu-release-wheel-resolved" in workflow
     assert '"$envdir/bin/python" -m pip install -r requirements-runtime.txt' in workflow
+    assert "/tmp/xushu-release-wheel/bin/python -m pip install dist/*.whl --no-deps" in workflow
+    assert "/tmp/xushu-release-sdist/bin/python -m pip install dist/*.tar.gz --no-deps --no-build-isolation" in workflow
+    assert "/tmp/xushu-release-wheel-resolved/bin/python -m pip install dist/*.whl" in workflow
+    assert '"$envdir/bin/python" -m pip check' in workflow
+    assert "from starlette.middleware.body_limit import RequestBodyLimitMiddleware" in workflow
     assert '"$envdir/bin/xushu-harness"' in workflow
 
-    # The clean-install web smoke must use only production runtime dependencies.
-    # In particular it starts the installed Uvicorn server and probes it with the
-    # standard library rather than pulling a TestClient-only dependency into runtime.
+    # The installed web smoke uses only runtime dependencies. In particular it
+    # starts Uvicorn and probes it with the standard library rather than adding a
+    # TestClient-only dependency to the release environments.
     assert "fastapi.testclient" not in workflow
     assert '"$envdir/bin/python" -m uvicorn lingjing_harness.api:app' in workflow
     assert "from urllib.request import urlopen" in workflow
