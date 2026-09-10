@@ -10,6 +10,7 @@ from typing import Any
 import uuid
 
 from .api_cancel_execution_fence import install_cancel_execution_fence
+from .api_message_start import install_message_start_boundary
 from .api_recovery import (
     install_expired_run_recovery_heartbeat,
     install_startup_recovery_batching,
@@ -154,6 +155,12 @@ def install_shutdown_boundary(core: Any) -> None:
     # those existing paths resolve core.WORKER_ID at runtime, so one installation
     # keeps their owner token coherent without duplicating run-owner plumbing.
     install_run_owner_session(core)
+
+    # Replace the task-start route before request-body middleware captures route
+    # ASGI apps. The wrapper reuses the original endpoint and only narrows its
+    # conversation existence check, so validation and run lifecycle semantics stay
+    # owned by api_core while body limits still cover the final registered route.
+    install_message_start_boundary(core)
 
     # Request-size accounting must sit outside FastAPI's body/model parsing. Add it
     # before the security middleware so the later security layer remains the
