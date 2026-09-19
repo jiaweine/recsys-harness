@@ -78,7 +78,11 @@ def context_query_terms(text: str, limit: int = 10) -> list[str]:
 
     seen: set[str] = set()
     ranked: list[tuple[int, int, str]] = []
-    for token in tokenize(text):
+
+    # Preserve R&D identifiers before the generic tokenizer splits punctuation.
+    # Examples: alpha-7, foo_bar, ranker/v2, issue:123.
+    technical_terms = re.findall(r"[A-Za-z0-9][A-Za-z0-9_./:-]{1,79}", text)
+    for token in [*technical_terms, *tokenize(text)]:
         term = str(token).strip().lower()
         if len(term) < 2 or term in _STOP_TERMS or term in seen:
             continue
