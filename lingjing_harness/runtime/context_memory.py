@@ -249,7 +249,7 @@ def _select_current(
     *,
     max_selected: int,
     char_budget: int,
-) -> tuple[list[MemoryCandidate], int]:
+) -> list[MemoryCandidate]:
     selected: list[MemoryCandidate] = []
     used = 0
     for row in sorted(rows, key=lambda item: (item.score, item.created_at), reverse=True):
@@ -264,7 +264,7 @@ def _select_current(
         row.content = content
         selected.append(row)
         used += len(content)
-    return selected, used
+    return selected
 
 
 def _select_history(
@@ -273,7 +273,7 @@ def _select_history(
     continuation: bool,
     max_selected: int,
     char_budget: int,
-) -> tuple[list[MemoryCandidate], int]:
+) -> list[MemoryCandidate]:
     """Select one semantic anchor plus recent context, then fill by utility."""
 
     relevant = [
@@ -294,7 +294,7 @@ def _select_history(
         eligible_by_hash[row.content_hash or _hash(row.content)] = row
     eligible = list(eligible_by_hash.values())
     if not eligible or max_selected <= 0 or char_budget <= 80:
-        return [], 0
+        return []
 
     reserved: list[MemoryCandidate] = []
     if relevant:
@@ -341,7 +341,7 @@ def _select_history(
         row.content = content
         selected.append(row)
         used += len(content)
-    return selected, used
+    return selected
 
 
 def _memory_block(row: MemoryCandidate) -> str:
@@ -452,13 +452,13 @@ def build_governed_context(
     current_candidates, current_deduplicated = _deduplicate(current_candidates)
     deduplicated = history_deduplicated + current_deduplicated
 
-    current_selected, used_attachment = _select_current(
+    current_selected = _select_current(
         current_candidates,
         max_selected=max_selected,
         char_budget=attachment_chars,
     )
     history_slots = max(0, max_selected - len(current_selected))
-    selected, used_history = _select_history(
+    selected = _select_history(
         historical_candidates,
         continuation=_continuation_query(query),
         max_selected=history_slots,
@@ -473,7 +473,6 @@ def build_governed_context(
             current_attachment_context,
             limit=min(attachment_chars, max_chars // 2),
         )
-        used_attachment = len(current_attachment)
 
     header = (
         "[CONTEXT_MEMORY version=1]\n"
@@ -511,7 +510,6 @@ def build_governed_context(
         "current_attachment_selected": len(rendered_current) + (1 if fallback_used else 0),
         "source_counts": source_counts,
         "source_manifest": [row.manifest() for row in rendered_rows],
-        "stale_selected": sum(1 for row in rendered_history if row.stale),
         "stale_rejected": sum(1 for row in historical_candidates if row.stale),
         "deduplicated": deduplicated,
         "truncated": truncated,
