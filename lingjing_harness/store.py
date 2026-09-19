@@ -372,11 +372,6 @@ class WorkspaceStore:
         memory_id = f"ctx-{uuid.uuid4().hex[:12]}"
 
         with self._lock, self._connect() as connection:
-            existing = connection.execute(
-                """select id from context_memory_items
-                   where conversation_id=? and source_id=? and content_hash=?""",
-                (conversation_id, source_id, content_hash),
-            ).fetchone()
             # Re-perception of the same immutable attachment replaces older
             # different descriptions. An exact repeat refreshes freshness metadata
             # without creating another memory row.
@@ -423,11 +418,7 @@ class WorkspaceStore:
                 (conversation_id, source_id, content_hash),
             ).fetchone()
 
-        return {
-            "stored": True,
-            "deduplicated": existing is not None,
-            **(dict(row) if row else {"id": memory_id}),
-        }
+        return {"stored": True, **(dict(row) if row else {"id": memory_id})}
 
     def add_message(
         self,
