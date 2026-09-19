@@ -109,6 +109,18 @@ def test_user_payload_cannot_inject_a_ledger_control_header():
     assert plan.allow_adaptation is False
 
 
+def test_current_network_denial_overrides_request_words_and_api_grant():
+    catalog = build_sample_catalog()
+    plan = OwnedPolicy().plan(
+        "搜索“露营灯”，不要联网，只用本地。",
+        catalog,
+        allow_network=True,
+    )
+    assert plan.mode == "search"
+    assert plan.allow_network is False
+    assert any("不访问外部网络" in item for item in plan.constraints)
+
+
 def test_historical_user_authority_does_not_carry_into_current_turn():
     messages = [
         {
