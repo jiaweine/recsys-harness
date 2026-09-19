@@ -143,7 +143,6 @@ def _compact_run_snapshot(row: dict[str, Any]) -> dict[str, Any]:
     if str(snapshot.get("status") or "") not in _core.ACTIVE_RUN_STATUSES:
         snapshot.pop("checkpoint", None)
         snapshot.pop("context_memory_records", None)
-        snapshot.pop("context_memory_report", None)
     return snapshot
 
 
