@@ -353,7 +353,7 @@ def _memory_block(row: MemoryCandidate) -> str:
     return (
         "[MEMORY "
         f"source={row.source_kind} id={row.source_id} trust={row.trust:.2f} "
-        f"stale={int(row.stale)} created_at={int(row.created_at)}]\n"
+        f"stale={int(row.stale)} created_at={row.created_at:.6f}]\n"
         + _prefix_content(row.content)
     )
 
