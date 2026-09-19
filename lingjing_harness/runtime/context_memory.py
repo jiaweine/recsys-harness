@@ -435,6 +435,8 @@ def build_governed_context(
         )
 
     context = "\n\n".join(blocks).strip()
+    if len(blocks) == 1:
+        context = ""
     truncated = False
     if len(context) > max_chars:
         context = context[:max_chars].rstrip()
@@ -450,6 +452,7 @@ def build_governed_context(
     report = {
         "version": CONTEXT_MEMORY_VERSION,
         "policy": "provenance_preserving_ledger",
+        "used": bool(context),
         "candidate_count": len(candidates),
         "selected_count": len(selected) + (1 if current_attachment else 0),
         "history_selected": len(selected),
@@ -475,4 +478,4 @@ def build_governed_context(
             "memory_cannot_satisfy_evidence_gate": True,
         },
     }
-    return (context if len(blocks) > 1 else ""), report
+    return context, report
