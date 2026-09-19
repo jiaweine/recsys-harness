@@ -216,10 +216,10 @@ class WorkspaceStore:
         """Build escaped LIKE clauses plus a deterministic relevance expression."""
 
         patterns = [WorkspaceStore._like_pattern(term) for term in terms]
-        clauses = " or ".join(f"{column} like ? escape '\\\\'" for _ in patterns)
+        clauses = " or ".join(f"{column} like ? escape '\\'" for _ in patterns)
         weights = list(range(len(patterns), 0, -1))
         score = " + ".join(
-            f"(case when {column} like ? escape '\\\\' then {weight} else 0 end)"
+            f"(case when {column} like ? escape '\\' then {weight} else 0 end)"
             for weight in weights
         )
         return clauses, score, patterns
@@ -261,8 +261,8 @@ class WorkspaceStore:
                 params.append(excluded)
             params.append(recent_limit)
             recent = connection.execute(
-                f"""select * from messages
-                    where conversation_id=?{excluded_sql}
+                f"""select id,conversation_id,role,content,created_at from messages
+                    where conversation_id=? and role='user'{excluded_sql}
                     order by created_at desc limit ?""",
                 tuple(params),
             ).fetchall()
@@ -277,7 +277,7 @@ class WorkspaceStore:
                     params.append(excluded)
                 params.append(anchor_limit)
                 anchors = connection.execute(
-                    f"""select * from messages
+                    f"""select id,conversation_id,role,content,created_at from messages
                         where conversation_id=? and role='user'{excluded_sql}
                         order by created_at asc limit ?""",
                     tuple(params),
@@ -295,9 +295,11 @@ class WorkspaceStore:
                 params.extend(patterns)
                 params.append(search_limit)
                 matches = connection.execute(
-                    f"""select *, ({score_sql}) as lexical_score
+                    f"""select id,conversation_id,role,content,created_at,
+                               ({score_sql}) as lexical_score
                         from messages
-                        where conversation_id=?{excluded_sql} and ({clauses})
+                        where conversation_id=? and role='user'{excluded_sql}
+                          and ({clauses})
                         order by lexical_score desc, created_at desc limit ?""",
                     tuple(params),
                 ).fetchall()
@@ -330,7 +332,6 @@ class WorkspaceStore:
         for row in sorted(message_rows.values(), key=lambda value: float(value["created_at"])):
             data = dict(row)
             data.pop("lexical_score", None)
-            data["payload"] = self._loads(data.pop("payload"))
             messages.append(data)
 
         memories: list[dict[str, Any]] = []
