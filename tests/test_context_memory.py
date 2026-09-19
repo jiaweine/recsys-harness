@@ -413,6 +413,24 @@ def test_context_memory_store_reports_when_old_write_is_immediately_pruned(
     assert "att-old" not in {row["source_id"] for row in snapshot["memory_items"]}
 
 
+def test_zero_context_limits_are_respected():
+    assert context_query_terms("alpha-7", limit=0) == []
+    context, report = build_governed_context(
+        "继续 alpha-7",
+        messages=[
+            {
+                "id": "msg-1",
+                "role": "user",
+                "content": "搜索 alpha-7",
+                "created_at": 1.0,
+            }
+        ],
+        max_selected=0,
+    )
+    assert context == ""
+    assert report["selected_count"] == 0
+
+
 def test_context_query_terms_preserve_hyphenated_rnd_identifiers():
     terms = context_query_terms("继续 alpha-7 和 ranker/r7 的实验")
     assert "alpha-7" in terms
