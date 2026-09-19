@@ -296,6 +296,40 @@ def test_multimodal_store_keeps_one_canonical_observation_per_source(tmp_path):
     assert "两次" in snapshot["memory_items"][0]["content"]
 
 
+def test_older_recovery_write_cannot_roll_back_newer_source_observation(tmp_path):
+    store = WorkspaceStore(tmp_path / "workspace.db")
+    cid = store.create_conversation("图片诊断", "recommend")["id"]
+
+    store.remember_context_item(
+        cid,
+        source_id="att-123",
+        source_kind="attachment_image",
+        content="新观察：商品 A 只重复两次。",
+        catalog_revision="rev-new",
+        created_at=20.0,
+    )
+    returned = store.remember_context_item(
+        cid,
+        source_id="att-123",
+        source_kind="attachment_image",
+        content="旧观察：商品 A 重复三次。",
+        catalog_revision="rev-old",
+        created_at=10.0,
+    )
+
+    assert returned["catalog_revision"] == "rev-new"
+    assert returned["created_at"] == 20.0
+    snapshot = store.context_snapshot(
+        cid,
+        query_terms=context_query_terms("商品 A 重复"),
+        recent_limit=8,
+        memory_limit=8,
+    )
+    assert len(snapshot["memory_items"]) == 1
+    assert "只重复两次" in snapshot["memory_items"][0]["content"]
+    assert snapshot["memory_items"][0]["catalog_revision"] == "rev-new"
+
+
 def test_context_memory_store_has_bounded_retention(tmp_path, monkeypatch):
     monkeypatch.setattr(store_module, "CONTEXT_MEMORY_ITEM_BUDGET", 3)
     store = WorkspaceStore(tmp_path / "workspace.db")
