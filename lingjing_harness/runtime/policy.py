@@ -261,7 +261,7 @@ class OwnedPolicy:
             key=lambda block: block[1],
             reverse=True,
         )
-        user_memory = "\n".join(value for _, _, value in direct)[:10_000]
+        user_memory = direct[0][2][:10_000] if direct else ""
 
         def has_domain_hint(value: str) -> bool:
             lowered = value.lower()
