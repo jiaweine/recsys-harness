@@ -678,7 +678,7 @@ def test_context_budget_is_hard_bounded_under_large_history():
     )
     assert len(context) <= 2_400
     assert report["chars"] <= 2_400
-    assert report["history_selected"] <= 8
+    assert report["selected_count"] <= 8
 
 
 def test_context_budget_below_header_size_fails_closed_to_empty_context():
@@ -692,12 +692,12 @@ def test_context_budget_below_header_size_fails_closed_to_empty_context():
                 "created_at": 1.0,
             }
         ],
-        max_chars=128,
-        history_chars=128,
+        max_chars=64,
+        history_chars=64,
     )
     assert context == ""
     assert report["chars"] == 0
-    assert report["max_chars"] == 128
+    assert report["max_chars"] == 64
 
 
 def test_verifier_fails_closed_if_memory_contract_is_violated():
