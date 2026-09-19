@@ -517,6 +517,30 @@ def test_latest_user_state_can_turn_off_older_exploration_intent():
     assert plan.allow_adaptation is False
 
 
+def test_same_second_user_updates_keep_subsecond_order():
+    catalog = build_sample_catalog()
+    context, _ = build_governed_context(
+        "继续",
+        messages=[
+            {
+                "id": "msg-old",
+                "role": "user",
+                "content": "搜索“露营灯”。",
+                "created_at": 10.1,
+            },
+            {
+                "id": "msg-new",
+                "role": "user",
+                "content": "改成推荐用户 u-lin。",
+                "created_at": 10.9,
+            },
+        ],
+    )
+    plan = OwnedPolicy().plan("继续", catalog, context=context)
+    assert plan.mode == "recommend"
+    assert plan.user_id == "u-lin"
+
+
 def test_latest_user_domain_update_overrides_older_conflicting_memory():
     catalog = build_sample_catalog()
     context, _ = build_governed_context(
