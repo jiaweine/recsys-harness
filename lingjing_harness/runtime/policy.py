@@ -22,6 +22,7 @@ class OwnedPolicy:
     REC_HINTS = ("推荐", "recommend", "首页", "feed", "猜你喜欢", "分发", "曝光", "推荐体验", "个性化")
     NO_SEARCH_HINTS = ("不要搜索", "别搜索", "不搜索", "不用搜索", "不要搜", "别搜", "不搜")
     NO_REC_HINTS = ("不要推荐", "别推荐", "不推荐", "不用推荐")
+    AUDIT_HINTS = ("全局体检", "全局检查", "系统体检", "整体检查", "全面检查", "审计")
     EXPLORE_HINTS = ("优化", "提升", "改进", "实验", "候选", "试试", "调整", "进化", "学习")
     NO_EXPLORE_HINTS = (
         "不要优化",
@@ -152,9 +153,10 @@ class OwnedPolicy:
             not deny_search and any(k in lowered for k in self.SEARCH_HINTS)
         )
         direct_rec = not deny_rec and any(k in lowered for k in self.REC_HINTS)
+        direct_audit = any(k in lowered for k in self.AUDIT_HINTS)
         inferred_search = any(k in context_lower for k in self.SEARCH_HINTS)
         inferred_rec = any(k in context_lower for k in self.REC_HINTS)
-        infer_from_context = not direct_search and not direct_rec
+        infer_from_context = not direct_search and not direct_rec and not direct_audit
         search = direct_search or (
             infer_from_context and not deny_search and inferred_search
         )
@@ -318,7 +320,7 @@ class OwnedPolicy:
             lowered = value.lower()
             return any(
                 hint in lowered
-                for hint in (*cls.SEARCH_HINTS, *cls.REC_HINTS)
+                for hint in (*cls.SEARCH_HINTS, *cls.REC_HINTS, *cls.AUDIT_HINTS)
             )
 
         current = [block for block in blocks if block[0] == "current_attachment"]
