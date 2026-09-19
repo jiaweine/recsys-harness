@@ -6,6 +6,7 @@ from lingjing_harness.runtime.context_memory import (
     context_query_terms,
 )
 from lingjing_harness.runtime.policy import OwnedPolicy
+from lingjing_harness.runtime.perception import PerceptionEngine
 from lingjing_harness.runtime.verifier import ResultVerifier
 from lingjing_harness.sample_data import build_sample_catalog
 from lingjing_harness.store import WorkspaceStore
@@ -209,6 +210,24 @@ def test_stale_multimodal_memory_is_rejected_before_context_render():
     plan = OwnedPolicy().plan("继续检查", build_sample_catalog(), context=context)
     assert plan.mode == "audit"
     assert plan.allow_adaptation is False
+
+
+def test_degraded_text_perception_does_not_create_memory_payload(tmp_path):
+    engine = PerceptionEngine()
+    missing = tmp_path / "missing.txt"
+    _context, observations = engine.build_context(
+        [
+            {
+                "id": "att-missing",
+                "name": "missing.txt",
+                "mime": "text/plain",
+                "size": 3,
+                "path": str(missing),
+            }
+        ]
+    )
+    assert observations[0]["perception"] == "degraded"
+    assert "_memory_text" not in observations[0]
 
 
 def test_current_multimodal_selection_is_relevance_driven_not_upload_order():
