@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 ACTIVE_RUN_STATUSES = ("running", "interrupted", "cancel_requested")
+CONTEXT_MEMORY_ITEM_BUDGET = 256
 
 
 class WorkspaceStore:
@@ -44,6 +45,7 @@ class WorkspaceStore:
           content text not null,
           content_hash text not null,
           trust real not null,
+          catalog_revision text not null default '',
           created_at real not null,
           unique(conversation_id,source_id,content_hash)
         );
@@ -79,6 +81,17 @@ class WorkspaceStore:
                 connection.execute("alter table runs add column owner_id text")
             if "lease_until" not in columns:
                 connection.execute("alter table runs add column lease_until real")
+            context_columns = {
+                row["name"]
+                for row in connection.execute(
+                    "pragma table_info(context_memory_items)"
+                ).fetchall()
+            }
+            if "catalog_revision" not in context_columns:
+                connection.execute(
+                    "alter table context_memory_items "
+                    "add column catalog_revision text not null default ''"
+                )
             connection.execute(
                 "insert or ignore into workspace_state(id,catalog_revision,updated_at) values(1,'',?)",
                 (time.time(),),
@@ -193,6 +206,24 @@ class WorkspaceStore:
             output.append(data)
         return output
 
+    @staticmethod
+    def _like_pattern(term: str) -> str:
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return f"%{escaped}%"
+
+    @staticmethod
+    def _lexical_match_sql(terms: list[str], column: str = "content") -> tuple[str, str, list[str]]:
+        """Build escaped LIKE clauses plus a deterministic relevance expression."""
+
+        patterns = [WorkspaceStore._like_pattern(term) for term in terms]
+        clauses = " or ".join(f"{column} like ? escape '\\\\'" for _ in patterns)
+        weights = list(range(len(patterns), 0, -1))
+        score = " + ".join(
+            f"(case when {column} like ? escape '\\\\' then {weight} else 0 end)"
+            for weight in weights
+        )
+        return clauses, score, patterns
+
     def context_snapshot(
         self,
         conversation_id: str,
@@ -204,18 +235,14 @@ class WorkspaceStore:
         anchor_limit: int = 16,
         memory_limit: int = 72,
     ) -> dict[str, list[dict[str, Any]]]:
-        """Return a bounded candidate pool for long-horizon context retrieval.
-
-        Retrieval is deliberately two-stage: SQLite performs a cheap union of the
-        recent tail, project anchors, and lexical matches; runtime.context_memory
-        then performs trust-aware semantic ranking and context budgeting.
-        """
+        """Return a bounded pool for trust-aware long-horizon context ranking."""
 
         recent_limit = max(8, min(256, int(recent_limit)))
         search_limit = max(0, min(256, int(search_limit)))
         anchor_limit = max(0, min(64, int(anchor_limit)))
         memory_limit = max(0, min(192, int(memory_limit)))
-        terms = []
+
+        terms: list[str] = []
         for value in query_terms or []:
             term = str(value or "").strip()[:80]
             if len(term) >= 2 and term not in terms:
@@ -259,18 +286,19 @@ class WorkspaceStore:
                     message_rows[str(row["id"])] = row
 
             if terms and search_limit:
-                clauses = " or ".join("content like ?" for _ in terms)
-                params = [conversation_id]
+                clauses, score_sql, patterns = self._lexical_match_sql(terms)
+                params = [*patterns, conversation_id]
                 excluded_sql = ""
                 if excluded:
                     excluded_sql = " and id<>?"
                     params.append(excluded)
-                params.extend(f"%{term}%" for term in terms)
+                params.extend(patterns)
                 params.append(search_limit)
                 matches = connection.execute(
-                    f"""select * from messages
+                    f"""select *, ({score_sql}) as lexical_score
+                        from messages
                         where conversation_id=?{excluded_sql} and ({clauses})
-                        order by created_at desc limit ?""",
+                        order by lexical_score desc, created_at desc limit ?""",
                     tuple(params),
                 ).fetchall()
                 for row in matches:
@@ -287,28 +315,29 @@ class WorkspaceStore:
                     memory_rows[str(row["id"])] = row
 
                 if terms:
-                    clauses = " or ".join("content like ?" for _ in terms)
+                    clauses, score_sql, patterns = self._lexical_match_sql(terms)
                     match_memory = connection.execute(
-                        f"""select * from context_memory_items
+                        f"""select *, ({score_sql}) as lexical_score
+                            from context_memory_items
                             where conversation_id=? and ({clauses})
-                            order by created_at desc limit ?""",
-                        (conversation_id, *(f"%{term}%" for term in terms), memory_limit),
+                            order by lexical_score desc, created_at desc limit ?""",
+                        (*patterns, conversation_id, *patterns, memory_limit),
                     ).fetchall()
                     for row in match_memory:
                         memory_rows[str(row["id"])] = row
 
-        messages = []
+        messages: list[dict[str, Any]] = []
         for row in sorted(message_rows.values(), key=lambda value: float(value["created_at"])):
             data = dict(row)
+            data.pop("lexical_score", None)
             data["payload"] = self._loads(data.pop("payload"))
             messages.append(data)
-        memories = [
-            dict(row)
-            for row in sorted(
-                memory_rows.values(),
-                key=lambda value: float(value["created_at"]),
-            )
-        ]
+
+        memories: list[dict[str, Any]] = []
+        for row in sorted(memory_rows.values(), key=lambda value: float(value["created_at"])):
+            data = dict(row)
+            data.pop("lexical_score", None)
+            memories.append(data)
         return {"messages": messages, "memory_items": memories}
 
     def remember_context_item(
@@ -319,9 +348,10 @@ class WorkspaceStore:
         source_kind: str,
         content: str,
         trust: float = 0.52,
+        catalog_revision: str | None = None,
         created_at: float | None = None,
     ) -> dict[str, Any]:
-        """Persist a compact derived observation with immutable source provenance."""
+        """Persist one canonical derived observation per immutable source id."""
 
         value = str(content or "").replace("\x00", "").strip()
         if not value:
@@ -331,17 +361,28 @@ class WorkspaceStore:
         source_kind = str(source_kind or "derived").strip()
         if not source_id:
             return {"stored": False, "reason": "missing_source"}
+
         content_hash = blake2b(
             " ".join(value.split()).lower().encode("utf-8", "ignore"),
             digest_size=12,
         ).hexdigest()
+        revision = str(catalog_revision or "")
         now = time.time() if created_at is None else float(created_at)
         memory_id = f"ctx-{uuid.uuid4().hex[:12]}"
+
         with self._lock, self._connect() as connection:
+            # Re-perception of the same immutable attachment replaces its older
+            # derived observation instead of accumulating indistinguishable copies.
             connection.execute(
+                """delete from context_memory_items
+                   where conversation_id=? and source_id=? and content_hash<>?""",
+                (conversation_id, source_id, content_hash),
+            )
+            cursor = connection.execute(
                 """insert or ignore into context_memory_items(
-                     id,conversation_id,source_id,source_kind,content,content_hash,trust,created_at
-                   ) values(?,?,?,?,?,?,?,?)""",
+                     id,conversation_id,source_id,source_kind,content,content_hash,
+                     trust,catalog_revision,created_at
+                   ) values(?,?,?,?,?,?,?,?,?)""",
                 (
                     memory_id,
                     conversation_id,
@@ -350,15 +391,31 @@ class WorkspaceStore:
                     value,
                     content_hash,
                     max(0.0, min(1.0, float(trust))),
+                    revision,
                     now,
                 ),
+            )
+            connection.execute(
+                """delete from context_memory_items
+                   where conversation_id=?
+                     and id not in (
+                       select id from context_memory_items
+                       where conversation_id=?
+                       order by created_at desc limit ?
+                     )""",
+                (conversation_id, conversation_id, CONTEXT_MEMORY_ITEM_BUDGET),
             )
             row = connection.execute(
                 """select * from context_memory_items
                    where conversation_id=? and source_id=? and content_hash=?""",
                 (conversation_id, source_id, content_hash),
             ).fetchone()
-        return {"stored": True, **(dict(row) if row else {"id": memory_id})}
+
+        return {
+            "stored": True,
+            "deduplicated": cursor.rowcount == 0,
+            **(dict(row) if row else {"id": memory_id}),
+        }
 
     def add_message(
         self,
