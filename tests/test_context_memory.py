@@ -313,6 +313,29 @@ def test_routing_prefers_user_memory_unless_current_turn_points_to_attachment():
 
 
 
+
+
+
+def test_continuation_carries_exploration_but_not_activation_or_network_authority():
+    catalog = build_sample_catalog()
+    context, _ = build_governed_context(
+        "继续",
+        messages=[
+            {
+                "id": "msg-old",
+                "role": "user",
+                "content": "优化搜索“露营灯”，联网查资料，验证通过后上线。",
+                "created_at": 10.0,
+            }
+        ],
+    )
+    plan = OwnedPolicy().plan("继续", catalog, context=context)
+    assert plan.mode == "search"
+    assert plan.explore is True
+    assert plan.allow_network is False
+    assert plan.allow_adaptation is False
+
+
 def test_latest_user_domain_update_overrides_older_conflicting_memory():
     catalog = build_sample_catalog()
     context, _ = build_governed_context(
