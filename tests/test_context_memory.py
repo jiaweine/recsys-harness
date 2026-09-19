@@ -367,6 +367,12 @@ def test_historical_attachment_json_restores_query_without_field_name_confusion(
     assert plan.query == "露营灯"
 
 
+def test_natural_language_user_word_does_not_become_an_id():
+    catalog = build_sample_catalog()
+    policy = OwnedPolicy()
+    assert policy._extract_user("检查推荐用户体验", catalog, fallback=False) == ""
+
+
 def test_structured_attachment_user_id_is_extracted_from_value_not_key():
     catalog = build_sample_catalog()
     context, _ = build_governed_context(
