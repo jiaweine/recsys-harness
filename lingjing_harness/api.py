@@ -142,6 +142,8 @@ def _compact_run_snapshot(row: dict[str, Any]) -> dict[str, Any]:
         snapshot["checkpoint"] = compact
     if str(snapshot.get("status") or "") not in _core.ACTIVE_RUN_STATUSES:
         snapshot.pop("checkpoint", None)
+        snapshot.pop("context_memory_records", None)
+        snapshot.pop("context_memory_report", None)
     return snapshot
 
 
@@ -357,6 +359,8 @@ async def _recover_on_startup_hardened() -> None:
                 }
             )
             snapshot.pop("checkpoint", None)
+            snapshot.pop("context_memory_records", None)
+            snapshot.pop("context_memory_report", None)
             _core.store.save_run(
                 run_id,
                 cid,
