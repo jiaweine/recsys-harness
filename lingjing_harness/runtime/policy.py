@@ -5,6 +5,7 @@ import re
 from lingjing_harness.domain import Catalog
 from .capabilities import CapabilityRegistry, RUNTIME_CAPABILITIES
 from .contracts import AgentPlan, Decision, RunState, ToolSpec
+from .context_memory import CONTINUATION_HINTS
 from .deliberation import DeliberationEngine
 
 
@@ -124,7 +125,12 @@ class OwnedPolicy:
             mode = "recommend"
         else:
             mode = "audit"
-        explore = any(k in lowered for k in self.EXPLORE_HINTS)
+        continuation = any(hint in lowered for hint in CONTINUATION_HINTS)
+        user_memory_lower = self._user_memory_context(context).lower()
+        explore = any(k in lowered for k in self.EXPLORE_HINTS) or (
+            continuation
+            and any(k in user_memory_lower for k in self.EXPLORE_HINTS)
+        )
         query = None
         if mode in {"search", "both"}:
             query = self._extract_query(user_text, catalog, fallback=False)
@@ -203,11 +209,9 @@ class OwnedPolicy:
         return self.deliberation.critique(plan, state)
 
     @staticmethod
-    def _routing_context(context: str, *, prefer_attachment: bool = False) -> str:
-        """Choose one fresh provenance block for routing before falling back."""
-
+    def _context_blocks(context: str) -> list[tuple[str, float, str]]:
         if not context or "[CONTEXT_MEMORY" not in context:
-            return context
+            return []
 
         allowed = {
             "direct_user",
@@ -236,11 +240,7 @@ class OwnedPolicy:
                 created_match = re.search(r"\bcreated_at=([0-9.]+)", line)
                 source = source_match.group(1) if source_match else ""
                 stale = bool(stale_match and stale_match.group(1) == "1")
-                created_at = (
-                    float(created_match.group(1))
-                    if created_match
-                    else 0.0
-                )
+                created_at = float(created_match.group(1)) if created_match else 0.0
                 active = source in allowed and not stale
                 continue
             if line.startswith("[CONTEXT_MEMORY") or line.startswith(
@@ -250,17 +250,36 @@ class OwnedPolicy:
             if active and line.startswith("> "):
                 lines.append(line[2:])
         flush()
+        return blocks
+
+    @classmethod
+    def _user_memory_context(cls, context: str) -> str:
+        if "[CONTEXT_MEMORY" not in context:
+            return ""
+        direct = sorted(
+            (block for block in cls._context_blocks(context) if block[0] == "direct_user"),
+            key=lambda block: block[1],
+            reverse=True,
+        )
+        return "\n".join(value for _, _, value in direct)[:10_000]
+
+    @classmethod
+    def _routing_context(cls, context: str, *, prefer_attachment: bool = False) -> str:
+        """Choose one fresh provenance block for routing before falling back."""
+
+        if not context or "[CONTEXT_MEMORY" not in context:
+            return context
+
+        blocks = cls._context_blocks(context)
 
         def has_domain_hint(value: str) -> bool:
             lowered = value.lower()
             return any(
                 hint in lowered
-                for hint in (*OwnedPolicy.SEARCH_HINTS, *OwnedPolicy.REC_HINTS)
+                for hint in (*cls.SEARCH_HINTS, *cls.REC_HINTS)
             )
 
-        current = [
-            block for block in blocks if block[0] == "current_attachment"
-        ]
+        current = [block for block in blocks if block[0] == "current_attachment"]
         direct = sorted(
             (block for block in blocks if block[0] == "direct_user"),
             key=lambda block: block[1],
