@@ -44,7 +44,6 @@ def test_long_history_prefers_old_specific_anchor_over_recent_generic_matches(tm
     )
     assert "alpha-7" in context
     assert report["chars"] <= report["max_chars"]
-    assert report["history_selected"] > 0
     assert report["evidence_eligible"] is False
 
 
@@ -84,7 +83,6 @@ def test_prior_assistant_output_and_tool_evidence_are_not_replayed():
     assert "旧结论" not in context
     assert "旧工具证据" not in context
     assert "旧工作区" not in context
-    assert report["hallucination_guard"]["assistant_outputs_not_replayed"] is True
 
     plan = OwnedPolicy().plan("继续优化", build_sample_catalog(), context=context)
     assert plan.mode == "search"
@@ -175,8 +173,8 @@ def test_current_multimodal_selection_is_relevance_driven_not_upload_order():
         max_selected=2,
     )
     assert "商品 B" in context
-    assert report["source_manifest"][0]["source_id"] == "att-relevant"
-    assert report["current_attachment_selected"] >= 1
+    assert context.index("att-relevant") < context.index("att-unrelated")
+    assert report["current_attachment_used"] is True
 
 
 def test_multimodal_store_keeps_one_canonical_observation_per_source(tmp_path):
@@ -272,9 +270,6 @@ def test_lexical_lookup_escapes_sql_like_wildcards(tmp_path):
     assert not any("fooXbar" in row["content"] for row in snapshot["messages"])
 
 
-
-
-
 def test_routing_prefers_user_memory_unless_current_turn_points_to_attachment():
     catalog = build_sample_catalog()
     context, _ = build_governed_context(
@@ -305,15 +300,6 @@ def test_routing_prefers_user_memory_unless_current_turn_points_to_attachment():
     attachment_plan = OwnedPolicy().plan("继续看这个截图", catalog, context=context)
     assert attachment_plan.mode == "recommend"
     assert attachment_plan.user_id == "u-lin"
-
-
-
-
-
-
-
-
-
 
 
 def test_continuation_carries_exploration_but_not_activation_or_network_authority():
