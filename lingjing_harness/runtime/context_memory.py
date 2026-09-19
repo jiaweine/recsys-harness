@@ -282,15 +282,25 @@ def _select_history(
         if not row.stale and row.relevance >= MIN_HISTORY_RELEVANCE
     ]
     recent_direct: list[MemoryCandidate] = []
+    recent_multimodal: list[MemoryCandidate] = []
     if continuation:
         recent_direct = sorted(
             (row for row in rows if row.source_kind == "direct_user"),
             key=lambda row: row.created_at,
             reverse=True,
         )[:2]
+        recent_multimodal = sorted(
+            (
+                row
+                for row in rows
+                if row.source_kind != "direct_user" and not row.stale
+            ),
+            key=lambda row: row.created_at,
+            reverse=True,
+        )[:1]
 
     eligible_by_hash: dict[str, MemoryCandidate] = {}
-    for row in relevant + recent_direct:
+    for row in relevant + recent_direct + recent_multimodal:
         eligible_by_hash[row.content_hash or _hash(row.content)] = row
     eligible = list(eligible_by_hash.values())
     if not eligible or max_selected <= 0 or char_budget <= 80:
