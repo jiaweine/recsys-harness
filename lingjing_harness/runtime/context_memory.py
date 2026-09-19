@@ -277,7 +277,9 @@ def _select_history(
     """Select one semantic anchor plus recent context, then fill by utility."""
 
     relevant = [
-        row for row in rows if row.relevance >= MIN_HISTORY_RELEVANCE
+        row
+        for row in rows
+        if not row.stale and row.relevance >= MIN_HISTORY_RELEVANCE
     ]
     recent_direct: list[MemoryCandidate] = []
     if continuation:
@@ -510,6 +512,7 @@ def build_governed_context(
         "source_counts": source_counts,
         "source_manifest": [row.manifest() for row in rendered_rows],
         "stale_selected": sum(1 for row in rendered_history if row.stale),
+        "stale_rejected": sum(1 for row in historical_candidates if row.stale),
         "deduplicated": deduplicated,
         "truncated": truncated,
         "chars": len(context),
@@ -527,7 +530,7 @@ def build_governed_context(
             "verbatim_user_memory": True,
             "assistant_outputs_not_replayed": True,
             "derived_sources_labeled": True,
-            "workspace_revision_marks_stale_multimodal": True,
+            "workspace_revision_filters_stale_multimodal": True,
             "memory_cannot_satisfy_evidence_gate": True,
         },
     }
