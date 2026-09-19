@@ -87,6 +87,15 @@ class PerceptionEngine:
                 "kind": "image" if mime.startswith("image/") else "document",
                 "perception": status,
             }
+            # Private fields are consumed by the API context-memory boundary before
+            # the public attachment metadata is persisted.  Keeping the observation
+            # tied to the immutable attachment id lets later turns retrieve the
+            # original perception without trusting a generated assistant summary.
+            if observation:
+                public["_memory_text"] = observation
+                public["_memory_kind"] = (
+                    "attachment_image" if mime.startswith("image/") else "attachment_text"
+                )
             observations.append(public)
             if observation:
                 chunks.append(f"附件：{name}\n观察：{observation}")
