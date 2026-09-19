@@ -119,7 +119,6 @@ class ResultVerifier:
                 "counts_as_evidence": False,
                 "selected_count": int(context_report.get("selected_count", 0) or 0),
                 "stale_selected": int(context_report.get("stale_selected", 0) or 0),
-                "conflicts": list(context_report.get("conflicts") or []),
                 "truncated": bool(context_report.get("truncated")),
             },
             "trajectory": {
