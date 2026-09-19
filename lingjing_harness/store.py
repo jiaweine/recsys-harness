@@ -372,18 +372,29 @@ class WorkspaceStore:
         memory_id = f"ctx-{uuid.uuid4().hex[:12]}"
 
         with self._lock, self._connect() as connection:
-            # Re-perception of the same immutable attachment replaces its older
-            # derived observation instead of accumulating indistinguishable copies.
+            existing = connection.execute(
+                """select id from context_memory_items
+                   where conversation_id=? and source_id=? and content_hash=?""",
+                (conversation_id, source_id, content_hash),
+            ).fetchone()
+            # Re-perception of the same immutable attachment replaces older
+            # different descriptions. An exact repeat refreshes freshness metadata
+            # without creating another memory row.
             connection.execute(
                 """delete from context_memory_items
                    where conversation_id=? and source_id=? and content_hash<>?""",
                 (conversation_id, source_id, content_hash),
             )
-            cursor = connection.execute(
-                """insert or ignore into context_memory_items(
+            connection.execute(
+                """insert into context_memory_items(
                      id,conversation_id,source_id,source_kind,content,content_hash,
                      trust,catalog_revision,created_at
-                   ) values(?,?,?,?,?,?,?,?,?)""",
+                   ) values(?,?,?,?,?,?,?,?,?)
+                   on conflict(conversation_id,source_id,content_hash) do update set
+                     source_kind=excluded.source_kind,
+                     trust=excluded.trust,
+                     catalog_revision=excluded.catalog_revision,
+                     created_at=excluded.created_at""",
                 (
                     memory_id,
                     conversation_id,
@@ -414,7 +425,7 @@ class WorkspaceStore:
 
         return {
             "stored": True,
-            "deduplicated": cursor.rowcount == 0,
+            "deduplicated": existing is not None,
             **(dict(row) if row else {"id": memory_id}),
         }
 
