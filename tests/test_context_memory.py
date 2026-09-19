@@ -517,6 +517,29 @@ def test_latest_user_state_can_turn_off_older_exploration_intent():
     assert plan.allow_adaptation is False
 
 
+def test_audit_update_prevents_older_search_domain_from_reviving():
+    catalog = build_sample_catalog()
+    context, _ = build_governed_context(
+        "继续",
+        messages=[
+            {
+                "id": "msg-old",
+                "role": "user",
+                "content": "搜索“露营灯”。",
+                "created_at": 10.0,
+            },
+            {
+                "id": "msg-new",
+                "role": "user",
+                "content": "改成做一次全局体检。",
+                "created_at": 20.0,
+            },
+        ],
+    )
+    plan = OwnedPolicy().plan("继续", catalog, context=context)
+    assert plan.mode == "audit"
+
+
 def test_same_second_user_updates_keep_subsecond_order():
     catalog = build_sample_catalog()
     context, _ = build_governed_context(
