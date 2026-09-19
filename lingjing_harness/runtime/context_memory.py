@@ -220,7 +220,15 @@ def _deduplicate(rows: list[MemoryCandidate]) -> list[MemoryCandidate]:
     for row in rows:
         key = row.content_hash or _hash(row.content)
         current = best.get(key)
-        if current is None or (row.score, row.created_at) > (current.score, current.created_at):
+        if current is None or (
+            not row.stale,
+            row.score,
+            row.created_at,
+        ) > (
+            not current.stale,
+            current.score,
+            current.created_at,
+        ):
             best[key] = row
     return list(best.values())
 
