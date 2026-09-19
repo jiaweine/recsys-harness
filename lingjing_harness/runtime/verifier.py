@@ -112,11 +112,11 @@ class ResultVerifier:
                 "external": len(external_evidence),
                 "completed_audits": len(completed_audits),
                 "external_only": external_only,
-                "context_memory_counts_as_evidence": False,
             },
             "context_memory": {
-                "used": bool(context_report),
+                "used": bool(context_report.get("used")),
                 "safe": context_memory_safe,
+                "counts_as_evidence": False,
                 "selected_count": int(context_report.get("selected_count", 0) or 0),
                 "stale_selected": int(context_report.get("stale_selected", 0) or 0),
                 "conflicts": list(context_report.get("conflicts") or []),
