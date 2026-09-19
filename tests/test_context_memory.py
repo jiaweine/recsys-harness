@@ -321,6 +321,31 @@ def test_continuation_carries_exploration_but_not_activation_or_network_authorit
     assert plan.allow_adaptation is False
 
 
+def test_latest_user_state_can_turn_off_older_exploration_intent():
+    catalog = build_sample_catalog()
+    context, _ = build_governed_context(
+        "继续",
+        messages=[
+            {
+                "id": "msg-old",
+                "role": "user",
+                "content": "优化搜索“露营灯”，做候选实验。",
+                "created_at": 10.0,
+            },
+            {
+                "id": "msg-new",
+                "role": "user",
+                "content": "现在只检查搜索“露营灯”，不要修改。",
+                "created_at": 20.0,
+            },
+        ],
+    )
+    plan = OwnedPolicy().plan("继续", catalog, context=context)
+    assert plan.mode == "search"
+    assert plan.explore is False
+    assert plan.allow_adaptation is False
+
+
 def test_latest_user_domain_update_overrides_older_conflicting_memory():
     catalog = build_sample_catalog()
     context, _ = build_governed_context(
