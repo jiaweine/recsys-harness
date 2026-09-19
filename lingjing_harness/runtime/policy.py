@@ -317,9 +317,16 @@ class OwnedPolicy:
         )
         if structured:
             return structured.group(1).strip()
-        quoted = re.findall(r"[‘’'\"“”]([^‘’'\"“”]{1,50})[‘’'\"“”]", text)
+        quoted = [
+            match.group(1).strip()
+            for match in re.finditer(
+                r"""[‘'“"]([^‘’'"“”]{1,50})[’'”"](?!\s*:)""",
+                text,
+            )
+            if match.group(1).strip()
+        ]
         if quoted:
-            return quoted[0].strip()
+            return quoted[0]
         for label in catalog.query_labels:
             if label.query and label.query in text:
                 return label.query
