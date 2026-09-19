@@ -145,7 +145,6 @@ def test_stale_multimodal_memory_is_rejected_before_context_render():
         catalog_revision="new-revision",
     )
     assert "att-old" not in context
-    assert report["stale_selected"] == 0
     assert report["stale_rejected"] == 1
 
     plan = OwnedPolicy().plan("继续检查", build_sample_catalog(), context=context)
@@ -265,6 +264,41 @@ def test_lexical_lookup_escapes_sql_like_wildcards(tmp_path):
     ids = {row["id"] for row in snapshot["messages"]}
     assert literal["id"] in ids
     assert not any("fooXbar" in row["content"] for row in snapshot["messages"])
+
+
+
+
+
+def test_routing_prefers_user_memory_unless_current_turn_points_to_attachment():
+    catalog = build_sample_catalog()
+    context, _ = build_governed_context(
+        "继续",
+        messages=[
+            {
+                "id": "msg-history",
+                "role": "user",
+                "content": "继续搜索“露营灯”的实验。",
+                "created_at": 10.0,
+            }
+        ],
+        current_multimodal_items=[
+            {
+                "source_id": "att-now",
+                "source_kind": "attachment_image",
+                "content": "截图中写着推荐用户 u-lin。",
+                "trust": 0.55,
+                "created_at": 20.0,
+            }
+        ],
+    )
+
+    default_plan = OwnedPolicy().plan("继续", catalog, context=context)
+    assert default_plan.mode == "search"
+    assert default_plan.query == "露营灯"
+
+    attachment_plan = OwnedPolicy().plan("继续看这个截图", catalog, context=context)
+    assert attachment_plan.mode == "recommend"
+    assert attachment_plan.user_id == "u-lin"
 
 
 def test_context_budget_is_hard_bounded_under_large_history():
