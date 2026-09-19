@@ -233,6 +233,8 @@ def _message_candidates(
 
 def _multimodal_candidates(
     items: Iterable[dict[str, Any]],
+    *,
+    current: bool = False,
 ) -> list[MemoryCandidate]:
     rows: list[MemoryCandidate] = []
     for index, item in enumerate(items):
@@ -240,7 +242,11 @@ def _multimodal_candidates(
         if not content:
             continue
         source_id = str(item.get("source_id") or item.get("id") or f"attachment-{index}")
-        kind = str(item.get("source_kind") or "attachment_observation")
+        kind = (
+            "current_attachment"
+            if current
+            else str(item.get("source_kind") or "attachment_observation")
+        )
         rows.append(
             MemoryCandidate(
                 source_id=source_id,
@@ -270,6 +276,7 @@ def _score_candidates(query: str, rows: list[MemoryCandidate]) -> None:
         recency = 0.72 * recency_rank[id(row)] + 0.28 * wall_clock_recency
         source_bonus = {
             "direct_user": 0.12,
+            "current_attachment": 0.14,
             "owned_evidence": 0.08,
             "attachment_observation": 0.05,
             "attachment_text": 0.05,
@@ -347,6 +354,7 @@ def build_governed_context(
     *,
     messages: Iterable[dict[str, Any]] = (),
     multimodal_items: Iterable[dict[str, Any]] = (),
+    current_multimodal_items: Iterable[dict[str, Any]] = (),
     current_attachment_context: str = "",
     current_message_id: str | None = None,
     catalog_revision: str | None = None,
@@ -369,17 +377,24 @@ def build_governed_context(
     attachment_chars = max(0, min(int(attachment_chars), max_chars))
     max_selected = max(1, min(64, int(max_selected)))
 
-    candidates = _message_candidates(
+    historical_candidates = _message_candidates(
         query,
         messages,
         current_message_id=current_message_id,
         catalog_revision=catalog_revision,
     )
-    candidates.extend(_multimodal_candidates(multimodal_items))
-    _score_candidates(query, candidates)
-    candidates, deduplicated = _deduplicate(candidates)
+    historical_candidates.extend(_multimodal_candidates(multimodal_items))
+    current_candidates = _multimodal_candidates(
+        current_multimodal_items,
+        current=True,
+    )
+    _score_candidates(query, historical_candidates)
+    _score_candidates(query, current_candidates)
+    historical_candidates, history_deduplicated = _deduplicate(historical_candidates)
+    current_candidates, current_deduplicated = _deduplicate(current_candidates)
+    deduplicated = history_deduplicated + current_deduplicated
 
-    candidates.sort(
+    historical_candidates.sort(
         key=lambda row: (
             row.score,
             row.source_kind == "direct_user",
@@ -387,11 +402,33 @@ def build_governed_context(
         ),
         reverse=True,
     )
+    current_candidates.sort(
+        key=lambda row: (row.score, row.created_at),
+        reverse=True,
+    )
+
+    # Current attachments get a dedicated budget pool. This prevents attachment
+    # upload order from deciding which image/document survives a global truncation.
+    current_selected: list[MemoryCandidate] = []
+    used_attachment = 0
+    for row in current_candidates:
+        if len(current_selected) >= min(8, max_selected):
+            break
+        allowance = min(2_200, attachment_chars - used_attachment)
+        if allowance <= 80:
+            break
+        content = _clean(row.content, limit=allowance)
+        if len(content) <= 1:
+            continue
+        row.content = content
+        current_selected.append(row)
+        used_attachment += len(content)
 
     selected: list[MemoryCandidate] = []
     used_history = 0
-    for row in candidates:
-        if len(selected) >= max_selected:
+    history_slots = max(0, max_selected - len(current_selected))
+    for row in historical_candidates:
+        if len(selected) >= history_slots:
             break
         allowance = min(
             2_400 if row.source_kind == "direct_user" else 1_500,
@@ -406,10 +443,13 @@ def build_governed_context(
         selected.append(row)
         used_history += len(content)
 
-    current_attachment = _clean(
-        current_attachment_context,
-        limit=min(attachment_chars, max_chars // 2),
-    )
+    current_attachment = ""
+    if not current_selected:
+        current_attachment = _clean(
+            current_attachment_context,
+            limit=min(attachment_chars, max_chars // 2),
+        )
+        used_attachment = len(current_attachment)
 
     header = (
         "[CONTEXT_MEMORY version=1]\n"
@@ -421,7 +461,7 @@ def build_governed_context(
         "newer direct-user records and re-check material claims with owned tools.\n"
     )
     blocks: list[str] = [header]
-    for row in selected:
+    for row in current_selected + selected:
         blocks.append(
             "[MEMORY "
             f"source={row.source_kind} id={row.source_id} trust={row.trust:.2f} "
@@ -444,20 +484,21 @@ def build_governed_context(
 
     conflicts = _conflicts(query, selected)
     source_counts: dict[str, int] = {}
-    for row in selected:
+    for row in current_selected + selected:
         source_counts[row.source_kind] = source_counts.get(row.source_kind, 0) + 1
     if current_attachment:
-        source_counts["current_attachment"] = 1
+        source_counts["current_attachment"] = source_counts.get("current_attachment", 0) + 1
 
     report = {
         "version": CONTEXT_MEMORY_VERSION,
         "policy": "provenance_preserving_ledger",
         "used": bool(context),
-        "candidate_count": len(candidates),
-        "selected_count": len(selected) + (1 if current_attachment else 0),
+        "candidate_count": len(historical_candidates) + len(current_candidates),
+        "selected_count": len(current_selected) + len(selected) + (1 if current_attachment else 0),
         "history_selected": len(selected),
+        "current_attachment_selected": len(current_selected) + (1 if current_attachment else 0),
         "source_counts": source_counts,
-        "source_manifest": [row.manifest() for row in selected],
+        "source_manifest": [row.manifest() for row in current_selected + selected],
         "stale_selected": sum(1 for row in selected if row.stale),
         "deduplicated": deduplicated,
         "conflicts": conflicts,
@@ -465,8 +506,8 @@ def build_governed_context(
         "chars": len(context),
         "max_chars": max_chars,
         "history_chars": used_history,
-        "attachment_chars": len(current_attachment),
-        "current_attachment_used": bool(current_attachment),
+        "attachment_chars": used_attachment,
+        "current_attachment_used": bool(current_selected or current_attachment),
         "assistant_text_recall_enabled": _assistant_recall_query(query),
         "evidence_eligible": False,
         "authority_from_history": False,
