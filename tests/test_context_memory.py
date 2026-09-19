@@ -322,6 +322,35 @@ def test_context_memory_store_has_bounded_retention(tmp_path, monkeypatch):
     ]
 
 
+def test_context_memory_store_reports_when_old_write_is_immediately_pruned(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(store_module, "CONTEXT_MEMORY_ITEM_BUDGET", 2)
+    store = WorkspaceStore(tmp_path / "workspace.db")
+    cid = store.create_conversation("retention", "audit")["id"]
+
+    for index in (10.0, 20.0):
+        store.remember_context_item(
+            cid,
+            source_id=f"att-{int(index)}",
+            source_kind="attachment_text",
+            content=f"newer {index}",
+            created_at=index,
+        )
+
+    result = store.remember_context_item(
+        cid,
+        source_id="att-old",
+        source_kind="attachment_text",
+        content="old observation",
+        created_at=1.0,
+    )
+    assert result == {"stored": False, "reason": "retention"}
+    snapshot = store.context_snapshot(cid, recent_limit=8, memory_limit=8)
+    assert "att-old" not in {row["source_id"] for row in snapshot["memory_items"]}
+
+
 def test_context_query_terms_preserve_hyphenated_rnd_identifiers():
     terms = context_query_terms("继续 alpha-7 和 ranker/r7 的实验")
     assert "alpha-7" in terms
