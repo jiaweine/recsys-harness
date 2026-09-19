@@ -418,7 +418,9 @@ class WorkspaceStore:
                 (conversation_id, source_id, content_hash),
             ).fetchone()
 
-        return {"stored": True, **(dict(row) if row else {"id": memory_id})}
+        if row is None:
+            return {"stored": False, "reason": "retention"}
+        return {"stored": True, **dict(row)}
 
     def add_message(
         self,
