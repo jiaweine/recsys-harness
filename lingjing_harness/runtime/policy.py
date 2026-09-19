@@ -23,6 +23,19 @@ class OwnedPolicy:
     NO_SEARCH_HINTS = ("不要搜索", "别搜索", "不搜索", "不用搜索", "不要搜", "别搜", "不搜")
     NO_REC_HINTS = ("不要推荐", "别推荐", "不推荐", "不用推荐")
     EXPLORE_HINTS = ("优化", "提升", "改进", "实验", "候选", "试试", "调整", "进化", "学习")
+    NO_EXPLORE_HINTS = (
+        "不要优化",
+        "别优化",
+        "不优化",
+        "不要实验",
+        "别实验",
+        "不做实验",
+        "不要调整",
+        "别调整",
+        "不调整",
+        "只检查",
+        "只看",
+    )
     # ``allow_adaptation`` is retained in AgentPlan for checkpoint/API compatibility,
     # but its authority meaning is intentionally narrow: it authorizes changing the
     # active serving strategy. Exploring, validating and learning a candidate is
@@ -157,10 +170,14 @@ class OwnedPolicy:
         else:
             mode = "audit"
         continuation = any(hint in lowered for hint in CONTINUATION_HINTS)
+        deny_explore = any(k in lowered for k in self.NO_EXPLORE_HINTS)
         user_memory_lower = user_memory_context.lower()
-        explore = any(k in lowered for k in self.EXPLORE_HINTS) or (
-            continuation
-            and any(k in user_memory_lower for k in self.EXPLORE_HINTS)
+        explore = not deny_explore and (
+            any(k in lowered for k in self.EXPLORE_HINTS)
+            or (
+                continuation
+                and any(k in user_memory_lower for k in self.EXPLORE_HINTS)
+            )
         )
         query = None
         if mode in {"search", "both"}:
