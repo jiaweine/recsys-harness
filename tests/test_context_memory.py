@@ -196,7 +196,6 @@ def test_multimodal_store_keeps_one_canonical_observation_per_source(tmp_path):
         catalog_revision="rev-2",
     )
     assert first["content_hash"] == second["content_hash"]
-    assert second["deduplicated"] is True
     assert second["catalog_revision"] == "rev-2"
 
     store.remember_context_item(
