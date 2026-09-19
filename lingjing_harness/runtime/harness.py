@@ -149,7 +149,7 @@ class AgentHarness:
                     7,
                     context_memory=True,
                     multimodal=bool((report.get("source_counts") or {}).get("current_attachment")),
-                    stale_selected=int(report.get("stale_selected", 0) or 0),
+                    stale_rejected=int(report.get("stale_rejected", 0) or 0),
                 )
             if memory_hits:
                 self._emit(
@@ -389,7 +389,10 @@ class AgentHarness:
                 "idempotent_adaptive_tools": True,
             },
             "multimodal": {
-                "context_used": bool(context),
+                "context_used": bool(
+                    (context_report or {}).get("current_attachment_used")
+                    or (context and not context_report)
+                ),
                 "governance": context_report or {},
             },
             "network": {
