@@ -273,6 +273,13 @@ class OwnedPolicy:
 
     @staticmethod
     def _extract_query(text: str, catalog: Catalog, *, fallback: bool = True) -> str:
+        structured = re.search(
+            r"""(?:["']?query["']?|查询词|关键词)\s*[:：=]\s*["'“]?([^"'“”\n,}]{1,50})""",
+            text,
+            re.I,
+        )
+        if structured:
+            return structured.group(1).strip()
         quoted = re.findall(r"[‘’'\"“”]([^‘’'\"“”]{1,50})[‘’'\"“”]", text)
         if quoted:
             return quoted[0].strip()
@@ -302,7 +309,11 @@ class OwnedPolicy:
 
     @staticmethod
     def _extract_user(text: str, catalog: Catalog, *, fallback: bool = True) -> str:
-        match = re.search(r"(?:用户|user)\s*[:：]?\s*([\w-]+)", text, re.I)
+        match = re.search(
+            r"""(?:用户|["']?user(?:_id)?["']?)\s*[:：=]?\s*["']?([\w-]+)""",
+            text,
+            re.I,
+        )
         if match:
             return match.group(1)
         if not fallback:
