@@ -129,7 +129,7 @@ def test_historical_user_authority_does_not_carry_into_current_turn():
     assert plan.allow_adaptation is False
 
 
-def test_stale_multimodal_memory_is_visible_but_cannot_retarget_routing():
+def test_stale_multimodal_memory_is_rejected_before_context_render():
     context, report = build_governed_context(
         "继续检查",
         multimodal_items=[
@@ -144,9 +144,9 @@ def test_stale_multimodal_memory_is_visible_but_cannot_retarget_routing():
         ],
         catalog_revision="new-revision",
     )
-    assert "source=attachment_image" in context
-    assert "stale=1" in context
-    assert report["stale_selected"] == 1
+    assert "att-old" not in context
+    assert report["stale_selected"] == 0
+    assert report["stale_rejected"] == 1
 
     plan = OwnedPolicy().plan("继续检查", build_sample_catalog(), context=context)
     assert plan.mode == "audit"
