@@ -118,7 +118,6 @@ class ResultVerifier:
                 "safe": context_memory_safe,
                 "counts_as_evidence": False,
                 "selected_count": int(context_report.get("selected_count", 0) or 0),
-                "stale_selected": int(context_report.get("stale_selected", 0) or 0),
                 "stale_rejected": int(context_report.get("stale_rejected", 0) or 0),
                 "truncated": bool(context_report.get("truncated")),
             },
