@@ -18,7 +18,7 @@ class OwnedPolicy:
     """
 
     SEARCH_HINTS = ("搜", "搜索", "查询", "query", "找不到", "关键词", "结果不准", "无结果", "搜索体验")
-    REC_HINTS = ("推荐", "首页", "feed", "猜你喜欢", "分发", "曝光", "推荐体验", "个性化")
+    REC_HINTS = ("推荐", "recommend", "首页", "feed", "猜你喜欢", "分发", "曝光", "推荐体验", "个性化")
     EXPLORE_HINTS = ("优化", "提升", "改进", "实验", "候选", "试试", "调整", "进化", "学习")
     # ``allow_adaptation`` is retained in AgentPlan for checkpoint/API compatibility,
     # but its authority meaning is intentionally narrow: it authorizes changing the
