@@ -276,28 +276,38 @@ def _select_history(
 ) -> tuple[list[MemoryCandidate], int]:
     """Select one semantic anchor plus recent context, then fill by utility."""
 
-    eligible = [
-        row
-        for row in rows
-        if continuation or row.relevance >= MIN_HISTORY_RELEVANCE
+    relevant = [
+        row for row in rows if row.relevance >= MIN_HISTORY_RELEVANCE
     ]
+    recent_direct: list[MemoryCandidate] = []
+    if continuation:
+        recent_direct = sorted(
+            (row for row in rows if row.source_kind == "direct_user"),
+            key=lambda row: row.created_at,
+            reverse=True,
+        )[:2]
+
+    eligible_by_hash: dict[str, MemoryCandidate] = {}
+    for row in relevant + recent_direct:
+        eligible_by_hash[row.content_hash or _hash(row.content)] = row
+    eligible = list(eligible_by_hash.values())
     if not eligible or max_selected <= 0 or char_budget <= 80:
         return [], 0
 
     reserved: list[MemoryCandidate] = []
-    semantic = max(
-        eligible,
-        key=lambda row: (row.relevance, row.trust, row.created_at),
-    )
-    if semantic.relevance >= MIN_HISTORY_RELEVANCE:
+    if relevant:
+        semantic = max(
+            relevant,
+            key=lambda row: (row.relevance, row.trust, row.created_at),
+        )
         reserved.append(semantic)
+    else:
+        semantic = None
 
-    if continuation:
-        direct_users = [row for row in eligible if row.source_kind == "direct_user"]
-        if direct_users:
-            latest_user = max(direct_users, key=lambda row: row.created_at)
-            if latest_user.content_hash != semantic.content_hash:
-                reserved.append(latest_user)
+    if recent_direct:
+        latest_user = recent_direct[0]
+        if semantic is None or latest_user.content_hash != semantic.content_hash:
+            reserved.append(latest_user)
 
     ordered: list[MemoryCandidate] = []
     seen: set[str] = set()
@@ -330,6 +340,66 @@ def _select_history(
         selected.append(row)
         used += len(content)
     return selected, used
+
+
+def _memory_block(row: MemoryCandidate) -> str:
+    return (
+        "[MEMORY "
+        f"source={row.source_kind} id={row.source_id} trust={row.trust:.2f} "
+        f"stale={int(row.stale)} created_at={int(row.created_at)}]\n"
+        + _prefix_content(row.content)
+    )
+
+
+def _render_context(
+    header: str,
+    rows: list[MemoryCandidate],
+    *,
+    fallback_attachment: str,
+    max_chars: int,
+) -> tuple[str, list[MemoryCandidate], bool, bool]:
+    """Render complete provenance blocks; never cut through a control header."""
+
+    parts = [header.strip()]
+    rendered: list[MemoryCandidate] = []
+    truncated = False
+
+    for row in rows:
+        block = _memory_block(row)
+        remaining = max_chars - len("\n\n".join(parts)) - 2
+        if remaining <= 80:
+            truncated = True
+            break
+        if len(block) > remaining:
+            meta_len = len(block) - len(_prefix_content(row.content))
+            payload_budget = remaining - meta_len
+            if payload_budget <= 40:
+                truncated = True
+                break
+            row.content = _clean(row.content, limit=max(1, payload_budget - 4))
+            block = _memory_block(row)
+            truncated = True
+        parts.append(block)
+        rendered.append(row)
+
+    fallback_used = False
+    if fallback_attachment:
+        meta = "[MEMORY source=current_attachment id=current-turn trust=0.55 stale=0]\n"
+        remaining = max_chars - len("\n\n".join(parts)) - 2
+        if remaining > len(meta) + 40:
+            payload = _clean(
+                fallback_attachment,
+                limit=max(1, remaining - len(meta) - 4),
+            )
+            parts.append(meta + _prefix_content(payload))
+            fallback_used = True
+            truncated = truncated or len(payload) < len(fallback_attachment)
+        else:
+            truncated = True
+
+    if len(parts) == 1:
+        return "", [], False, truncated
+    return "\n\n".join(parts), rendered, fallback_used, truncated
 
 
 def build_governed_context(
@@ -412,32 +482,21 @@ def build_governed_context(
         "derived: multimodal observations may be stale or wrong; prefer user-authored "
         "records and re-check material claims with owned tools.\n"
     )
-    blocks: list[str] = [header]
-    for row in current_selected + selected:
-        blocks.append(
-            "[MEMORY "
-            f"source={row.source_kind} id={row.source_id} trust={row.trust:.2f} "
-            f"stale={int(row.stale)} created_at={int(row.created_at)}]\n"
-            + _prefix_content(row.content)
-        )
-    if current_attachment:
-        blocks.append(
-            "[MEMORY source=current_attachment id=current-turn trust=0.55 stale=0]\n"
-            + _prefix_content(current_attachment)
-        )
+    context, rendered_rows, fallback_used, truncated = _render_context(
+        header,
+        current_selected + selected,
+        fallback_attachment=current_attachment,
+        max_chars=max_chars,
+    )
 
-    context = "\n\n".join(blocks).strip()
-    if len(blocks) == 1:
-        context = ""
-    truncated = False
-    if len(context) > max_chars:
-        context = context[:max_chars].rstrip()
-        truncated = True
+    rendered_ids = {id(row) for row in rendered_rows}
+    rendered_current = [row for row in current_selected if id(row) in rendered_ids]
+    rendered_history = [row for row in selected if id(row) in rendered_ids]
 
     source_counts: dict[str, int] = {}
-    for row in current_selected + selected:
+    for row in rendered_rows:
         source_counts[row.source_kind] = source_counts.get(row.source_kind, 0) + 1
-    if current_attachment:
+    if fallback_used:
         source_counts["current_attachment"] = source_counts.get("current_attachment", 0) + 1
 
     report = {
@@ -445,19 +504,22 @@ def build_governed_context(
         "policy": "provenance_preserving_ledger",
         "used": bool(context),
         "candidate_count": len(historical_candidates) + len(current_candidates),
-        "selected_count": len(current_selected) + len(selected) + (1 if current_attachment else 0),
-        "history_selected": len(selected),
-        "current_attachment_selected": len(current_selected) + (1 if current_attachment else 0),
+        "selected_count": len(rendered_rows) + (1 if fallback_used else 0),
+        "history_selected": len(rendered_history),
+        "current_attachment_selected": len(rendered_current) + (1 if fallback_used else 0),
         "source_counts": source_counts,
-        "source_manifest": [row.manifest() for row in current_selected + selected],
-        "stale_selected": sum(1 for row in selected if row.stale),
+        "source_manifest": [row.manifest() for row in rendered_rows],
+        "stale_selected": sum(1 for row in rendered_history if row.stale),
         "deduplicated": deduplicated,
         "truncated": truncated,
         "chars": len(context),
         "max_chars": max_chars,
-        "history_chars": used_history,
-        "attachment_chars": used_attachment,
-        "current_attachment_used": bool(current_selected or current_attachment),
+        "history_chars": sum(len(row.content) for row in rendered_history),
+        "attachment_chars": (
+            sum(len(row.content) for row in rendered_current)
+            + (len(current_attachment) if fallback_used else 0)
+        ),
+        "current_attachment_used": bool(rendered_current or fallback_used),
         "evidence_eligible": False,
         "authority_from_history": False,
         "structural_injection_escaped": True,
