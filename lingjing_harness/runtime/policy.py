@@ -200,10 +200,9 @@ class OwnedPolicy:
     def _routing_context(context: str) -> str:
         """Expose only planning-safe ledger sources to deterministic routing.
 
-        Assistant-generated prose and historical tool evidence stay available to
-        future model reasoning but cannot silently retarget the deterministic
-        search/recommend router.  Legacy unstructured context is preserved for
-        backward compatibility with direct harness callers.
+        Only user-authored memory and non-stale multimodal observations may
+        influence deterministic routing. Legacy unstructured context is preserved
+        for backward compatibility with direct harness callers.
         """
 
         if not context or "[CONTEXT_MEMORY" not in context:
@@ -219,8 +218,11 @@ class OwnedPolicy:
         active = False
         for line in context.splitlines():
             if line.startswith("[MEMORY "):
-                match = re.search(r"\bsource=([^\s\]]+)", line)
-                active = bool(match and match.group(1) in allowed)
+                source_match = re.search(r"\bsource=([^\s\]]+)", line)
+                stale_match = re.search(r"\bstale=([01])", line)
+                source = source_match.group(1) if source_match else ""
+                stale = bool(stale_match and stale_match.group(1) == "1")
+                active = source in allowed and not stale
                 continue
             if line.startswith("[CONTEXT_MEMORY") or line.startswith("policy:") or line.startswith("authority:") or line.startswith("derived:"):
                 continue
