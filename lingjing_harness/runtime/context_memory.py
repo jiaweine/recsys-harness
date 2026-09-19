@@ -87,7 +87,7 @@ def context_query_terms(text: str, limit: int = 10) -> list[str]:
         if len(term) < 2 or term in _STOP_TERMS or term in seen:
             continue
         seen.add(term)
-        technical = int(bool(re.search(r"[a-z0-9_./:-]", term, re.I)))
+        technical = int(bool(re.search(r"[0-9_./:-]", term)))
         ranked.append((technical, len(term), term))
     ranked.sort(key=lambda row: (-row[0], -row[1], row[2]))
     return [row[2] for row in ranked[: max(1, int(limit))]]
