@@ -370,14 +370,19 @@ class OwnedPolicy:
         )
         if structured:
             return structured.group(1).strip()
-        quoted = [
-            match.group(1).strip()
-            for match in re.finditer(
-                r"""[‘'“"]([^‘’'"“”]{1,50})[’'”"](?!\s*:)""",
-                text,
+        quoted: list[str] = []
+        for match in re.finditer(
+            r'''"([^"\n]{1,50})"|'([^'\n]{1,50})'|“([^”\n]{1,50})”|‘([^’\n]{1,50})’''',
+            text,
+        ):
+            if re.match(r"\s*:", text[match.end():]):
+                continue
+            value = next(
+                (group.strip() for group in match.groups() if group and group.strip()),
+                "",
             )
-            if match.group(1).strip()
-        ]
+            if value:
+                quoted.append(value)
         if quoted:
             return quoted[0]
         for label in catalog.query_labels:
