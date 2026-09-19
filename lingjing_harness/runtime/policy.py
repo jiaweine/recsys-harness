@@ -346,14 +346,30 @@ class OwnedPolicy:
 
     @staticmethod
     def _extract_user(text: str, catalog: Catalog, *, fallback: bool = True) -> str:
+        users = sorted(
+            {event.user_id for event in catalog.interactions if event.user_id},
+            key=len,
+            reverse=True,
+        )
+        for user_id in users:
+            if re.search(
+                rf"(?<![\w-]){re.escape(user_id)}(?![\w-])",
+                text,
+                re.I,
+            ):
+                return user_id
+
         match = re.search(
-            r"""(?:用户|["']?user(?:_id)?["']?)\s*[:：=]?\s*["']?([\w-]+)""",
+            r"""(?:
+                ["']?user(?:_id)?["']?\s*[:=]\s*["']?
+                |用户\s*[:：=]\s*["']?
+                |用户\s+
+            )([A-Za-z0-9_.-]+)""",
             text,
-            re.I,
+            re.I | re.X,
         )
         if match:
             return match.group(1)
         if not fallback:
             return ""
-        users = sorted({event.user_id for event in catalog.interactions if event.user_id})
         return users[0] if users else "new-user"
