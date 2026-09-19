@@ -189,6 +189,34 @@ def test_historical_user_authority_does_not_carry_into_current_turn():
     assert plan.allow_adaptation is False
 
 
+def test_fresh_duplicate_survives_newer_stale_duplicate():
+    context, report = build_governed_context(
+        "继续检查露营灯",
+        multimodal_items=[
+            {
+                "source_id": "att-fresh",
+                "source_kind": "attachment_text",
+                "content": "露营灯结果需要复核。",
+                "trust": 0.55,
+                "catalog_revision": "rev-current",
+                "created_at": 10.0,
+            },
+            {
+                "source_id": "att-stale",
+                "source_kind": "attachment_text",
+                "content": "露营灯结果需要复核。",
+                "trust": 0.55,
+                "catalog_revision": "rev-old",
+                "created_at": 20.0,
+            },
+        ],
+        catalog_revision="rev-current",
+    )
+    assert "att-fresh" in context
+    assert "att-stale" not in context
+    assert report["stale_rejected"] == 0
+
+
 def test_stale_multimodal_memory_is_rejected_before_context_render():
     context, report = build_governed_context(
         "继续检查",
