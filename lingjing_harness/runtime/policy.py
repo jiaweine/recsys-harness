@@ -51,6 +51,18 @@ class OwnedPolicy:
         "先离线",
     )
     NETWORK_HINTS = ("联网", "网上", "外部资料", "最新资料", "最新信息", "行业趋势", "同类产品", "公开资料", "查网页")
+    NO_NETWORK_HINTS = (
+        "不要联网",
+        "别联网",
+        "不联网",
+        "无需联网",
+        "不要查网页",
+        "别查网页",
+        "不查网页",
+        "只用本地",
+        "仅用本地",
+        "仅本地",
+    )
 
     def __init__(
         self,
@@ -62,9 +74,17 @@ class OwnedPolicy:
         self.deliberation = deliberation or DeliberationEngine(self.capabilities)
 
     @classmethod
+    def _network_explicitly_denied(cls, text: str) -> bool:
+        lowered = str(text or "").lower()
+        return any(hint in lowered for hint in cls.NO_NETWORK_HINTS)
+
+    @classmethod
     def _network_explicitly_requested(cls, text: str) -> bool:
         lowered = str(text or "").lower()
-        return any(hint in lowered for hint in cls.NETWORK_HINTS)
+        return (
+            not cls._network_explicitly_denied(lowered)
+            and any(hint in lowered for hint in cls.NETWORK_HINTS)
+        )
 
     @staticmethod
     def _local_evidence_can_close(state: RunState) -> bool:
@@ -143,8 +163,9 @@ class OwnedPolicy:
                 user = self._extract_user(routing_context, catalog, fallback=True)
         deny_activation = any(k in lowered for k in self.NO_ACTIVATE_HINTS)
         allow_activation = any(k in lowered for k in self.ACTIVATE_HINTS) and not deny_activation
+        network_denied = self._network_explicitly_denied(user_text)
         network_requested = self._network_explicitly_requested(user_text)
-        network = bool(allow_network or network_requested)
+        network = bool((allow_network or network_requested) and not network_denied)
         constraints = []
         if deny_activation:
             constraints.append("不改变当前工作区策略")
@@ -152,7 +173,9 @@ class OwnedPolicy:
             constraints.append("未授予激活权限；候选只验证和学习，不改变当前工作区策略")
         if "先" in lowered and ("离线" in lowered or "复核" in lowered):
             constraints.append("先完成离线验证")
-        if network_requested:
+        if network_denied:
+            constraints.append("按当前用户要求仅使用本地能力，不访问外部网络")
+        elif network_requested:
             constraints.append("按用户要求补充外部资料；外部资料只作为证据，不参与策略晋升")
         elif network:
             constraints.append("允许在本地证据不足时补充外部资料；外部资料不参与策略晋升")
