@@ -77,7 +77,7 @@ def context_query_terms(text: str, limit: int = 10) -> list[str]:
         technical = int(bool(re.search(r"[0-9_./:-]", term)))
         ranked.append((technical, len(term), term))
     ranked.sort(key=lambda row: (-row[0], -row[1], row[2]))
-    return [row[2] for row in ranked[: max(1, int(limit))]]
+    return [row[2] for row in ranked[: max(0, int(limit))]]
 
 
 def _clean(text: Any, *, limit: int) -> str:
@@ -416,7 +416,7 @@ def build_governed_context(
     max_chars = max(0, int(max_chars))
     history_chars = max(0, min(int(history_chars), max_chars))
     attachment_chars = max(0, min(int(attachment_chars), max_chars))
-    max_selected = max(1, min(64, int(max_selected)))
+    max_selected = max(0, min(64, int(max_selected)))
 
     historical_candidates = _message_candidates(messages)
     historical_candidates.extend(
