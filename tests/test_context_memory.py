@@ -411,6 +411,25 @@ def test_context_budget_is_hard_bounded_under_large_history():
     assert report["history_selected"] <= 8
 
 
+def test_context_budget_below_header_size_fails_closed_to_empty_context():
+    context, report = build_governed_context(
+        "继续搜索露营灯",
+        messages=[
+            {
+                "id": "msg-1",
+                "role": "user",
+                "content": "搜索“露营灯”的历史实验。",
+                "created_at": 1.0,
+            }
+        ],
+        max_chars=128,
+        history_chars=128,
+    )
+    assert context == ""
+    assert report["chars"] == 0
+    assert report["max_chars"] == 128
+
+
 def test_verifier_fails_closed_if_memory_contract_is_violated():
     result = ResultVerifier.final(
         [{"tool": "search.audit", "status": "completed", "result": {}}],
