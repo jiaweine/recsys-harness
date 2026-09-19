@@ -109,6 +109,32 @@ def test_user_payload_cannot_inject_a_ledger_control_header():
     assert plan.allow_adaptation is False
 
 
+def test_current_mode_denial_overrides_history_and_positive_substrings():
+    catalog = build_sample_catalog()
+    context, _ = build_governed_context(
+        "继续",
+        messages=[
+            {
+                "id": "msg-old",
+                "role": "user",
+                "content": "继续搜索“露营灯”。",
+                "created_at": 10.0,
+            }
+        ],
+    )
+
+    recommend = OwnedPolicy().plan(
+        "不要搜索，改做推荐用户 u-lin。",
+        catalog,
+        context=context,
+    )
+    assert recommend.mode == "recommend"
+    assert recommend.user_id == "u-lin"
+
+    audit = OwnedPolicy().plan("不要搜索，继续检查。", catalog, context=context)
+    assert audit.mode == "audit"
+
+
 def test_current_network_denial_overrides_request_words_and_api_grant():
     catalog = build_sample_catalog()
     plan = OwnedPolicy().plan(
