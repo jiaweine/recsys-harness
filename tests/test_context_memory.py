@@ -301,6 +301,50 @@ def test_routing_prefers_user_memory_unless_current_turn_points_to_attachment():
     assert attachment_plan.user_id == "u-lin"
 
 
+
+
+
+def test_historical_attachment_json_restores_query_without_field_name_confusion():
+    catalog = build_sample_catalog()
+    context, report = build_governed_context(
+        "继续",
+        multimodal_items=[
+            {
+                "source_id": "att-json",
+                "source_kind": "attachment_text",
+                "content": 'context.json\n{"query":"露营灯","note":"top result looks weak"}',
+                "trust": 0.55,
+                "catalog_revision": "rev-current",
+                "created_at": 10.0,
+            }
+        ],
+        catalog_revision="rev-current",
+    )
+    assert report["stale_rejected"] == 0
+    plan = OwnedPolicy().plan("继续", catalog, context=context)
+    assert plan.mode == "search"
+    assert plan.query == "露营灯"
+
+
+def test_structured_attachment_user_id_is_extracted_from_value_not_key():
+    catalog = build_sample_catalog()
+    context, _ = build_governed_context(
+        "继续看这个文件",
+        current_multimodal_items=[
+            {
+                "source_id": "att-user",
+                "source_kind": "attachment_text",
+                "content": '{"user_id":"u-lin","surface":"recommend"}',
+                "trust": 0.55,
+                "created_at": 10.0,
+            }
+        ],
+    )
+    plan = OwnedPolicy().plan("继续看这个文件", catalog, context=context)
+    assert plan.mode == "recommend"
+    assert plan.user_id == "u-lin"
+
+
 def test_context_budget_is_hard_bounded_under_large_history():
     messages = [
         {
