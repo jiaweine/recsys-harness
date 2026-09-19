@@ -693,24 +693,6 @@ async def _execute(
             should_stop,
         )
 
-    # A retried run may already have persisted its own attachment observation in
-    # the tiny crash window after execution.  Exclude current immutable sources so
-    # recovery cannot inject the same observation twice.
-    current_attachment_ids = {str(row.get("id") or "") for row in attachment_rows}
-    historical_multimodal = [
-        row
-        for row in context_snapshot.get("memory_items", [])
-        if str(row.get("source_id") or "") not in current_attachment_ids
-    ]
-    context, context_report = build_governed_context(
-        text,
-        messages=context_snapshot.get("messages", []),
-        multimodal_items=historical_multimodal,
-        current_attachment_context=attachment_context,
-        current_message_id=current_message_id,
-        catalog_revision=catalog_revision,
-    )
-
     memory_records: list[dict[str, Any]] = []
     observed_attachments: list[dict[str, Any]] = []
     for row in raw_observations:
@@ -727,6 +709,25 @@ async def _execute(
         public = {key: value for key, value in row.items() if not str(key).startswith("_")}
         public["url"] = f"/api/attachments/{public['id']}"
         observed_attachments.append(public)
+
+    # A retried run may already have persisted its own attachment observation in
+    # the tiny crash window after execution.  Exclude current immutable sources so
+    # recovery cannot inject the same observation twice.
+    current_attachment_ids = {str(row.get("id") or "") for row in attachment_rows}
+    historical_multimodal = [
+        row
+        for row in context_snapshot.get("memory_items", [])
+        if str(row.get("source_id") or "") not in current_attachment_ids
+    ]
+    context, context_report = build_governed_context(
+        text,
+        messages=context_snapshot.get("messages", []),
+        multimodal_items=historical_multimodal,
+        current_multimodal_items=memory_records,
+        current_attachment_context=attachment_context,
+        current_message_id=current_message_id,
+        catalog_revision=catalog_revision,
+    )
 
     with RUN_LOCK:
         current = RUNS.get(run_id)
