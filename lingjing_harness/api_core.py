@@ -685,10 +685,9 @@ async def _execute(
     )
 
     attachment_rows = _resolve_attachments(list(attachment_ids or []), strict=False)
-    attachment_context = ""
     raw_observations: list[dict[str, Any]] = []
     if attachment_rows:
-        attachment_context, raw_observations = await _perceive_with_cancel(
+        _, raw_observations = await _perceive_with_cancel(
             attachment_rows,
             should_stop,
         )
@@ -726,7 +725,6 @@ async def _execute(
         messages=context_snapshot.get("messages", []),
         multimodal_items=historical_multimodal,
         current_multimodal_items=memory_records,
-        current_attachment_context=attachment_context,
         current_message_id=current_message_id,
         catalog_revision=catalog_revision,
     )
@@ -735,7 +733,6 @@ async def _execute(
         current = RUNS.get(run_id)
         if current is not None:
             current["attachments"] = observed_attachments
-            current["multimodal_context"] = attachment_context
             current["context_memory_records"] = memory_records
             current["context_memory_report"] = context_report
             current["updated_at"] = time.time()
