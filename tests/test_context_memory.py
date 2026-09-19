@@ -246,9 +246,9 @@ def test_context_memory_store_has_bounded_retention(tmp_path, monkeypatch):
 
 
 def test_context_query_terms_preserve_hyphenated_rnd_identifiers():
-    terms = context_query_terms("继续 alpha-7 和 ranker/v2 的实验")
+    terms = context_query_terms("继续 alpha-7 和 ranker/r7 的实验")
     assert "alpha-7" in terms
-    assert "ranker/v2" in terms
+    assert "ranker/r7" in terms
 
 
 def test_lexical_lookup_escapes_sql_like_wildcards(tmp_path):
