@@ -317,6 +317,20 @@ async def _recover_on_startup_hardened() -> None:
             result["job_id"] = run_id
             result["attachments"] = copy.deepcopy(snapshot.get("attachments") or [])
             result["catalog_revision"] = saved_revision
+            recovered_multimodal = str(snapshot.get("multimodal_context") or "").strip()
+            if recovered_multimodal:
+                # The completed harness checkpoint can survive a crash before the
+                # API commits per-attachment observations. Preserve the already
+                # perceived text as a provenance-bound bundle instead of silently
+                # losing multimodal memory on this recovery-only path.
+                _core.store.remember_context_item(
+                    cid,
+                    source_id=f"{run_id}:recovered-attachments",
+                    source_kind="attachment_observation",
+                    content=recovered_multimodal,
+                    trust=0.50,
+                    created_at=float(snapshot.get("created_at") or time.time()),
+                )
             _renew_execution_fence(run_id)
             existing = _core.store.assistant_for_job(cid, run_id)
             if existing is None:
