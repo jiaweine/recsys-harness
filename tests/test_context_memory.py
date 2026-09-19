@@ -304,6 +304,33 @@ def test_routing_prefers_user_memory_unless_current_turn_points_to_attachment():
 
 
 
+
+
+
+def test_latest_user_domain_update_overrides_older_conflicting_memory():
+    catalog = build_sample_catalog()
+    context, _ = build_governed_context(
+        "继续",
+        messages=[
+            {
+                "id": "msg-old",
+                "role": "user",
+                "content": "先优化搜索“露营灯”。",
+                "created_at": 10.0,
+            },
+            {
+                "id": "msg-new",
+                "role": "user",
+                "content": "改成检查推荐用户 u-lin。",
+                "created_at": 20.0,
+            },
+        ],
+    )
+    plan = OwnedPolicy().plan("继续", catalog, context=context)
+    assert plan.mode == "recommend"
+    assert plan.user_id == "u-lin"
+
+
 def test_historical_attachment_json_restores_query_without_field_name_confusion():
     catalog = build_sample_catalog()
     context, report = build_governed_context(
