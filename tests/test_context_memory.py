@@ -282,7 +282,7 @@ def test_current_multimodal_selection_is_relevance_driven_not_upload_order():
     )
     assert "商品 B" in context
     assert context.index("att-relevant") < context.index("att-unrelated")
-    assert report["current_attachment_used"] is True
+    assert report["multimodal_used"] is True
 
 
 def test_multimodal_store_keeps_one_canonical_observation_per_source(tmp_path):
@@ -558,6 +558,7 @@ def test_historical_attachment_json_restores_query_without_field_name_confusion(
         catalog_revision="rev-current",
     )
     assert report["stale_rejected"] == 0
+    assert report["multimodal_used"] is True
     plan = OwnedPolicy().plan("继续", catalog, context=context)
     assert plan.mode == "search"
     assert plan.query == "露营灯"
