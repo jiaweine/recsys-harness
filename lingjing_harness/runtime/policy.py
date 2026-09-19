@@ -204,7 +204,7 @@ class OwnedPolicy:
 
     @staticmethod
     def _routing_context(context: str, *, prefer_attachment: bool = False) -> str:
-        """Expose planning-safe ledger sources with provenance-aware priority."""
+        """Choose one fresh provenance block for routing before falling back."""
 
         if not context or "[CONTEXT_MEMORY" not in context:
             return context
@@ -216,15 +216,31 @@ class OwnedPolicy:
             "attachment_text",
             "attachment_observation",
         }
-        buckets: dict[str, list[str]] = {source: [] for source in allowed}
+        blocks: list[tuple[str, float, str]] = []
         source = ""
+        created_at = 0.0
+        lines: list[str] = []
         active = False
+
+        def flush() -> None:
+            nonlocal lines
+            if active and source and lines:
+                blocks.append((source, created_at, "\n".join(lines)))
+            lines = []
+
         for line in context.splitlines():
             if line.startswith("[MEMORY "):
+                flush()
                 source_match = re.search(r"\bsource=([^\s\]]+)", line)
                 stale_match = re.search(r"\bstale=([01])", line)
+                created_match = re.search(r"\bcreated_at=([0-9.]+)", line)
                 source = source_match.group(1) if source_match else ""
                 stale = bool(stale_match and stale_match.group(1) == "1")
+                created_at = (
+                    float(created_match.group(1))
+                    if created_match
+                    else 0.0
+                )
                 active = source in allowed and not stale
                 continue
             if line.startswith("[CONTEXT_MEMORY") or line.startswith(
@@ -232,44 +248,59 @@ class OwnedPolicy:
             ):
                 continue
             if active and line.startswith("> "):
-                buckets[source].append(line[2:])
-
-        historical_attachment_sources = (
-            "attachment_image",
-            "attachment_text",
-            "attachment_observation",
-        )
-
-        def joined(source_names: tuple[str, ...]) -> str:
-            return "\n".join(
-                line
-                for source_name in source_names
-                for line in buckets[source_name]
-            )
+                lines.append(line[2:])
+        flush()
 
         def has_domain_hint(value: str) -> bool:
             lowered = value.lower()
-            return any(hint in lowered for hint in (*OwnedPolicy.SEARCH_HINTS, *OwnedPolicy.REC_HINTS))
+            return any(
+                hint in lowered
+                for hint in (*OwnedPolicy.SEARCH_HINTS, *OwnedPolicy.REC_HINTS)
+            )
 
-        current_attachment = joined(("current_attachment",))
-        direct_user = joined(("direct_user",))
-        historical_attachments = joined(historical_attachment_sources)
-
-        if prefer_attachment and current_attachment and has_domain_hint(current_attachment):
-            return current_attachment[:10_000]
-        if direct_user and has_domain_hint(direct_user):
-            return direct_user[:10_000]
-        if current_attachment and has_domain_hint(current_attachment):
-            return current_attachment[:10_000]
-        if historical_attachments and has_domain_hint(historical_attachments):
-            return historical_attachments[:10_000]
-
-        source_order = (
-            ("current_attachment", "direct_user", *historical_attachment_sources)
-            if prefer_attachment
-            else ("direct_user", "current_attachment", *historical_attachment_sources)
+        current = [
+            block for block in blocks if block[0] == "current_attachment"
+        ]
+        direct = sorted(
+            (block for block in blocks if block[0] == "direct_user"),
+            key=lambda block: block[1],
+            reverse=True,
         )
-        return joined(source_order)[:10_000]
+        historical = sorted(
+            (
+                block
+                for block in blocks
+                if block[0]
+                in {
+                    "attachment_image",
+                    "attachment_text",
+                    "attachment_observation",
+                }
+            ),
+            key=lambda block: block[1],
+            reverse=True,
+        )
+
+        if prefer_attachment:
+            for _, _, value in current:
+                if has_domain_hint(value):
+                    return value[:10_000]
+        for _, _, value in direct:
+            if has_domain_hint(value):
+                return value[:10_000]
+        for _, _, value in current:
+            if has_domain_hint(value):
+                return value[:10_000]
+        for _, _, value in historical:
+            if has_domain_hint(value):
+                return value[:10_000]
+
+        ordered = (
+            [*current, *direct, *historical]
+            if prefer_attachment
+            else [*direct, *current, *historical]
+        )
+        return "\n".join(value for _, _, value in ordered)[:10_000]
 
     @staticmethod
     def _extract_query(text: str, catalog: Catalog, *, fallback: bool = True) -> str:
