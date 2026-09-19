@@ -109,6 +109,29 @@ def test_user_payload_cannot_inject_a_ledger_control_header():
     assert plan.allow_adaptation is False
 
 
+def test_current_no_explore_intent_overrides_old_exploration_memory():
+    catalog = build_sample_catalog()
+    context, _ = build_governed_context(
+        "继续",
+        messages=[
+            {
+                "id": "msg-old",
+                "role": "user",
+                "content": "优化搜索“露营灯”，做候选实验。",
+                "created_at": 10.0,
+            }
+        ],
+    )
+    plan = OwnedPolicy().plan(
+        "继续，只检查，不要优化。",
+        catalog,
+        context=context,
+    )
+    assert plan.mode == "search"
+    assert plan.explore is False
+    assert plan.allow_adaptation is False
+
+
 def test_current_mode_denial_overrides_history_and_positive_substrings():
     catalog = build_sample_catalog()
     context, _ = build_governed_context(
