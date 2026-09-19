@@ -20,6 +20,8 @@ class OwnedPolicy:
 
     SEARCH_HINTS = ("搜", "搜索", "查询", "query", "找不到", "关键词", "结果不准", "无结果", "搜索体验")
     REC_HINTS = ("推荐", "recommend", "首页", "feed", "猜你喜欢", "分发", "曝光", "推荐体验", "个性化")
+    NO_SEARCH_HINTS = ("不要搜索", "别搜索", "不搜索", "不用搜索", "不要搜", "别搜", "不搜")
+    NO_REC_HINTS = ("不要推荐", "别推荐", "不推荐", "不用推荐")
     EXPLORE_HINTS = ("优化", "提升", "改进", "实验", "候选", "试试", "调整", "进化", "学习")
     # ``allow_adaptation`` is retained in AgentPlan for checkpoint/API compatibility,
     # but its authority meaning is intentionally narrow: it authorizes changing the
@@ -131,12 +133,21 @@ class OwnedPolicy:
             ),
         )
         context_lower = routing_context.lower()
-        direct_search = any(k in lowered for k in self.SEARCH_HINTS)
-        direct_rec = any(k in lowered for k in self.REC_HINTS)
+        deny_search = any(k in lowered for k in self.NO_SEARCH_HINTS)
+        deny_rec = any(k in lowered for k in self.NO_REC_HINTS)
+        direct_search = (
+            not deny_search and any(k in lowered for k in self.SEARCH_HINTS)
+        )
+        direct_rec = not deny_rec and any(k in lowered for k in self.REC_HINTS)
         inferred_search = any(k in context_lower for k in self.SEARCH_HINTS)
         inferred_rec = any(k in context_lower for k in self.REC_HINTS)
-        search = direct_search or (not direct_search and not direct_rec and inferred_search)
-        rec = direct_rec or (not direct_search and not direct_rec and inferred_rec)
+        infer_from_context = not direct_search and not direct_rec
+        search = direct_search or (
+            infer_from_context and not deny_search and inferred_search
+        )
+        rec = direct_rec or (
+            infer_from_context and not deny_rec and inferred_rec
+        )
         if search and rec:
             mode = "both"
         elif search:
