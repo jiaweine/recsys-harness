@@ -734,7 +734,6 @@ async def _execute(
         if current is not None:
             current["attachments"] = observed_attachments
             current["context_memory_records"] = memory_records
-            current["context_memory_report"] = context_report
             current["updated_at"] = time.time()
             _persist_run(current)
 
