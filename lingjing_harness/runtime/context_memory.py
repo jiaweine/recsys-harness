@@ -10,7 +10,6 @@ from typing import Any, Iterable
 from lingjing_harness.algorithms.text import cosine, hashed_vector, tokenize
 
 
-CONTEXT_MEMORY_VERSION = 1
 DEFAULT_CONTEXT_CHAR_BUDGET = 16_000
 DEFAULT_HISTORY_CHAR_BUDGET = 9_000
 DEFAULT_ATTACHMENT_CHAR_BUDGET = 5_500
@@ -493,19 +492,11 @@ def build_governed_context(
 
     rendered_ids = {id(row) for row in rendered_rows}
     rendered_current = [row for row in current_selected if id(row) in rendered_ids]
-    rendered_history = [row for row in selected if id(row) in rendered_ids]
-
-    source_counts: dict[str, int] = {}
-    for row in rendered_rows:
-        source_counts[row.source_kind] = source_counts.get(row.source_kind, 0) + 1
-    if fallback_chars:
-        source_counts["current_attachment"] = source_counts.get("current_attachment", 0) + 1
 
     report = {
         "used": bool(context),
         "candidate_count": len(historical_candidates) + len(current_candidates),
         "selected_count": len(rendered_rows) + (1 if fallback_chars else 0),
-        "source_counts": source_counts,
         "stale_rejected": sum(1 for row in historical_candidates if row.stale),
         "truncated": truncated,
         "chars": len(context),
