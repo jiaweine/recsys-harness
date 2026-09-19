@@ -367,6 +367,18 @@ def test_historical_attachment_json_restores_query_without_field_name_confusion(
     assert plan.query == "露营灯"
 
 
+def test_quoted_json_key_is_not_mistaken_for_query():
+    catalog = build_sample_catalog()
+    policy = OwnedPolicy()
+    query = policy._extract_query(
+        '{"note":"搜索露营灯体验差"}',
+        catalog,
+        fallback=False,
+    )
+    assert query != "note"
+    assert "露营灯" in query
+
+
 def test_natural_language_user_word_does_not_become_an_id():
     catalog = build_sample_catalog()
     policy = OwnedPolicy()
