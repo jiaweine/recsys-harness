@@ -704,6 +704,8 @@ async def _execute(
                     "source_kind": str(row.get("_memory_kind") or "attachment_observation"),
                     "content": f"{row.get('name') or '附件'}\n{private_text}",
                     "trust": 0.55,
+                    "catalog_revision": str(catalog_revision or ""),
+                    "created_at": time.time(),
                 }
             )
         public = {key: value for key, value in row.items() if not str(key).startswith("_")}
@@ -734,6 +736,7 @@ async def _execute(
         if current is not None:
             current["attachments"] = observed_attachments
             current["multimodal_context"] = attachment_context
+            current["context_memory_records"] = memory_records
             current["context_memory_report"] = context_report
             current["updated_at"] = time.time()
             _persist_run(current)
@@ -786,6 +789,8 @@ async def _execute(
                 source_kind=memory_record["source_kind"],
                 content=memory_record["content"],
                 trust=memory_record["trust"],
+                catalog_revision=memory_record.get("catalog_revision"),
+                created_at=memory_record.get("created_at"),
             )
         message = store.add_message(cid, "assistant", result["answer"], result)
         with RUN_LOCK:
