@@ -102,7 +102,13 @@ class OwnedPolicy:
     ) -> AgentPlan:
         user_text = text.strip()
         lowered = user_text.lower()
-        routing_context = self._routing_context(context)
+        routing_context = self._routing_context(
+            context,
+            prefer_attachment=any(
+                hint in lowered
+                for hint in ("附件", "图片", "截图", "文件", "这个图", "图里")
+            ),
+        )
         context_lower = routing_context.lower()
         direct_search = any(k in lowered for k in self.SEARCH_HINTS)
         direct_rec = any(k in lowered for k in self.REC_HINTS)
@@ -197,16 +203,12 @@ class OwnedPolicy:
         return self.deliberation.critique(plan, state)
 
     @staticmethod
-    def _routing_context(context: str) -> str:
-        """Expose only planning-safe ledger sources to deterministic routing.
-
-        Only user-authored memory and non-stale multimodal observations may
-        influence deterministic routing. Legacy unstructured context is preserved
-        for backward compatibility with direct harness callers.
-        """
+    def _routing_context(context: str, *, prefer_attachment: bool = False) -> str:
+        """Expose planning-safe ledger sources with provenance-aware priority."""
 
         if not context or "[CONTEXT_MEMORY" not in context:
             return context
+
         allowed = {
             "direct_user",
             "current_attachment",
@@ -214,7 +216,8 @@ class OwnedPolicy:
             "attachment_text",
             "attachment_observation",
         }
-        chunks: list[str] = []
+        buckets: dict[str, list[str]] = {source: [] for source in allowed}
+        source = ""
         active = False
         for line in context.splitlines():
             if line.startswith("[MEMORY "):
@@ -224,11 +227,27 @@ class OwnedPolicy:
                 stale = bool(stale_match and stale_match.group(1) == "1")
                 active = source in allowed and not stale
                 continue
-            if line.startswith("[CONTEXT_MEMORY") or line.startswith("policy:") or line.startswith("authority:") or line.startswith("derived:"):
+            if line.startswith("[CONTEXT_MEMORY") or line.startswith(
+                ("policy:", "authority:", "derived:")
+            ):
                 continue
             if active and line.startswith("> "):
-                chunks.append(line[2:])
-        return "\n".join(chunks)[:10_000]
+                buckets[source].append(line[2:])
+
+        historical_attachment_sources = (
+            "attachment_image",
+            "attachment_text",
+            "attachment_observation",
+        )
+        if prefer_attachment:
+            source_order = ("current_attachment", "direct_user", *historical_attachment_sources)
+        else:
+            source_order = ("direct_user", "current_attachment", *historical_attachment_sources)
+        return "\n".join(
+            line
+            for source_name in source_order
+            for line in buckets[source_name]
+        )[:10_000]
 
     @staticmethod
     def _extract_query(text: str, catalog: Catalog, *, fallback: bool = True) -> str:
