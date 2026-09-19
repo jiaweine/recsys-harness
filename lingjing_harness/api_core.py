@@ -725,7 +725,6 @@ async def _execute(
         messages=context_snapshot.get("messages", []),
         multimodal_items=historical_multimodal,
         current_multimodal_items=memory_records,
-        current_message_id=current_message_id,
         catalog_revision=catalog_revision,
     )
 
