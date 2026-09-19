@@ -319,6 +319,7 @@ async def _recover_on_startup_hardened() -> None:
             result["job_id"] = run_id
             result["attachments"] = copy.deepcopy(snapshot.get("attachments") or [])
             result["catalog_revision"] = saved_revision
+            _renew_execution_fence(run_id)
             for memory_record in snapshot.get("context_memory_records") or []:
                 if not isinstance(memory_record, dict):
                     continue
