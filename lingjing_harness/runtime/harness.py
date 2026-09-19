@@ -148,7 +148,7 @@ class AgentHarness:
                     ),
                     7,
                     context_memory=True,
-                    multimodal=bool((report.get("source_counts") or {}).get("current_attachment")),
+                    multimodal=bool(report.get("current_attachment_used")),
                     stale_rejected=int(report.get("stale_rejected", 0) or 0),
                 )
             if memory_hits:
