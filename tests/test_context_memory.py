@@ -196,10 +196,11 @@ def test_multimodal_store_keeps_one_canonical_observation_per_source(tmp_path):
         source_id="att-123",
         source_kind="attachment_image",
         content="首屏截图：商品 A 重复出现三次。",
-        catalog_revision="rev-1",
+        catalog_revision="rev-2",
     )
     assert first["content_hash"] == second["content_hash"]
     assert second["deduplicated"] is True
+    assert second["catalog_revision"] == "rev-2"
 
     store.remember_context_item(
         cid,
