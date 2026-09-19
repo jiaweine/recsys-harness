@@ -455,9 +455,6 @@ def build_governed_context(
         max_chars=max_chars,
     )
 
-    rendered_ids = {id(row) for row in rendered_rows}
-    rendered_current = [row for row in current_selected if id(row) in rendered_ids]
-
     report = {
         "used": bool(context),
         "candidate_count": len(historical_candidates) + len(current_candidates),
@@ -466,7 +463,9 @@ def build_governed_context(
         "truncated": truncated,
         "chars": len(context),
         "max_chars": max_chars,
-        "current_attachment_used": bool(rendered_current),
+        "multimodal_used": any(
+            row.source_kind != "direct_user" for row in rendered_rows
+        ),
         "evidence_eligible": False,
         "authority_from_history": False,
         "structural_injection_escaped": True,
