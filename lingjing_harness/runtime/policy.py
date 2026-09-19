@@ -250,9 +250,7 @@ class OwnedPolicy:
                 created_at = float(created_match.group(1)) if created_match else 0.0
                 active = source in allowed and not stale
                 continue
-            if line.startswith("[CONTEXT_MEMORY") or line.startswith(
-                ("policy:", "authority:", "derived:")
-            ):
+            if line.startswith("[CONTEXT_MEMORY"):
                 continue
             if active and line.startswith("> "):
                 lines.append(line[2:])
