@@ -400,7 +400,15 @@ def test_context_budget_is_hard_bounded_under_large_history():
     context, report = build_governed_context(
         "继续搜索露营灯",
         messages=messages,
-        current_attachment_context="附件观察 " * 2_000,
+        current_multimodal_items=[
+            {
+                "source_id": "att-budget",
+                "source_kind": "attachment_text",
+                "content": "附件观察 " * 2_000,
+                "trust": 0.55,
+                "created_at": 100.0,
+            }
+        ],
         max_chars=2_400,
         history_chars=1_500,
         attachment_chars=700,
