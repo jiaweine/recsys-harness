@@ -60,18 +60,6 @@ class MemoryCandidate:
     score: float = 0.0
     content_hash: str = ""
 
-    def manifest(self) -> dict[str, Any]:
-        return {
-            "source_id": self.source_id,
-            "source_kind": self.source_kind,
-            "created_at": round(float(self.created_at), 3),
-            "trust": round(float(self.trust), 3),
-            "stale": bool(self.stale),
-            "relevance": round(float(self.relevance), 4),
-            "score": round(float(self.score), 4),
-            "content_hash": self.content_hash,
-        }
-
 
 def context_query_terms(text: str, limit: int = 10) -> list[str]:
     """Return deterministic lexical probes for bounded SQLite history lookup."""
@@ -232,14 +220,14 @@ def _score_candidates(query: str, rows: list[MemoryCandidate]) -> None:
         row.content_hash = _hash(row.content)
 
 
-def _deduplicate(rows: list[MemoryCandidate]) -> tuple[list[MemoryCandidate], int]:
+def _deduplicate(rows: list[MemoryCandidate]) -> list[MemoryCandidate]:
     best: dict[str, MemoryCandidate] = {}
     for row in rows:
         key = row.content_hash or _hash(row.content)
         current = best.get(key)
         if current is None or (row.score, row.created_at) > (current.score, current.created_at):
             best[key] = row
-    return list(best.values()), max(0, len(rows) - len(best))
+    return list(best.values())
 
 
 def _prefix_content(text: str) -> str:
@@ -462,9 +450,8 @@ def build_governed_context(
     )
     _score_candidates(query, historical_candidates)
     _score_candidates(query, current_candidates)
-    historical_candidates, history_deduplicated = _deduplicate(historical_candidates)
-    current_candidates, current_deduplicated = _deduplicate(current_candidates)
-    deduplicated = history_deduplicated + current_deduplicated
+    historical_candidates = _deduplicate(historical_candidates)
+    current_candidates = _deduplicate(current_candidates)
 
     current_selected = _select_current(
         current_candidates,
@@ -515,35 +502,17 @@ def build_governed_context(
         source_counts["current_attachment"] = source_counts.get("current_attachment", 0) + 1
 
     report = {
-        "version": CONTEXT_MEMORY_VERSION,
-        "policy": "provenance_preserving_ledger",
         "used": bool(context),
         "candidate_count": len(historical_candidates) + len(current_candidates),
         "selected_count": len(rendered_rows) + (1 if fallback_chars else 0),
-        "history_selected": len(rendered_history),
-        "current_attachment_selected": len(rendered_current) + (1 if fallback_chars else 0),
         "source_counts": source_counts,
-        "source_manifest": [row.manifest() for row in rendered_rows],
         "stale_rejected": sum(1 for row in historical_candidates if row.stale),
-        "deduplicated": deduplicated,
         "truncated": truncated,
         "chars": len(context),
         "max_chars": max_chars,
-        "history_chars": sum(len(row.content) for row in rendered_history),
-        "attachment_chars": (
-            sum(len(row.content) for row in rendered_current)
-            + fallback_chars
-        ),
         "current_attachment_used": bool(rendered_current or fallback_chars),
         "evidence_eligible": False,
         "authority_from_history": False,
         "structural_injection_escaped": True,
-        "hallucination_guard": {
-            "verbatim_user_memory": True,
-            "assistant_outputs_not_replayed": True,
-            "derived_sources_labeled": True,
-            "workspace_revision_filters_stale_multimodal": True,
-            "memory_cannot_satisfy_evidence_gate": True,
-        },
     }
     return context, report
