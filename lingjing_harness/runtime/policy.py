@@ -103,7 +103,7 @@ class OwnedPolicy:
     ) -> AgentPlan:
         user_text = text.strip()
         lowered = user_text.lower()
-        routing_context = self._routing_context(
+        routing_context, user_memory_context = self._planning_contexts(
             context,
             prefer_attachment=any(
                 hint in lowered
@@ -126,7 +126,7 @@ class OwnedPolicy:
         else:
             mode = "audit"
         continuation = any(hint in lowered for hint in CONTINUATION_HINTS)
-        user_memory_lower = self._user_memory_context(context).lower()
+        user_memory_lower = user_memory_context.lower()
         explore = any(k in lowered for k in self.EXPLORE_HINTS) or (
             continuation
             and any(k in user_memory_lower for k in self.EXPLORE_HINTS)
@@ -208,10 +208,17 @@ class OwnedPolicy:
     def critique(self, plan: AgentPlan, state: RunState):
         return self.deliberation.critique(plan, state)
 
-    @staticmethod
-    def _context_blocks(context: str) -> list[tuple[str, float, str]]:
+    @classmethod
+    def _planning_contexts(
+        cls,
+        context: str,
+        *,
+        prefer_attachment: bool = False,
+    ) -> tuple[str, str]:
+        """Parse the governed ledger once and derive routing/user-memory views."""
+
         if not context or "[CONTEXT_MEMORY" not in context:
-            return []
+            return context, ""
 
         allowed = {
             "direct_user",
@@ -250,27 +257,13 @@ class OwnedPolicy:
             if active and line.startswith("> "):
                 lines.append(line[2:])
         flush()
-        return blocks
 
-    @classmethod
-    def _user_memory_context(cls, context: str) -> str:
-        if "[CONTEXT_MEMORY" not in context:
-            return ""
         direct = sorted(
-            (block for block in cls._context_blocks(context) if block[0] == "direct_user"),
+            (block for block in blocks if block[0] == "direct_user"),
             key=lambda block: block[1],
             reverse=True,
         )
-        return "\n".join(value for _, _, value in direct)[:10_000]
-
-    @classmethod
-    def _routing_context(cls, context: str, *, prefer_attachment: bool = False) -> str:
-        """Choose one fresh provenance block for routing before falling back."""
-
-        if not context or "[CONTEXT_MEMORY" not in context:
-            return context
-
-        blocks = cls._context_blocks(context)
+        user_memory = "\n".join(value for _, _, value in direct)[:10_000]
 
         def has_domain_hint(value: str) -> bool:
             lowered = value.lower()
@@ -280,11 +273,6 @@ class OwnedPolicy:
             )
 
         current = [block for block in blocks if block[0] == "current_attachment"]
-        direct = sorted(
-            (block for block in blocks if block[0] == "direct_user"),
-            key=lambda block: block[1],
-            reverse=True,
-        )
         historical = sorted(
             (
                 block
@@ -303,23 +291,24 @@ class OwnedPolicy:
         if prefer_attachment:
             for _, _, value in current:
                 if has_domain_hint(value):
-                    return value[:10_000]
+                    return value[:10_000], user_memory
         for _, _, value in direct:
             if has_domain_hint(value):
-                return value[:10_000]
+                return value[:10_000], user_memory
         for _, _, value in current:
             if has_domain_hint(value):
-                return value[:10_000]
+                return value[:10_000], user_memory
         for _, _, value in historical:
             if has_domain_hint(value):
-                return value[:10_000]
+                return value[:10_000], user_memory
 
         ordered = (
             [*current, *direct, *historical]
             if prefer_attachment
             else [*direct, *current, *historical]
         )
-        return "\n".join(value for _, _, value in ordered)[:10_000]
+        routing = "\n".join(value for _, _, value in ordered)[:10_000]
+        return routing, user_memory
 
     @staticmethod
     def _extract_query(text: str, catalog: Catalog, *, fallback: bool = True) -> str:
