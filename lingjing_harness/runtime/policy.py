@@ -102,10 +102,14 @@ class OwnedPolicy:
     ) -> AgentPlan:
         user_text = text.strip()
         lowered = user_text.lower()
-        source = f"{user_text}\n{context}" if context else user_text
-        source_lower = source.lower()
-        search = any(k in source_lower for k in self.SEARCH_HINTS)
-        rec = any(k in source_lower for k in self.REC_HINTS)
+        routing_context = self._routing_context(context)
+        context_lower = routing_context.lower()
+        direct_search = any(k in lowered for k in self.SEARCH_HINTS)
+        direct_rec = any(k in lowered for k in self.REC_HINTS)
+        inferred_search = any(k in context_lower for k in self.SEARCH_HINTS)
+        inferred_rec = any(k in context_lower for k in self.REC_HINTS)
+        search = direct_search or (not direct_search and not direct_rec and inferred_search)
+        rec = direct_rec or (not direct_search and not direct_rec and inferred_rec)
         if search and rec:
             mode = "both"
         elif search:
@@ -115,8 +119,16 @@ class OwnedPolicy:
         else:
             mode = "audit"
         explore = any(k in lowered for k in self.EXPLORE_HINTS)
-        query = self._extract_query(source, catalog) if mode in {"search", "both"} else None
-        user = self._extract_user(source, catalog) if mode in {"recommend", "both"} else None
+        query = None
+        if mode in {"search", "both"}:
+            query = self._extract_query(user_text, catalog, fallback=False)
+            if not query:
+                query = self._extract_query(routing_context, catalog, fallback=True)
+        user = None
+        if mode in {"recommend", "both"}:
+            user = self._extract_user(user_text, catalog, fallback=False)
+            if not user:
+                user = self._extract_user(routing_context, catalog, fallback=True)
         deny_activation = any(k in lowered for k in self.NO_ACTIVATE_HINTS)
         allow_activation = any(k in lowered for k in self.ACTIVATE_HINTS) and not deny_activation
         network_requested = self._network_explicitly_requested(user_text)
@@ -185,7 +197,39 @@ class OwnedPolicy:
         return self.deliberation.critique(plan, state)
 
     @staticmethod
-    def _extract_query(text: str, catalog: Catalog) -> str:
+    def _routing_context(context: str) -> str:
+        """Expose only planning-safe ledger sources to deterministic routing.
+
+        Assistant-generated prose and historical tool evidence stay available to
+        future model reasoning but cannot silently retarget the deterministic
+        search/recommend router.  Legacy unstructured context is preserved for
+        backward compatibility with direct harness callers.
+        """
+
+        if not context or "[CONTEXT_MEMORY" not in context:
+            return context
+        allowed = {
+            "direct_user",
+            "current_attachment",
+            "attachment_image",
+            "attachment_text",
+            "attachment_observation",
+        }
+        chunks: list[str] = []
+        active = False
+        for line in context.splitlines():
+            if line.startswith("[MEMORY "):
+                match = re.search(r"\bsource=([^\s\]]+)", line)
+                active = bool(match and match.group(1) in allowed)
+                continue
+            if line.startswith("[CONTEXT_MEMORY") or line.startswith("policy:") or line.startswith("authority:") or line.startswith("derived:"):
+                continue
+            if active and line.startswith("> "):
+                chunks.append(line[2:])
+        return "\n".join(chunks)[:10_000]
+
+    @staticmethod
+    def _extract_query(text: str, catalog: Catalog, *, fallback: bool = True) -> str:
         quoted = re.findall(r"[‘’'\"“”]([^‘’'\"“”]{1,50})[‘’'\"“”]", text)
         if quoted:
             return quoted[0].strip()
@@ -193,26 +237,32 @@ class OwnedPolicy:
             if label.query and label.query in text:
                 return label.query
         cleaned = re.sub(
-            r"(帮我|请|看下|看看|分析|检查|为什么|搜索|搜一下|搜|不准|不好|优化|改进|结果|体验|一下|最近)",
+            r"(帮我|请|看下|看看|分析|检查|为什么|搜索|搜一下|搜|不准|不好|优化|改进|结果|体验|一下|最近|继续|接着|沿用|刚才|之前|上次)",
             " ",
             text,
         )
         chunks = [
             x.strip(" ，。！？,.!?：:")
             for x in re.split(r"\s+", cleaned)
-            if x.strip()
+            if x.strip(" ，。！？,.!?：:")
         ]
-        fallback = (
+        if chunks:
+            return max(chunks, key=len)[:50]
+        if not fallback:
+            return ""
+        default = (
             catalog.query_labels[0].query
             if catalog.query_labels
             else (catalog.items[0].title if catalog.items else "")
         )
-        return max(chunks, key=len, default=fallback)[:50]
+        return default[:50]
 
     @staticmethod
-    def _extract_user(text: str, catalog: Catalog) -> str:
+    def _extract_user(text: str, catalog: Catalog, *, fallback: bool = True) -> str:
         match = re.search(r"(?:用户|user)\s*[:：]?\s*([\w-]+)", text, re.I)
         if match:
             return match.group(1)
+        if not fallback:
+            return ""
         users = sorted({event.user_id for event in catalog.interactions if event.user_id})
         return users[0] if users else "new-user"
