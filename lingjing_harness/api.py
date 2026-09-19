@@ -370,6 +370,7 @@ async def _recover_on_startup_hardened() -> None:
                 allow_network=bool(snapshot.get("allow_network")),
                 resume=checkpoint,
                 catalog_revision=saved_revision,
+                current_message_id=snapshot.get("user_message_id"),
             )
         )
 
@@ -387,6 +388,7 @@ async def _execute_with_run_lease_fence(
     allow_network: bool = False,
     resume: dict[str, Any] | None = None,
     catalog_revision: str | None = None,
+    current_message_id: str | None = None,
 ) -> None:
     """Fence tool, learning, and assistant side effects to the current lease owner."""
 
@@ -413,6 +415,7 @@ async def _execute_with_run_lease_fence(
             allow_network=allow_network,
             resume=resume,
             catalog_revision=catalog_revision,
+            current_message_id=current_message_id,
         )
     except _RunLeaseLost:
         with _core.RUN_LOCK:
