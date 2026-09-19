@@ -17,7 +17,7 @@ class OwnedPolicy:
     can add evidence but cannot expand user-granted authority.
     """
 
-    SEARCH_HINTS = ("搜", "搜索", "查询", "找不到", "关键词", "结果不准", "无结果", "搜索体验")
+    SEARCH_HINTS = ("搜", "搜索", "查询", "query", "找不到", "关键词", "结果不准", "无结果", "搜索体验")
     REC_HINTS = ("推荐", "首页", "feed", "猜你喜欢", "分发", "曝光", "推荐体验", "个性化")
     EXPLORE_HINTS = ("优化", "提升", "改进", "实验", "候选", "试试", "调整", "进化", "学习")
     # ``allow_adaptation`` is retained in AgentPlan for checkpoint/API compatibility,
@@ -239,15 +239,37 @@ class OwnedPolicy:
             "attachment_text",
             "attachment_observation",
         )
-        if prefer_attachment:
-            source_order = ("current_attachment", "direct_user", *historical_attachment_sources)
-        else:
-            source_order = ("direct_user", "current_attachment", *historical_attachment_sources)
-        return "\n".join(
-            line
-            for source_name in source_order
-            for line in buckets[source_name]
-        )[:10_000]
+
+        def joined(source_names: tuple[str, ...]) -> str:
+            return "\n".join(
+                line
+                for source_name in source_names
+                for line in buckets[source_name]
+            )
+
+        def has_domain_hint(value: str) -> bool:
+            lowered = value.lower()
+            return any(hint in lowered for hint in (*OwnedPolicy.SEARCH_HINTS, *OwnedPolicy.REC_HINTS))
+
+        current_attachment = joined(("current_attachment",))
+        direct_user = joined(("direct_user",))
+        historical_attachments = joined(historical_attachment_sources)
+
+        if prefer_attachment and current_attachment and has_domain_hint(current_attachment):
+            return current_attachment[:10_000]
+        if direct_user and has_domain_hint(direct_user):
+            return direct_user[:10_000]
+        if current_attachment and has_domain_hint(current_attachment):
+            return current_attachment[:10_000]
+        if historical_attachments and has_domain_hint(historical_attachments):
+            return historical_attachments[:10_000]
+
+        source_order = (
+            ("current_attachment", "direct_user", *historical_attachment_sources)
+            if prefer_attachment
+            else ("direct_user", "current_attachment", *historical_attachment_sources)
+        )
+        return joined(source_order)[:10_000]
 
     @staticmethod
     def _extract_query(text: str, catalog: Catalog, *, fallback: bool = True) -> str:
