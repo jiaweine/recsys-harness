@@ -105,6 +105,7 @@ class AgentHarness:
         text: str,
         *,
         context: str = "",
+        context_report: dict[str, Any] | None = None,
         allow_network: bool = False,
         sink: EventSink | None = None,
         checkpoint_sink: CheckpointSink | None = None,
@@ -132,10 +133,23 @@ class AgentHarness:
             events: list[RunEvent] = []
             self._emit(events, sink, "observe", "读取当前工作区", "确认当前数据、目标和执行边界", 5, mode=plan.mode)
             if context:
+                report = context_report or {}
                 self._emit(
-                    events, sink, "perceive", "理解附件上下文",
-                    "已把附件转换为受限观察；附件内容不会扩大联网或策略修改权限",
-                    7, multimodal=True,
+                    events,
+                    sink,
+                    "memory",
+                    "治理长上下文记忆",
+                    (
+                        f"已从 {int(report.get('candidate_count', 0) or 0)} 条候选中选择 "
+                        f"{int(report.get('selected_count', 0) or 0)} 条有来源的上下文；"
+                        "历史/附件记忆只辅助规划，不参与本轮证据门槛或权限授权"
+                        if report
+                        else "已载入受限上下文；上下文不会扩大联网或策略修改权限"
+                    ),
+                    7,
+                    context_memory=True,
+                    multimodal=bool((report.get("source_counts") or {}).get("current_attachment")),
+                    stale_selected=int(report.get("stale_selected", 0) or 0),
                 )
             if memory_hits:
                 self._emit(
@@ -290,6 +304,7 @@ class AgentHarness:
             state.evidence,
             allow_adaptation=plan.allow_adaptation,
             critic=critic,
+            context_report=context_report,
         )
         learned = self._learned_events(state.actions)
         suggestions = self._suggestions(plan.mode, plan.explore, state.findings, learned)
@@ -373,7 +388,10 @@ class AgentHarness:
                 "deliberation_state_persisted": True,
                 "idempotent_adaptive_tools": True,
             },
-            "multimodal": {"context_used": bool(context)},
+            "multimodal": {
+                "context_used": bool(context),
+                "governance": context_report or {},
+            },
             "network": {
                 "allowed": plan.allow_network,
                 "used": any(row.get("tool") == "web.research" and row.get("status") == "completed" for row in state.actions),
