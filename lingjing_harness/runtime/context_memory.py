@@ -427,7 +427,7 @@ def build_governed_context(
     by current-run owned tools.
     """
 
-    max_chars = max(2_000, int(max_chars))
+    max_chars = max(0, int(max_chars))
     history_chars = max(0, min(int(history_chars), max_chars))
     attachment_chars = max(0, min(int(attachment_chars), max_chars))
     max_selected = max(1, min(64, int(max_selected)))
