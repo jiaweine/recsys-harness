@@ -148,7 +148,7 @@ class AgentHarness:
                     ),
                     7,
                     context_memory=True,
-                    multimodal=bool(report.get("current_attachment_used")),
+                    multimodal=bool(report.get("multimodal_used")),
                     stale_rejected=int(report.get("stale_rejected", 0) or 0),
                 )
             if memory_hits:
@@ -390,7 +390,7 @@ class AgentHarness:
             },
             "multimodal": {
                 "context_used": bool(
-                    (context_report or {}).get("current_attachment_used")
+                    (context_report or {}).get("multimodal_used")
                     or (context and not context_report)
                 ),
                 "governance": context_report or {},
