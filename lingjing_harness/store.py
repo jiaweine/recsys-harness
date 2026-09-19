@@ -372,9 +372,21 @@ class WorkspaceStore:
         memory_id = f"ctx-{uuid.uuid4().hex[:12]}"
 
         with self._lock, self._connect() as connection:
+            existing_source = connection.execute(
+                """select * from context_memory_items
+                   where conversation_id=? and source_id=?
+                   order by created_at desc limit 1""",
+                (conversation_id, source_id),
+            ).fetchone()
+            if (
+                existing_source is not None
+                and float(existing_source["created_at"]) > now
+            ):
+                return {"stored": True, **dict(existing_source)}
+
             # Re-perception of the same immutable attachment replaces older
-            # different descriptions. An exact repeat refreshes freshness metadata
-            # without creating another memory row.
+            # different descriptions. Exact replay may refresh metadata, but an
+            # older recovery record can never roll a newer source observation back.
             connection.execute(
                 """delete from context_memory_items
                    where conversation_id=? and source_id=? and content_hash<>?""",
