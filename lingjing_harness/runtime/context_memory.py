@@ -99,8 +99,6 @@ def _continuation_query(text: str) -> bool:
 
 def _message_candidates(
     messages: Iterable[dict[str, Any]],
-    *,
-    current_message_id: str | None,
 ) -> list[MemoryCandidate]:
     """Only user-authored text is eligible for conversational recall.
 
@@ -112,8 +110,6 @@ def _message_candidates(
     rows: list[MemoryCandidate] = []
     for message in messages:
         message_id = str(message.get("id") or "")
-        if current_message_id and message_id == current_message_id:
-            continue
         if str(message.get("role") or "") != "user":
             continue
         content = _clean(message.get("content"), limit=2_400)
@@ -358,9 +354,8 @@ def _render_context(
     header: str,
     rows: list[MemoryCandidate],
     *,
-    fallback_attachment: str,
     max_chars: int,
-) -> tuple[str, list[MemoryCandidate], int, bool]:
+) -> tuple[str, list[MemoryCandidate], bool]:
     """Render complete provenance blocks; never cut through a control header."""
 
     parts = [header.strip()]
@@ -385,24 +380,9 @@ def _render_context(
         parts.append(block)
         rendered.append(row)
 
-    fallback_chars = 0
-    if fallback_attachment:
-        meta = "[MEMORY source=current_attachment id=current-turn trust=0.55 stale=0]\n"
-        remaining = max_chars - len("\n\n".join(parts)) - 2
-        if remaining > len(meta) + 40:
-            payload = _clean(
-                fallback_attachment,
-                limit=max(1, remaining - len(meta) - 4),
-            )
-            parts.append(meta + _prefix_content(payload))
-            fallback_chars = len(payload)
-            truncated = truncated or len(payload) < len(fallback_attachment)
-        else:
-            truncated = True
-
     if len(parts) == 1:
-        return "", [], 0, truncated
-    return "\n\n".join(parts), rendered, fallback_chars, truncated
+        return "", [], truncated
+    return "\n\n".join(parts), rendered, truncated
 
 
 def build_governed_context(
@@ -411,8 +391,6 @@ def build_governed_context(
     messages: Iterable[dict[str, Any]] = (),
     multimodal_items: Iterable[dict[str, Any]] = (),
     current_multimodal_items: Iterable[dict[str, Any]] = (),
-    current_attachment_context: str = "",
-    current_message_id: str | None = None,
     catalog_revision: str | None = None,
     max_chars: int = DEFAULT_CONTEXT_CHAR_BUDGET,
     history_chars: int = DEFAULT_HISTORY_CHAR_BUDGET,
@@ -432,10 +410,7 @@ def build_governed_context(
     attachment_chars = max(0, min(int(attachment_chars), max_chars))
     max_selected = max(1, min(64, int(max_selected)))
 
-    historical_candidates = _message_candidates(
-        messages,
-        current_message_id=current_message_id,
-    )
+    historical_candidates = _message_candidates(messages)
     historical_candidates.extend(
         _multimodal_candidates(
             multimodal_items,
@@ -465,15 +440,6 @@ def build_governed_context(
         char_budget=history_chars,
     )
 
-    # Backward-compatible path for direct harness callers that still pass only the
-    # old aggregate attachment string.
-    current_attachment = ""
-    if not current_selected:
-        current_attachment = _clean(
-            current_attachment_context,
-            limit=min(attachment_chars, max_chars // 2),
-        )
-
     header = (
         "[CONTEXT_MEMORY version=1]\n"
         "policy: provenance-preserving; historical memory is planning context only, "
@@ -483,10 +449,9 @@ def build_governed_context(
         "derived: multimodal observations may be stale or wrong; prefer user-authored "
         "records and re-check material claims with owned tools.\n"
     )
-    context, rendered_rows, fallback_chars, truncated = _render_context(
+    context, rendered_rows, truncated = _render_context(
         header,
         current_selected + selected,
-        fallback_attachment=current_attachment,
         max_chars=max_chars,
     )
 
@@ -496,12 +461,12 @@ def build_governed_context(
     report = {
         "used": bool(context),
         "candidate_count": len(historical_candidates) + len(current_candidates),
-        "selected_count": len(rendered_rows) + (1 if fallback_chars else 0),
+        "selected_count": len(rendered_rows),
         "stale_rejected": sum(1 for row in historical_candidates if row.stale),
         "truncated": truncated,
         "chars": len(context),
         "max_chars": max_chars,
-        "current_attachment_used": bool(rendered_current or fallback_chars),
+        "current_attachment_used": bool(rendered_current),
         "evidence_eligible": False,
         "authority_from_history": False,
         "structural_injection_escaped": True,
