@@ -120,7 +120,7 @@ def _persistence_meta(row: dict[str, Any]) -> tuple[Any, ...]:
         row.get("result") is not None,
         row.get("message") is not None,
         len(attachments) if isinstance(attachments, list) else 0,
-        bool(row.get("multimodal_context")),
+        bool(row.get("context_memory_records")),
         bool(row.get("error")),
     )
 
