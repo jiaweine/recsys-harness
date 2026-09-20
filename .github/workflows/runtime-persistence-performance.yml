@@ -34,4 +34,8 @@ jobs:
             --repeats 50 \
             --event-count 80 \
             --event-payload-bytes 1024 \
-            --messages 10000
+            --messages 10000 \
+            --max-save-fenced-p50-ms 10 \
+            --max-assistant-lookup-miss-p50-ms 20 \
+            --max-heartbeat-batch-p50-ms 20 \
+            --min-heartbeat-speedup 5
