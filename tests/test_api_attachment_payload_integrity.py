@@ -260,3 +260,24 @@ def test_upload_storage_check_uses_one_filesystem_scan_on_fast_path(
     assert storage["bytes"] == 7
     assert storage["removed"] == 0
     assert scans == 1
+
+
+
+def test_upload_storage_check_reanchors_after_clock_rollback(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(api_module, "ATTACHMENT_DIR", tmp_path)
+    now = 5_000_000.0
+    stale = tmp_path / "att-abcdefabcdef.payload.txt"
+    stale.write_bytes(b"clock rollback orphan")
+    stale_time = now - api_module.ATTACHMENT_ORPHAN_TTL_SECONDS - 5
+    os.utime(stale, (stale_time, stale_time))
+
+    api_module._ATTACHMENT_GC_STATE["last_full_gc_at"] = now + 10_000
+
+    storage = api_module._attachment_storage_for_upload(1, now=now)
+
+    assert not stale.exists()
+    assert storage["removed"] >= 1
+    assert api_module._ATTACHMENT_GC_STATE["last_full_gc_at"] == now
