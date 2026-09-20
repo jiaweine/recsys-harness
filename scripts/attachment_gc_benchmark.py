@@ -117,6 +117,11 @@ def run_benchmark(*, messages: int, attachments: int, repeats: int) -> dict[str,
         api_module._gc_attachments,
         repeats,
     )
+    api_module._gc_attachments()
+    upload_fast_check = _timed(
+        lambda: api_module._attachment_storage_for_upload(1024),
+        repeats * 4,
+    )
 
     referenced = api_module.store.referenced_attachment_ids()
     if not set(referenced_ids).issubset(referenced):
@@ -129,6 +134,7 @@ def run_benchmark(*, messages: int, attachments: int, repeats: int) -> dict[str,
         "reference_scan": _summary(reference_scan),
         "storage_scan": _summary(storage_scan),
         "full_gc": _summary(full_gc),
+        "upload_fast_check": _summary(upload_fast_check),
     }
 
 
