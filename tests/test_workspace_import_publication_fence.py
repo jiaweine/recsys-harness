@@ -215,7 +215,7 @@ def test_steady_readiness_does_not_contend_with_reserved_writer(tmp_path):
 
 
 class _FirstRevisionReadBarrierConnection:
-    def __init__(self, connection, barrier):
+    def __init__(self, connection, barrier=None):
         self._connection = connection
         self._barrier = barrier
         self._first_revision_read = True
@@ -224,7 +224,8 @@ class _FirstRevisionReadBarrierConnection:
         cursor = self._connection.execute(sql, *args, **kwargs)
         normalized = " ".join(sql.strip().lower().split())
         if (
-            self._first_revision_read
+            self._barrier is not None
+            and self._first_revision_read
             and normalized.startswith("select catalog_revision from workspace_state")
         ):
             self._first_revision_read = False
@@ -252,17 +253,29 @@ def test_concurrent_empty_revision_initialization_has_one_durable_winner(
 
     one_connect = one._connect
     two_connect = two._connect
+    one_first = True
+    two_first = True
 
-    monkeypatch.setattr(
-        one,
-        "_connect",
-        lambda: _FirstRevisionReadBarrierConnection(one_connect(), barrier),
-    )
-    monkeypatch.setattr(
-        two,
-        "_connect",
-        lambda: _FirstRevisionReadBarrierConnection(two_connect(), barrier),
-    )
+    def connect_one():
+        nonlocal one_first
+        current = one_first
+        one_first = False
+        return _FirstRevisionReadBarrierConnection(
+            one_connect(),
+            barrier if current else None,
+        )
+
+    def connect_two():
+        nonlocal two_first
+        current = two_first
+        two_first = False
+        return _FirstRevisionReadBarrierConnection(
+            two_connect(),
+            barrier if current else None,
+        )
+
+    monkeypatch.setattr(one, "_connect", connect_one)
+    monkeypatch.setattr(two, "_connect", connect_two)
 
     results: list[str] = []
     errors: list[BaseException] = []
