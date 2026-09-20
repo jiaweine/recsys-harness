@@ -484,6 +484,9 @@ class WorkspaceStore:
             return {"stored": False, "reason": reason}
 
         with self._lock, self._connect() as connection:
+            # Serialize the read-before-write freshness check across independent
+            # worker processes. RESERVED locking still permits concurrent readers.
+            connection.execute("begin immediate")
             stored_source, stored_hash = self._upsert_context_item(
                 connection,
                 conversation_id,
@@ -537,6 +540,7 @@ class WorkspaceStore:
             return
 
         with self._lock, self._connect() as connection:
+            connection.execute("begin immediate")
             for item in prepared:
                 self._upsert_context_item(connection, conversation_id, item)
             self._prune_context_items(connection, conversation_id)
