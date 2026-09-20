@@ -482,11 +482,33 @@ _core._recover_on_startup = _recover_on_startup_hardened
 _core._execute = _execute_with_run_lease_fence
 _core._compact_run_snapshot = _compact_run_snapshot
 _core._inflate_checkpoint = _inflate_checkpoint
+_core._clone_run_value = _clone_run_value
 _core._PERSIST_META = _PERSIST_META
 _core._RunLeaseLost = _RunLeaseLost
 
 
 _RUN_SNAPSHOT_RETRIES = 3
+
+
+def _clone_run_value(value: Any) -> Any:
+    """Clone the JSON-shaped run state without generic deepcopy overhead.
+
+    Persisted run snapshots are JSON-compatible. Exact built-in dict/list nodes
+    can therefore be copied recursively without deepcopy's memo/type machinery.
+    Subclasses and unexpected objects still fall back to deepcopy so custom
+    mutation/error semantics remain visible to the bounded retry boundary.
+    """
+
+    value_type = type(value)
+    if value_type is dict:
+        return {key: _clone_run_value(child) for key, child in value.items()}
+    if value_type is list:
+        return [_clone_run_value(child) for child in value]
+    if value_type is tuple:
+        return tuple(_clone_run_value(child) for child in value)
+    if value is None or value_type in {str, int, float, bool}:
+        return value
+    return copy.deepcopy(value)
 
 
 def _snapshot_in_memory_run(run_id: str) -> dict[str, Any] | None:
@@ -506,7 +528,7 @@ def _snapshot_in_memory_run(run_id: str) -> dict[str, Any] | None:
             if row is None:
                 return None
             try:
-                return copy.deepcopy(row)
+                return _clone_run_value(row)
             except RuntimeError as exc:
                 if "dictionary changed size during iteration" not in str(exc):
                     raise
