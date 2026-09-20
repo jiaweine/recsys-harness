@@ -275,20 +275,9 @@ class Catalog:
     def summary(self) -> dict[str, Any]:
         users = {event.user_id for event in self.interactions}
         categories = {category for item in self.items for category in item.categories}
-
-        # Production-event status counters are requested frequently by /api/status.
-        # Collect the three request-id sets in one pass instead of rescanning the
-        # full event history once per surface.
-        request_ids: set[str] = set()
-        search_requests: set[str] = set()
-        recommend_requests: set[str] = set()
-        for event in self.events:
-            request_ids.add(event.request_id)
-            if event.surface == "search":
-                search_requests.add(event.request_id)
-            elif event.surface == "recommend":
-                recommend_requests.add(event.request_id)
-
+        request_ids = {event.request_id for event in self.events}
+        search_requests = {event.request_id for event in self.events if event.surface == "search"}
+        recommend_requests = {event.request_id for event in self.events if event.surface == "recommend"}
         return {
             "name": self.name,
             "items": len(self.items),
