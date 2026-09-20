@@ -176,3 +176,38 @@ def test_run_status_watcher_reopens_after_process_identity_changes(tmp_path, mon
     assert store._read_watch_connection is not None
     assert store._read_watch_connection is not original_watcher
     assert store._read_watch_pid == original_pid + 1000
+
+
+def test_terminal_takeover_poll_reuses_canonical_snapshot_reader(monkeypatch):
+    conversation = api_module.store.create_conversation("canonical poll reader", "search")
+    run_id = "job-canonical-poll-reader"
+    running = _running_row(run_id, conversation["id"])
+    api_module.store.delete_run(run_id)
+    assert api_module.store.reserve_run(
+        run_id,
+        conversation["id"],
+        running["goal"],
+        running,
+        owner_id=api_module.WORKER_ID,
+        lease_seconds=30,
+    )
+    with api_module.RUN_LOCK:
+        api_module.RUNS[run_id] = copy.deepcopy(running)
+
+    original = api_module._snapshot_in_memory_run
+    calls = 0
+
+    def counted(target: str):
+        nonlocal calls
+        calls += 1
+        return original(target)
+
+    monkeypatch.setattr(api_module, "_snapshot_in_memory_run", counted)
+    try:
+        visible = api_module.get_run(run_id)
+        assert visible["status"] == "running"
+        assert calls == 1
+    finally:
+        with api_module.RUN_LOCK:
+            api_module.RUNS.pop(run_id, None)
+        api_module.store.delete_run(run_id)
