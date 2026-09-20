@@ -108,8 +108,13 @@ def run_benchmark(
         if expected_status != "running" or expected_poll.get("status") != "running":
             raise AssertionError("benchmark run did not remain active")
 
+        def baseline_snapshot_copy():
+            with api.RUN_LOCK:
+                current = api.RUNS.get(run_id)
+                return copy.deepcopy(current) if current is not None else None
+
         status_samples = _timed(lambda: api.store.run_status(run_id), repeats)
-        snapshot_samples = _timed(lambda: api._snapshot_in_memory_run(run_id), repeats)
+        snapshot_samples = _timed(baseline_snapshot_copy, repeats)
         poll_samples = _timed(lambda: api.get_run(run_id), repeats)
 
         def poll_many(iterations: int) -> int:
