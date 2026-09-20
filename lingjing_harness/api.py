@@ -427,8 +427,25 @@ async def _execute_with_run_lease_fence(
             current_message_id=current_message_id,
         )
     except _RunLeaseLost:
+        # A successor may already have terminalized the run while this worker was
+        # inside the runner. Retire stale active ownership, but keep a coherent
+        # local terminal snapshot when one is durably available so polling does
+        # not transiently lose or regress the completed run.
+        try:
+            durable = _core.store.get_run(run_id)
+        except KeyError:
+            durable = None
         with _core.RUN_LOCK:
-            _core.RUNS.pop(run_id, None)
+            if (
+                isinstance(durable, dict)
+                and durable.get("status") not in _core.ACTIVE_RUN_STATUSES
+            ):
+                current = _core.RUNS.get(run_id)
+                if current is not None:
+                    current.clear()
+                    current.update(copy.deepcopy(durable))
+            else:
+                _core.RUNS.pop(run_id, None)
         _PERSIST_META.pop(run_id, None)
     finally:
         runner.run = original_run
