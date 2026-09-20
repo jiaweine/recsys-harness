@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import concurrent.futures
+import time
 from types import SimpleNamespace
 
 import lingjing_harness.api_core as api_core
@@ -47,3 +49,33 @@ def test_catalog_summary_cache_is_revision_scoped_and_copy_safe(monkeypatch):
 
     assert calls == 3
     assert refreshed == {"name": "workspace", "production_events": 3}
+
+
+
+def test_catalog_summary_cache_single_flights_concurrent_readers(monkeypatch):
+    calls = 0
+
+    def summary():
+        nonlocal calls
+        calls += 1
+        time.sleep(0.02)
+        return {"name": "workspace", "calls": calls}
+
+    fake_catalog = SimpleNamespace(
+        summary=summary,
+        name="workspace",
+        items=[],
+        interactions=[],
+        query_labels=[],
+        events=[],
+        reward_spec=None,
+    )
+    monkeypatch.setattr(api_core, "catalog", fake_catalog)
+    monkeypatch.setattr(api_core, "CATALOG_REVISION", "rev-concurrent")
+    monkeypatch.setattr(api_core, "_CATALOG_SUMMARY_CACHE", None)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(lambda _index: api_core._catalog_summary(), range(8)))
+
+    assert calls == 1
+    assert results == [{"name": "workspace", "calls": 1}] * 8
