@@ -113,8 +113,23 @@ def run_benchmark(
                 current = api.RUNS.get(run_id)
                 return copy.deepcopy(current) if current is not None else None
 
+        def baseline_status_read():
+            with api.store._connect() as connection:
+                status_row = connection.execute(
+                    "select status from runs where run_id=?",
+                    (run_id,),
+                ).fetchone()
+            return str(status_row["status"]) if status_row else None
+
+        def specialized_snapshot_copy():
+            with api.RUN_LOCK:
+                current = api.RUNS.get(run_id)
+                return api._clone_run_value(current) if current is not None else None
+
+        baseline_status_samples = _timed(baseline_status_read, repeats)
         status_samples = _timed(lambda: api.store.run_status(run_id), repeats)
         snapshot_samples = _timed(baseline_snapshot_copy, repeats)
+        specialized_snapshot_samples = _timed(specialized_snapshot_copy, repeats)
         poll_samples = _timed(lambda: api.get_run(run_id), repeats)
 
         def poll_many(iterations: int) -> int:
@@ -139,8 +154,10 @@ def run_benchmark(
             "events": events,
             "payload_bytes": payload_bytes,
             "snapshot_bytes": snapshot_bytes,
+            "run_status_baseline": _summary(baseline_status_samples),
             "run_status": _summary(status_samples),
-            "snapshot_copy": _summary(snapshot_samples),
+            "snapshot_copy_baseline": _summary(snapshot_samples),
+            "snapshot_copy": _summary(specialized_snapshot_samples),
             "active_poll": _summary(poll_samples),
             "concurrent": {
                 "workers": workers,
@@ -161,6 +178,8 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--max-status-p50-ms", type=float, default=0.0)
     parser.add_argument("--max-poll-p50-ms", type=float, default=0.0)
+    parser.add_argument("--min-status-speedup", type=float, default=0.0)
+    parser.add_argument("--min-copy-speedup", type=float, default=0.0)
     parser.add_argument("--min-concurrent-rps", type=float, default=0.0)
     args = parser.parse_args()
 
@@ -173,13 +192,28 @@ def main() -> None:
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
 
     failures: list[str] = []
+    status_baseline_p50 = float(result["run_status_baseline"]["p50_ms"])
     status_p50 = float(result["run_status"]["p50_ms"])
+    copy_baseline_p50 = float(result["snapshot_copy_baseline"]["p50_ms"])
+    copy_p50 = float(result["snapshot_copy"]["p50_ms"])
     poll_p50 = float(result["active_poll"]["p50_ms"])
+    status_speedup = status_baseline_p50 / max(status_p50, 1e-9)
+    copy_speedup = copy_baseline_p50 / max(copy_p50, 1e-9)
+    result["status_speedup_p50"] = round(status_speedup, 2)
+    result["copy_speedup_p50"] = round(copy_speedup, 2)
     rps = float(result["concurrent"]["polls_per_second"])
     if args.max_status_p50_ms > 0 and status_p50 > args.max_status_p50_ms:
         failures.append(f"run_status p50={status_p50} > {args.max_status_p50_ms}")
     if args.max_poll_p50_ms > 0 and poll_p50 > args.max_poll_p50_ms:
         failures.append(f"active poll p50={poll_p50} > {args.max_poll_p50_ms}")
+    if args.min_status_speedup > 0 and status_speedup < args.min_status_speedup:
+        failures.append(
+            f"run_status speedup={status_speedup:.2f} < {args.min_status_speedup}"
+        )
+    if args.min_copy_speedup > 0 and copy_speedup < args.min_copy_speedup:
+        failures.append(
+            f"snapshot copy speedup={copy_speedup:.2f} < {args.min_copy_speedup}"
+        )
     if args.min_concurrent_rps > 0 and rps < args.min_concurrent_rps:
         failures.append(f"concurrent rps={rps} < {args.min_concurrent_rps}")
     if failures:
