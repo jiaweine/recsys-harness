@@ -212,3 +212,81 @@ def test_steady_readiness_does_not_contend_with_reserved_writer(tmp_path):
     finally:
         blocker.rollback()
         blocker.close()
+
+
+class _FirstRevisionReadBarrierConnection:
+    def __init__(self, connection, barrier):
+        self._connection = connection
+        self._barrier = barrier
+        self._first_revision_read = True
+
+    def execute(self, sql, *args, **kwargs):
+        cursor = self._connection.execute(sql, *args, **kwargs)
+        normalized = " ".join(sql.strip().lower().split())
+        if (
+            self._first_revision_read
+            and normalized.startswith("select catalog_revision from workspace_state")
+        ):
+            self._first_revision_read = False
+            self._barrier.wait(timeout=10)
+        return cursor
+
+    def __enter__(self):
+        self._connection.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return self._connection.__exit__(exc_type, exc, tb)
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+
+def test_concurrent_empty_revision_initialization_has_one_durable_winner(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "workspace-initial-revision-race.db"
+    one = WorkspaceStore(path)
+    two = WorkspaceStore(path)
+    barrier = threading.Barrier(2)
+
+    one_connect = one._connect
+    two_connect = two._connect
+
+    monkeypatch.setattr(
+        one,
+        "_connect",
+        lambda: _FirstRevisionReadBarrierConnection(one_connect(), barrier),
+    )
+    monkeypatch.setattr(
+        two,
+        "_connect",
+        lambda: _FirstRevisionReadBarrierConnection(two_connect(), barrier),
+    )
+
+    results: list[str] = []
+    errors: list[BaseException] = []
+
+    def initialize(store, revision):
+        try:
+            results.append(store.ensure_workspace_revision(revision))
+        except BaseException as exc:  # noqa: BLE001 - surface race failures
+            errors.append(exc)
+
+    workers = [
+        threading.Thread(target=initialize, args=(one, "rev-a")),
+        threading.Thread(target=initialize, args=(two, "rev-b")),
+    ]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=15)
+
+    assert all(not worker.is_alive() for worker in workers)
+    assert errors == []
+    assert len(results) == 2
+    assert results[0] == results[1]
+    assert results[0] in {"rev-a", "rev-b"}
+
+    durable = WorkspaceStore(path).workspace_revision()
+    assert durable == results[0]
