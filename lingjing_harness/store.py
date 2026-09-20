@@ -632,6 +632,27 @@ class WorkspaceStore:
         now = time.time() if now is None else float(now)
         limit = max(1, int(limit))
         window_seconds = max(1.0, float(window_seconds))
+
+        # Once a shared counter is already saturated inside the current window,
+        # this request cannot change the decision. Reject it from a read snapshot
+        # instead of contending for SQLite's single writer lock. Any request that
+        # could be allowed (missing row, expired window, clock rollback, or count
+        # below the limit) still enters the authoritative write transaction below
+        # and re-reads the row before mutating it.
+        with self._connect() as connection:
+            observed = connection.execute(
+                "select window_start,count from rate_limits where scope_key=?",
+                (scope_key,),
+            ).fetchone()
+        if observed is not None:
+            observed_start = float(observed["window_start"])
+            if (
+                observed_start <= now
+                and now - observed_start < window_seconds
+                and int(observed["count"]) >= limit
+            ):
+                return False
+
         with self._lock, self._connect() as connection:
             connection.execute("begin immediate")
             row = connection.execute(
@@ -655,9 +676,6 @@ class WorkspaceStore:
                 )
                 allowed = True
             elif int(row["count"]) >= limit:
-                connection.execute(
-                    "update rate_limits set updated_at=? where scope_key=?", (now, scope_key)
-                )
                 allowed = False
             else:
                 connection.execute(
