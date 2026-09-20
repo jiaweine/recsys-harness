@@ -204,6 +204,10 @@ def main() -> None:
         description="Benchmark task-start durable write amplification."
     )
     parser.add_argument("--repeats", type=int, default=40)
+    parser.add_argument("--max-atomic-p50-ms", type=float, default=0.0)
+    parser.add_argument("--min-store-speedup", type=float, default=0.0)
+    parser.add_argument("--max-api-p50-ms", type=float, default=0.0)
+    parser.add_argument("--max-api-p95-ms", type=float, default=0.0)
     args = parser.parse_args()
     repeats = max(10, min(50, args.repeats))
 
@@ -218,7 +222,48 @@ def main() -> None:
             "api_task_start": asyncio.run(_api_start_benchmark(repeats)),
         }
 
+    atomic_p50 = float(result["store_atomic_start"]["p50_ms"])
+    legacy_p50 = float(result["store_three_write_start"]["p50_ms"])
+    speedup = legacy_p50 / max(atomic_p50, 1e-9)
+    result["store_speedup_p50"] = round(speedup, 2)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+
+    failures: list[str] = []
+    checks = [
+        (
+            args.max_atomic_p50_ms <= 0 or atomic_p50 <= args.max_atomic_p50_ms,
+            "atomic store p50",
+            atomic_p50,
+            args.max_atomic_p50_ms,
+        ),
+        (
+            args.min_store_speedup <= 0 or speedup >= args.min_store_speedup,
+            "store speedup",
+            round(speedup, 2),
+            args.min_store_speedup,
+        ),
+        (
+            args.max_api_p50_ms <= 0
+            or result["api_task_start"]["p50_ms"] <= args.max_api_p50_ms,
+            "api p50",
+            result["api_task_start"]["p50_ms"],
+            args.max_api_p50_ms,
+        ),
+        (
+            args.max_api_p95_ms <= 0
+            or result["api_task_start"]["p95_ms"] <= args.max_api_p95_ms,
+            "api p95",
+            result["api_task_start"]["p95_ms"],
+            args.max_api_p95_ms,
+        ),
+    ]
+    for ok, name, observed, threshold in checks:
+        if not ok:
+            failures.append(
+                f"{name}: observed={observed} threshold={threshold}"
+            )
+    if failures:
+        raise SystemExit("task-start performance guardrail failed: " + "; ".join(failures))
 
 
 if __name__ == "__main__":
