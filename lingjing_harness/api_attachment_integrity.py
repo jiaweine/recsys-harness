@@ -151,9 +151,11 @@ def install_attachment_integrity_boundary(core: Any) -> None:
         incoming_bytes = max(0, int(incoming_bytes))
         with core.ATTACHMENT_LOCK:
             total = core._attachment_storage_bytes()
+            last_full_gc_at = float(gc_state["last_full_gc_at"] or 0.0)
             full_gc_due = (
-                gc_state["last_full_gc_at"] <= 0.0
-                or now - gc_state["last_full_gc_at"] >= full_gc_interval_seconds
+                last_full_gc_at <= 0.0
+                or now < last_full_gc_at
+                or now - last_full_gc_at >= full_gc_interval_seconds
             )
             capacity_pressure = (
                 total + incoming_bytes > core.MAX_ATTACHMENT_STORAGE_BYTES
