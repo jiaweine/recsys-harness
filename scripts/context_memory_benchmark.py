@@ -213,6 +213,29 @@ def run_benchmark(
         concurrent_elapsed = max(time.perf_counter() - started, 1e-9)
         concurrent_reads = len(futures)
 
+        batch_samples: list[float] = []
+        for batch_index in range(24):
+            batch = [
+                {
+                    "source_id": f"bench-batch-{batch_index}-{item_index}",
+                    "source_kind": "attachment_text",
+                    "content": (
+                        f"batch {batch_index} item {item_index} 露营灯 "
+                        f"feature_{item_index}"
+                    ),
+                    "trust": 0.52,
+                    "catalog_revision": "rev-batch",
+                    "created_at": float(
+                        messages + memory_items + 10_000
+                        + batch_index * 8 + item_index
+                    ),
+                }
+                for item_index in range(8)
+            ]
+            started = time.perf_counter()
+            store.remember_context_items(cid, batch)
+            batch_samples.append((time.perf_counter() - started) * 1000.0)
+
         write_samples: list[float] = []
         write_count = min(192, max(64, memory_items))
         for index in range(write_count):
@@ -236,6 +259,7 @@ def run_benchmark(
             "context_snapshot": _summary(read_samples),
             "context_build": _summary(build_samples),
             "memory_write": _summary(write_samples),
+            "memory_batch_8": _summary(batch_samples),
             "concurrent_reads": {
                 "count": concurrent_reads,
                 "elapsed_ms": round(concurrent_elapsed * 1000.0, 3),
