@@ -13,7 +13,15 @@ def test_catalog_summary_cache_is_revision_scoped_and_copy_safe(monkeypatch):
         calls += 1
         return {"name": "workspace", "production_events": calls}
 
-    fake_catalog = SimpleNamespace(summary=summary)
+    fake_catalog = SimpleNamespace(
+        summary=summary,
+        name="workspace",
+        items=[],
+        interactions=[],
+        query_labels=[],
+        events=[],
+        reward_spec=None,
+    )
     monkeypatch.setattr(api_core, "catalog", fake_catalog)
     monkeypatch.setattr(api_core, "CATALOG_REVISION", "rev-a")
     monkeypatch.setattr(api_core, "_CATALOG_SUMMARY_CACHE", None)
@@ -28,8 +36,14 @@ def test_catalog_summary_cache_is_revision_scoped_and_copy_safe(monkeypatch):
     assert api_core._catalog_summary()["name"] == "workspace"
     assert calls == 1
 
+    fake_catalog.events.append(object())
+    structurally_refreshed = api_core._catalog_summary()
+
+    assert calls == 2
+    assert structurally_refreshed == {"name": "workspace", "production_events": 2}
+
     monkeypatch.setattr(api_core, "CATALOG_REVISION", "rev-b")
     refreshed = api_core._catalog_summary()
 
-    assert calls == 2
-    assert refreshed == {"name": "workspace", "production_events": 2}
+    assert calls == 3
+    assert refreshed == {"name": "workspace", "production_events": 3}
