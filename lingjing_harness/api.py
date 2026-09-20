@@ -65,6 +65,10 @@ class _RunLeaseLost(RuntimeError):
     """The durable run lease moved to another worker before a side effect."""
 
 
+class _FinalRunLeaseLost(_RunLeaseLost):
+    """The runner returned, but the final durable ownership fence was lost."""
+
+
 class _LeaseFencedMemory:
     """Fence non-idempotent final learning without changing shared tool memory."""
 
@@ -410,7 +414,10 @@ async def _execute_with_run_lease_fence(
 
     def run_with_final_fence(*args: Any, **kwargs: Any) -> Any:
         result = original_run(*args, **kwargs)
-        _renew_execution_fence(run_id)
+        try:
+            _renew_execution_fence(run_id)
+        except _RunLeaseLost as exc:
+            raise _FinalRunLeaseLost(str(exc)) from exc
         return result
 
     runner.run = run_with_final_fence
@@ -426,11 +433,9 @@ async def _execute_with_run_lease_fence(
             catalog_revision=catalog_revision,
             current_message_id=current_message_id,
         )
-    except _RunLeaseLost:
-        # A successor may already have terminalized the run while this worker was
-        # inside the runner. Retire stale active ownership, but keep a coherent
-        # local terminal snapshot when one is durably available so polling does
-        # not transiently lose or regress the completed run.
+    except _FinalRunLeaseLost:
+        # The runner itself finished, so a successor terminal snapshot is safe to
+        # expose locally even though this worker no longer owns execution.
         try:
             durable = _core.store.get_run(run_id)
         except KeyError:
@@ -446,6 +451,12 @@ async def _execute_with_run_lease_fence(
                     current.update(copy.deepcopy(durable))
             else:
                 _core.RUNS.pop(run_id, None)
+        _PERSIST_META.pop(run_id, None)
+    except _RunLeaseLost:
+        # Losing authority during execution is different: retire the stale local
+        # executor immediately so it cannot continue to the next side effect.
+        with _core.RUN_LOCK:
+            _core.RUNS.pop(run_id, None)
         _PERSIST_META.pop(run_id, None)
     finally:
         runner.run = original_run
