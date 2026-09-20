@@ -175,6 +175,38 @@ def run_benchmark(
         copy_source = store.get_run(run_id)
         deep_copy = _timed(lambda: copy.deepcopy(copy_source), repeats * 2)
 
+        heartbeat_run_ids: list[str] = []
+        for index in range(100):
+            heartbeat_cid = store.create_conversation(
+                f"heartbeat-{index}",
+                "audit",
+            )["id"]
+            heartbeat_run_id = f"heartbeat-run-{index}"
+            heartbeat_snapshot = _snapshot(
+                heartbeat_run_id,
+                heartbeat_cid,
+                1,
+                0,
+            )
+            if not store.reserve_run(
+                heartbeat_run_id,
+                heartbeat_cid,
+                heartbeat_snapshot["goal"],
+                heartbeat_snapshot,
+                owner_id=owner,
+                lease_seconds=30,
+            ):
+                raise AssertionError("failed to reserve heartbeat benchmark run")
+            heartbeat_run_ids.append(heartbeat_run_id)
+
+        heartbeat_individual = _timed(
+            lambda: [
+                store.renew_run_lease(heartbeat_run_id, owner, 30)
+                for heartbeat_run_id in heartbeat_run_ids
+            ],
+            max(5, repeats // 5),
+        )
+
         return {
             "event_count": event_count,
             "event_payload_bytes": event_payload_bytes,
@@ -192,6 +224,7 @@ def run_benchmark(
             "assistant_lookup_hit": _summary(assistant_lookup_hit),
             "assistant_lookup_miss": _summary(assistant_lookup_miss),
             "list_plus_active": _summary(list_plus_active),
+            "heartbeat_individual_100": _summary(heartbeat_individual),
         }
 
 
