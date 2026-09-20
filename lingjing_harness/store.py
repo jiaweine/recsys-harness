@@ -829,7 +829,7 @@ class WorkspaceStore:
             else:
                 connection.execute("delete from runs where run_id=?", (run_id,))
 
-    def save_run(
+    def _save_run_transaction(
         self,
         run_id: str,
         conversation_id: str,
@@ -837,9 +837,11 @@ class WorkspaceStore:
         status: str,
         snapshot: dict[str, Any],
         *,
-        owner_id: str | None = None,
-        lease_seconds: float = 30.0,
-    ) -> str:
+        owner_id: str | None,
+        lease_seconds: float,
+    ) -> tuple[str, bool]:
+        """Persist one run and report whether this caller still owned the mutation."""
+
         decision_at = time.time()
         created = min(float(snapshot.get("created_at") or decision_at), decision_at)
         active = status in ACTIVE_RUN_STATUSES
@@ -850,7 +852,7 @@ class WorkspaceStore:
             ).fetchone()
             if existing and existing["status"] not in ACTIVE_RUN_STATUSES:
                 connection.rollback()
-                return str(existing["status"])
+                return str(existing["status"]), False
             if (
                 existing
                 and existing["status"] in ACTIVE_RUN_STATUSES
@@ -858,7 +860,8 @@ class WorkspaceStore:
                 and str(existing["owner_id"]) != str(owner_id or "")
             ):
                 connection.rollback()
-                return str(existing["status"])
+                return str(existing["status"]), False
+
             payload = dict(snapshot)
             if (
                 existing
@@ -866,7 +869,13 @@ class WorkspaceStore:
                 and status in {"running", "interrupted"}
             ):
                 status = "cancel_requested"
-            payload.update({"status": status, "created_at": created, "updated_at": decision_at})
+            payload.update(
+                {
+                    "status": status,
+                    "created_at": created,
+                    "updated_at": decision_at,
+                }
+            )
             current_owner = owner_id if active else None
             if active and existing and existing["owner_id"] and owner_id is None:
                 current_owner = existing["owner_id"]
@@ -902,7 +911,52 @@ class WorkspaceStore:
                 ),
             )
             connection.commit()
-        return status
+        return status, True
+
+    def save_run(
+        self,
+        run_id: str,
+        conversation_id: str,
+        goal: str,
+        status: str,
+        snapshot: dict[str, Any],
+        *,
+        owner_id: str | None = None,
+        lease_seconds: float = 30.0,
+    ) -> str:
+        persisted_status, _authorized = self._save_run_transaction(
+            run_id,
+            conversation_id,
+            goal,
+            status,
+            snapshot,
+            owner_id=owner_id,
+            lease_seconds=lease_seconds,
+        )
+        return persisted_status
+
+    def save_run_fenced(
+        self,
+        run_id: str,
+        conversation_id: str,
+        goal: str,
+        status: str,
+        snapshot: dict[str, Any],
+        *,
+        owner_id: str,
+        lease_seconds: float = 30.0,
+    ) -> tuple[str, bool]:
+        """Persist and fence ownership in the same SQLite write transaction."""
+
+        return self._save_run_transaction(
+            run_id,
+            conversation_id,
+            goal,
+            status,
+            snapshot,
+            owner_id=owner_id,
+            lease_seconds=lease_seconds,
+        )
 
     def renew_run_lease(self, run_id: str, owner_id: str, lease_seconds: float) -> bool:
         now = time.time()
