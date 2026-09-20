@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from hashlib import blake2b
 import math
 import re
 import time
 from typing import Any, Iterable
 
-from lingjing_harness.algorithms.text import cosine, hashed_vector, tokenize
+from lingjing_harness.algorithms.text import cosine, token_hashed_vector, tokenize
 
 
 DEFAULT_CONTEXT_CHAR_BUDGET = 16_000
@@ -92,6 +93,11 @@ def _hash(text: str) -> str:
     return blake2b(normalized.encode("utf-8", "ignore"), digest_size=12).hexdigest()
 
 
+@lru_cache(maxsize=4096)
+def _context_vector(text: str) -> dict[int, float]:
+    return token_hashed_vector(text)
+
+
 def _continuation_query(text: str) -> bool:
     lowered = text.lower()
     return any(hint in lowered for hint in CONTINUATION_HINTS)
@@ -168,14 +174,14 @@ def _score_candidates(query: str, rows: list[MemoryCandidate]) -> None:
         return
 
     now = time.time()
-    query_vector = hashed_vector(query)
+    query_vector = _context_vector(query)
     query_terms = context_query_terms(query, limit=6)
     ordered = sorted(rows, key=lambda row: row.created_at, reverse=True)
     recency_rank = {id(row): 1.0 / (1.0 + rank / 7.0) for rank, row in enumerate(ordered)}
     continuation = _continuation_query(query)
 
     for row in rows:
-        similarity = max(0.0, cosine(query_vector, hashed_vector(row.content)))
+        similarity = max(0.0, cosine(query_vector, _context_vector(row.content)))
         content_lower = row.content.lower()
         lexical_hits = sum(1 for term in query_terms if term in content_lower)
         lexical = min(1.0, lexical_hits / max(1, min(3, len(query_terms))))

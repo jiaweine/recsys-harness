@@ -1,0 +1,46 @@
+name: Context Memory Stress
+
+on:
+  push:
+    branches:
+      - perf/context-memory-hotpath
+  pull_request:
+    paths:
+      - "lingjing_harness/algorithms/text.py"
+      - "lingjing_harness/runtime/context_memory.py"
+      - "lingjing_harness/store.py"
+      - "lingjing_harness/api.py"
+      - "lingjing_harness/api_core.py"
+      - "scripts/context_memory_stress.py"
+      - ".github/workflows/context-memory-stress.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mixed-contention:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Compile context memory stress harness
+        run: python -m compileall -q scripts/context_memory_stress.py
+      - name: Mixed read/write and cross-process freshness stress
+        run: |
+          for pass in 1 2 3; do
+            echo "context memory stress pass $pass/3"
+            python scripts/context_memory_stress.py \
+              --messages 100000 \
+              --readers 12 \
+              --writers 4 \
+              --read-iterations 24 \
+              --write-iterations 16 \
+              --processes 8
+          done

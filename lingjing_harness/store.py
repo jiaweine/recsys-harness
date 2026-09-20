@@ -37,6 +37,8 @@ class WorkspaceStore:
           content text not null,payload text not null,created_at real not null
         );
         create index if not exists idx_messages_conversation on messages(conversation_id,created_at);
+        create index if not exists idx_messages_user_created
+          on messages(conversation_id,created_at) where role='user';
         create table if not exists context_memory_items(
           id text primary key,
           conversation_id text not null,
@@ -212,17 +214,17 @@ class WorkspaceStore:
         return f"%{escaped}%"
 
     @staticmethod
-    def _lexical_match_sql(terms: list[str], column: str = "content") -> tuple[str, str, list[str]]:
-        """Build escaped LIKE clauses plus a deterministic relevance expression."""
+    def _lexical_match_sql(
+        terms: list[str],
+        column: str = "content",
+    ) -> tuple[str, list[str]]:
+        """Build escaped LIKE clauses for a high-recall first-stage scan."""
 
         patterns = [WorkspaceStore._like_pattern(term) for term in terms]
-        clauses = " or ".join(f"{column} like ? escape '\\'" for _ in patterns)
-        weights = list(range(len(patterns), 0, -1))
-        score = " + ".join(
-            f"(case when {column} like ? escape '\\' then {weight} else 0 end)"
-            for weight in weights
+        clauses = " or ".join(
+            f"{column} like ? escape '\\'" for _ in patterns
         )
-        return clauses, score, patterns
+        return clauses, patterns
 
     def context_snapshot(
         self,
@@ -286,25 +288,48 @@ class WorkspaceStore:
                     message_rows[str(row["id"])] = row
 
             if terms and search_limit:
-                clauses, score_sql, patterns = self._lexical_match_sql(terms)
-                params = [*patterns, conversation_id]
+                # Probe the strongest lexical term independently so a rare old
+                # technical anchor cannot be crowded out by many recent matches on
+                # broader terms. The broader query is recency-ordered and stops as
+                # soon as enough candidates are found; semantic/trust ranking lives
+                # in runtime.context_memory rather than being recomputed in SQLite.
+                priority_pattern = self._like_pattern(terms[0])
+                params = [conversation_id]
                 excluded_sql = ""
                 if excluded:
                     excluded_sql = " and id<>?"
                     params.append(excluded)
-                params.extend(patterns)
-                params.append(search_limit)
-                matches = connection.execute(
-                    f"""select id,conversation_id,role,content,created_at,
-                               ({score_sql}) as lexical_score
+                params.extend((priority_pattern, min(16, search_limit)))
+                priority_matches = connection.execute(
+                    f"""select id,conversation_id,role,content,created_at
                         from messages
                         where conversation_id=? and role='user'{excluded_sql}
-                          and ({clauses})
-                        order by lexical_score desc, created_at desc limit ?""",
+                          and content like ? escape '\\'
+                        order by created_at desc limit ?""",
                     tuple(params),
                 ).fetchall()
-                for row in matches:
+                for row in priority_matches:
                     message_rows[str(row["id"])] = row
+
+                if len(terms) > 1:
+                    clauses, patterns = self._lexical_match_sql(terms)
+                    params = [conversation_id]
+                    excluded_sql = ""
+                    if excluded:
+                        excluded_sql = " and id<>?"
+                        params.append(excluded)
+                    params.extend(patterns)
+                    params.append(search_limit)
+                    matches = connection.execute(
+                        f"""select id,conversation_id,role,content,created_at
+                            from messages
+                            where conversation_id=? and role='user'{excluded_sql}
+                              and ({clauses})
+                            order by created_at desc limit ?""",
+                        tuple(params),
+                    ).fetchall()
+                    for row in matches:
+                        message_rows[str(row["id"])] = row
 
             if memory_limit:
                 recent_memory = connection.execute(
@@ -317,13 +342,12 @@ class WorkspaceStore:
                     memory_rows[str(row["id"])] = row
 
                 if terms:
-                    clauses, score_sql, patterns = self._lexical_match_sql(terms)
+                    clauses, patterns = self._lexical_match_sql(terms)
                     match_memory = connection.execute(
-                        f"""select *, ({score_sql}) as lexical_score
-                            from context_memory_items
+                        f"""select * from context_memory_items
                             where conversation_id=? and ({clauses})
-                            order by lexical_score desc, created_at desc limit ?""",
-                        (*patterns, conversation_id, *patterns, memory_limit),
+                            order by created_at desc limit ?""",
+                        (conversation_id, *patterns, memory_limit),
                     ).fetchall()
                     for row in match_memory:
                         memory_rows[str(row["id"])] = row
@@ -331,15 +355,108 @@ class WorkspaceStore:
         messages: list[dict[str, Any]] = []
         for row in sorted(message_rows.values(), key=lambda value: float(value["created_at"])):
             data = dict(row)
-            data.pop("lexical_score", None)
             messages.append(data)
 
         memories: list[dict[str, Any]] = []
         for row in sorted(memory_rows.values(), key=lambda value: float(value["created_at"])):
-            data = dict(row)
-            data.pop("lexical_score", None)
-            memories.append(data)
+            memories.append(dict(row))
         return {"messages": messages, "memory_items": memories}
+
+    @staticmethod
+    def _prepare_context_item(
+        *,
+        source_id: str,
+        source_kind: str,
+        content: str,
+        trust: float,
+        catalog_revision: str | None,
+        created_at: float | None,
+    ) -> dict[str, Any] | None:
+        value = str(content or "").replace("\x00", "").strip()
+        source = str(source_id or "").strip()
+        if not value or not source:
+            return None
+        value = value[:12_000]
+        content_hash = blake2b(
+            " ".join(value.split()).lower().encode("utf-8", "ignore"),
+            digest_size=12,
+        ).hexdigest()
+        return {
+            "source_id": source,
+            "source_kind": str(source_kind or "derived").strip(),
+            "content": value,
+            "content_hash": content_hash,
+            "trust": max(0.0, min(1.0, float(trust))),
+            "catalog_revision": str(catalog_revision or ""),
+            "created_at": time.time() if created_at is None else float(created_at),
+        }
+
+    @staticmethod
+    def _upsert_context_item(
+        connection: sqlite3.Connection,
+        conversation_id: str,
+        item: dict[str, Any],
+    ) -> tuple[str, str]:
+        existing_source = connection.execute(
+            """select source_id,content_hash,created_at
+               from context_memory_items
+               where conversation_id=? and source_id=?
+               order by created_at desc limit 1""",
+            (conversation_id, item["source_id"]),
+        ).fetchone()
+        if (
+            existing_source is not None
+            and float(existing_source["created_at"]) > float(item["created_at"])
+        ):
+            return (
+                str(existing_source["source_id"]),
+                str(existing_source["content_hash"]),
+            )
+
+        connection.execute(
+            """delete from context_memory_items
+               where conversation_id=? and source_id=? and content_hash<>?""",
+            (conversation_id, item["source_id"], item["content_hash"]),
+        )
+        connection.execute(
+            """insert into context_memory_items(
+                 id,conversation_id,source_id,source_kind,content,content_hash,
+                 trust,catalog_revision,created_at
+               ) values(?,?,?,?,?,?,?,?,?)
+               on conflict(conversation_id,source_id,content_hash) do update set
+                 source_kind=excluded.source_kind,
+                 trust=excluded.trust,
+                 catalog_revision=excluded.catalog_revision,
+                 created_at=excluded.created_at""",
+            (
+                f"ctx-{uuid.uuid4().hex[:12]}",
+                conversation_id,
+                item["source_id"],
+                item["source_kind"],
+                item["content"],
+                item["content_hash"],
+                item["trust"],
+                item["catalog_revision"],
+                item["created_at"],
+            ),
+        )
+        return str(item["source_id"]), str(item["content_hash"])
+
+    @staticmethod
+    def _prune_context_items(
+        connection: sqlite3.Connection,
+        conversation_id: str,
+    ) -> None:
+        connection.execute(
+            """delete from context_memory_items
+               where conversation_id=?
+                 and id not in (
+                   select id from context_memory_items
+                   where conversation_id=?
+                   order by created_at desc limit ?
+                 )""",
+            (conversation_id, conversation_id, CONTEXT_MEMORY_ITEM_BUDGET),
+        )
 
     def remember_context_item(
         self,
@@ -354,85 +471,80 @@ class WorkspaceStore:
     ) -> dict[str, Any]:
         """Persist one canonical derived observation per immutable source id."""
 
-        value = str(content or "").replace("\x00", "").strip()
-        if not value:
-            return {"stored": False, "reason": "empty"}
-        value = value[:12_000]
-        source_id = str(source_id or "").strip()
-        source_kind = str(source_kind or "derived").strip()
-        if not source_id:
-            return {"stored": False, "reason": "missing_source"}
-
-        content_hash = blake2b(
-            " ".join(value.split()).lower().encode("utf-8", "ignore"),
-            digest_size=12,
-        ).hexdigest()
-        revision = str(catalog_revision or "")
-        now = time.time() if created_at is None else float(created_at)
-        memory_id = f"ctx-{uuid.uuid4().hex[:12]}"
+        item = self._prepare_context_item(
+            source_id=source_id,
+            source_kind=source_kind,
+            content=content,
+            trust=trust,
+            catalog_revision=catalog_revision,
+            created_at=created_at,
+        )
+        if item is None:
+            reason = "missing_source" if not str(source_id or "").strip() else "empty"
+            return {"stored": False, "reason": reason}
 
         with self._lock, self._connect() as connection:
-            existing_source = connection.execute(
-                """select * from context_memory_items
-                   where conversation_id=? and source_id=?
-                   order by created_at desc limit 1""",
-                (conversation_id, source_id),
-            ).fetchone()
-            if (
-                existing_source is not None
-                and float(existing_source["created_at"]) > now
-            ):
-                return {"stored": True, **dict(existing_source)}
-
-            # Re-perception of the same immutable attachment replaces older
-            # different descriptions. Exact replay may refresh metadata, but an
-            # older recovery record can never roll a newer source observation back.
-            connection.execute(
-                """delete from context_memory_items
-                   where conversation_id=? and source_id=? and content_hash<>?""",
-                (conversation_id, source_id, content_hash),
+            # Serialize the read-before-write freshness check across independent
+            # worker processes. RESERVED locking still permits concurrent readers.
+            connection.execute("begin immediate")
+            stored_source, stored_hash = self._upsert_context_item(
+                connection,
+                conversation_id,
+                item,
             )
-            connection.execute(
-                """insert into context_memory_items(
-                     id,conversation_id,source_id,source_kind,content,content_hash,
-                     trust,catalog_revision,created_at
-                   ) values(?,?,?,?,?,?,?,?,?)
-                   on conflict(conversation_id,source_id,content_hash) do update set
-                     source_kind=excluded.source_kind,
-                     trust=excluded.trust,
-                     catalog_revision=excluded.catalog_revision,
-                     created_at=excluded.created_at""",
-                (
-                    memory_id,
-                    conversation_id,
-                    source_id,
-                    source_kind,
-                    value,
-                    content_hash,
-                    max(0.0, min(1.0, float(trust))),
-                    revision,
-                    now,
-                ),
-            )
-            connection.execute(
-                """delete from context_memory_items
-                   where conversation_id=?
-                     and id not in (
-                       select id from context_memory_items
-                       where conversation_id=?
-                       order by created_at desc limit ?
-                     )""",
-                (conversation_id, conversation_id, CONTEXT_MEMORY_ITEM_BUDGET),
-            )
+            self._prune_context_items(connection, conversation_id)
             row = connection.execute(
                 """select * from context_memory_items
                    where conversation_id=? and source_id=? and content_hash=?""",
-                (conversation_id, source_id, content_hash),
+                (conversation_id, stored_source, stored_hash),
             ).fetchone()
 
         if row is None:
             return {"stored": False, "reason": "retention"}
         return {"stored": True, **dict(row)}
+
+    def remember_context_items(
+        self,
+        conversation_id: str,
+        items: list[dict[str, Any]],
+        *,
+        catalog_revision: str | None = None,
+        created_at: float | None = None,
+    ) -> None:
+        """Persist multiple source observations in one SQLite transaction."""
+
+        prepared: list[dict[str, Any]] = []
+        for row in items:
+            if not isinstance(row, dict):
+                continue
+            item = self._prepare_context_item(
+                source_id=str(row.get("source_id") or ""),
+                source_kind=str(row.get("source_kind") or "derived"),
+                content=str(row.get("content") or ""),
+                trust=float(row.get("trust", 0.52) or 0.52),
+                catalog_revision=(
+                    str(row.get("catalog_revision"))
+                    if row.get("catalog_revision") is not None
+                    else catalog_revision
+                ),
+                created_at=(
+                    float(row.get("created_at"))
+                    if row.get("created_at") is not None
+                    else created_at
+                ),
+            )
+            if item is not None:
+                prepared.append(item)
+
+        if not prepared:
+            return
+
+        with self._lock, self._connect() as connection:
+            connection.execute("begin immediate")
+            for item in prepared:
+                self._upsert_context_item(connection, conversation_id, item)
+            self._prune_context_items(connection, conversation_id)
+
 
     def add_message(
         self,

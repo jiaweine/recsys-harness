@@ -1,0 +1,64 @@
+name: Context Memory Performance
+
+on:
+  push:
+    branches:
+      - perf/context-memory-hotpath
+  pull_request:
+    paths:
+      - "lingjing_harness/algorithms/text.py"
+      - "lingjing_harness/runtime/context_memory.py"
+      - "lingjing_harness/store.py"
+      - "lingjing_harness/api.py"
+      - "lingjing_harness/api_core.py"
+      - "scripts/context_memory_benchmark.py"
+      - ".github/workflows/context-memory-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: 50k
+            messages: 50000
+            repeats: 40
+            workers: 8
+            max_snapshot_p95_ms: 100
+            max_build_warm_p95_ms: 25
+            min_concurrent_rps: 50
+          - label: 200k
+            messages: 200000
+            repeats: 24
+            workers: 16
+            max_snapshot_p95_ms: 400
+            max_build_warm_p95_ms: 30
+            min_concurrent_rps: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e . --no-deps
+      - name: Long context benchmark (${{ matrix.label }})
+        run: |
+          python scripts/context_memory_benchmark.py \
+            --messages ${{ matrix.messages }} \
+            --memory-items 256 \
+            --repeats ${{ matrix.repeats }} \
+            --workers ${{ matrix.workers }} \
+            --max-snapshot-p95-ms ${{ matrix.max_snapshot_p95_ms }} \
+            --max-build-warm-p95-ms ${{ matrix.max_build_warm_p95_ms }} \
+            --min-concurrent-rps ${{ matrix.min_concurrent_rps }} \
+            --max-batch-p50-ms 25

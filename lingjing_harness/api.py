@@ -319,26 +319,12 @@ async def _recover_on_startup_hardened() -> None:
             result["attachments"] = copy.deepcopy(snapshot.get("attachments") or [])
             result["catalog_revision"] = saved_revision
             _renew_execution_fence(run_id)
-            for memory_record in snapshot.get("context_memory_records") or []:
-                if not isinstance(memory_record, dict):
-                    continue
-                _core.store.remember_context_item(
-                    cid,
-                    source_id=str(memory_record.get("source_id") or ""),
-                    source_kind=str(
-                        memory_record.get("source_kind") or "attachment_observation"
-                    ),
-                    content=str(memory_record.get("content") or ""),
-                    trust=float(memory_record.get("trust", 0.52) or 0.52),
-                    catalog_revision=str(
-                        memory_record.get("catalog_revision") or saved_revision
-                    ),
-                    created_at=float(
-                        memory_record.get("created_at")
-                        or snapshot.get("created_at")
-                        or time.time()
-                    ),
-                )
+            _core.store.remember_context_items(
+                cid,
+                list(snapshot.get("context_memory_records") or []),
+                catalog_revision=saved_revision,
+                created_at=float(snapshot.get("created_at") or time.time()),
+            )
             _renew_execution_fence(run_id)
             existing = _core.store.assistant_for_job(cid, run_id)
             if existing is None:
