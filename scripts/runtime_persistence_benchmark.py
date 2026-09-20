@@ -206,6 +206,10 @@ def run_benchmark(
             ],
             max(5, repeats // 5),
         )
+        heartbeat_batch = _timed(
+            lambda: store.renew_run_leases(heartbeat_run_ids, owner, 30),
+            max(5, repeats // 5),
+        )
 
         return {
             "event_count": event_count,
@@ -225,6 +229,7 @@ def run_benchmark(
             "assistant_lookup_miss": _summary(assistant_lookup_miss),
             "list_plus_active": _summary(list_plus_active),
             "heartbeat_individual_100": _summary(heartbeat_individual),
+            "heartbeat_batch_100": _summary(heartbeat_batch),
         }
 
 
