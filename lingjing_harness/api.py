@@ -185,6 +185,16 @@ def _should_persist_run(row: dict[str, Any]) -> tuple[bool, tuple[Any, ...]]:
     return False, current
 
 
+def _mark_run_persisted(row: dict[str, Any]) -> None:
+    run_id = str(row.get("run_id") or "")
+    if not run_id:
+        return
+    if str(row.get("status") or "") in _core.ACTIVE_RUN_STATUSES:
+        _PERSIST_META[run_id] = _persistence_meta(row)
+    else:
+        _PERSIST_META.pop(run_id, None)
+
+
 def _coalesced_persist_run(row: dict[str, Any]) -> None:
     should_persist, current_meta = _should_persist_run(row)
     if not should_persist:
@@ -467,6 +477,7 @@ async def _execute_with_run_lease_fence(
 # entered.  api_core resolves these globals at runtime, so existing route and
 # integration monkeypatch behavior stays intact.
 _core._persist_run = _coalesced_persist_run
+_core._mark_run_persisted = _mark_run_persisted
 _core._recover_on_startup = _recover_on_startup_hardened
 _core._execute = _execute_with_run_lease_fence
 _core._compact_run_snapshot = _compact_run_snapshot
