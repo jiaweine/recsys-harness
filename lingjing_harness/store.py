@@ -645,13 +645,25 @@ class WorkspaceStore:
 
     def ensure_workspace_revision(self, revision: str) -> str:
         revision = str(revision or "").strip()
+        # Steady-state readiness is read-only. Upgrade to a write transaction
+        # only for the one-time empty-revision initialization, then recheck under
+        # BEGIN IMMEDIATE so competing workers cannot publish different initial
+        # revisions.
+        with self._connect() as connection:
+            row = connection.execute(
+                "select catalog_revision from workspace_state where id=1"
+            ).fetchone()
+        current = str(row["catalog_revision"] or "") if row else ""
+        if current or not revision:
+            return current
+
         with self._lock, self._connect() as connection:
             connection.execute("begin immediate")
             row = connection.execute(
                 "select catalog_revision from workspace_state where id=1"
             ).fetchone()
             current = str(row["catalog_revision"] or "") if row else ""
-            if not current and revision:
+            if not current:
                 connection.execute(
                     "update workspace_state set catalog_revision=?,updated_at=? where id=1",
                     (revision, time.time()),
