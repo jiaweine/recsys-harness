@@ -522,49 +522,33 @@ class AgentMemory(_CoreAgentMemory):
         return retired
 
     def stats(self, catalog_key: str | None = None) -> dict[str, Any]:
-        # /api/status reads these counters together. Reuse one connection for the
-        # base and credit tables, and fold positive-vs-negative arm counts into a
-        # single aggregate scan instead of opening a second connection and issuing
-        # independent COUNT queries.
+        result = dict(super().stats(catalog_key))
         with self._lock:
             conn = self._connect()
             try:
-                result = dict(self._base_stats(conn, catalog_key))
                 if catalog_key:
-                    credit = conn.execute(
-                        """
-                        select
-                          count(*) as credit_arms,
-                          coalesce(sum(case when negative>positive then 1 else 0 end),0)
-                            as negative_arms
-                        from agent_strategy_credit
-                        where catalog_key=?
-                        """,
+                    credit_arms = conn.execute(
+                        "select count(*) from agent_strategy_credit where catalog_key=?",
                         (catalog_key,),
-                    ).fetchone()
+                    ).fetchone()[0]
+                    negative_arms = conn.execute(
+                        "select count(*) from agent_strategy_credit where catalog_key=? and negative>positive",
+                        (catalog_key,),
+                    ).fetchone()[0]
                     credit_events = conn.execute(
                         "select count(*) from agent_strategy_credit_events where catalog_key=?",
                         (catalog_key,),
                     ).fetchone()[0]
                 else:
-                    credit = conn.execute(
-                        """
-                        select
-                          count(*) as credit_arms,
-                          coalesce(sum(case when negative>positive then 1 else 0 end),0)
-                            as negative_arms
-                        from agent_strategy_credit
-                        """
-                    ).fetchone()
-                    credit_events = conn.execute(
-                        "select count(*) from agent_strategy_credit_events"
-                    ).fetchone()[0]
+                    credit_arms = conn.execute("select count(*) from agent_strategy_credit").fetchone()[0]
+                    negative_arms = conn.execute("select count(*) from agent_strategy_credit where negative>positive").fetchone()[0]
+                    credit_events = conn.execute("select count(*) from agent_strategy_credit_events").fetchone()[0]
             finally:
                 self._close(conn)
         result.update(
             {
-                "credit_arms": int(credit["credit_arms"]),
-                "negative_credit_arms": int(credit["negative_arms"]),
+                "credit_arms": int(credit_arms),
+                "negative_credit_arms": int(negative_arms),
                 "credit_events": int(credit_events),
             }
         )
