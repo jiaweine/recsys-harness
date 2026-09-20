@@ -7,7 +7,9 @@ on:
   pull_request:
     paths:
       - "lingjing_harness/api_core.py"
+      - "lingjing_harness/runtime/memory.py"
       - "tests/test_status_catalog_summary_cache.py"
+      - "tests/test_memory_stats_cache.py"
       - "scripts/status_read_benchmark.py"
       - ".github/workflows/status-read-performance.yml"
   workflow_dispatch:
@@ -27,7 +29,7 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: pip install -e . --no-deps
-      - name: Benchmark revision-cached status aggregation
+      - name: Benchmark revision and data-version cached status aggregation
         run: |
           for pass in 1 2 3; do
             echo "status read performance pass $pass/3"
@@ -41,6 +43,8 @@ jobs:
               --credit-events 100000 \
               --repeats 24 \
               --max-warm-summary-p50-ms 0.05 \
-              --max-cached-combined-p50-ms 30 \
-              --min-combined-speedup 1.5
+              --max-warm-memory-p50-ms 1.0 \
+              --max-cached-combined-p50-ms 3.0 \
+              --min-memory-speedup 8.0 \
+              --min-combined-speedup 8.0
           done

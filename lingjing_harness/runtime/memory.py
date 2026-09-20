@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from hashlib import blake2b
 import json
+import sqlite3
 import time
 from typing import Any
 
@@ -99,6 +100,16 @@ class AgentMemory(_CoreAgentMemory):
                 conn.commit()
             finally:
                 self._close(conn)
+
+        # File-backed status reads keep one read-only connection open solely for
+        # SQLite's per-connection data_version counter. Any commit from another
+        # connection (including this process's normal write connections or a
+        # different worker) changes the counter and invalidates the exact stats
+        # snapshot below. In-memory databases share one connection, whose
+        # data_version does not advance for its own commits, so they deliberately
+        # bypass this cache.
+        self._stats_cache: tuple[str | None, int, dict[str, Any]] | None = None
+        self._stats_watch_connection: sqlite3.Connection | None = None
 
     def remember_strategy(
         self,
@@ -521,7 +532,30 @@ class AgentMemory(_CoreAgentMemory):
             )
         return retired
 
-    def stats(self, catalog_key: str | None = None) -> dict[str, Any]:
+    def _stats_data_version(self) -> int | None:
+        """Return an exact cross-connection invalidation token for file-backed memory."""
+
+        if self.path == ":memory:":
+            return None
+        conn = self._stats_watch_connection
+        if conn is None:
+            conn = sqlite3.connect(self.path, check_same_thread=False)
+            conn.execute("pragma query_only=1")
+            self._stats_watch_connection = conn
+        try:
+            row = conn.execute("pragma data_version").fetchone()
+        except sqlite3.Error:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
+            conn = sqlite3.connect(self.path, check_same_thread=False)
+            conn.execute("pragma query_only=1")
+            self._stats_watch_connection = conn
+            row = conn.execute("pragma data_version").fetchone()
+        return int(row[0]) if row else 0
+
+    def _stats_uncached(self, catalog_key: str | None = None) -> dict[str, Any]:
         result = dict(super().stats(catalog_key))
         with self._lock:
             conn = self._connect()
@@ -553,6 +587,38 @@ class AgentMemory(_CoreAgentMemory):
             }
         )
         return result
+
+    def stats(self, catalog_key: str | None = None) -> dict[str, Any]:
+        """Return live durable counters without rescanning unchanged tables."""
+
+        if self.path == ":memory:":
+            return self._stats_uncached(catalog_key)
+
+        cache_key = str(catalog_key) if catalog_key is not None else None
+        with self._lock:
+            for _ in range(2):
+                version = self._stats_data_version()
+                cached = self._stats_cache
+                if (
+                    version is not None
+                    and cached is not None
+                    and cached[0] == cache_key
+                    and cached[1] == version
+                ):
+                    return dict(cached[2])
+
+                result = self._stats_uncached(catalog_key)
+                after = self._stats_data_version()
+                if version is not None and after == version:
+                    snapshot = dict(result)
+                    self._stats_cache = (cache_key, after, snapshot)
+                    return dict(snapshot)
+
+            # A different process committed during both sampling attempts. Keep
+            # serving the live uncached behavior instead of pinning a potentially
+            # mixed-version snapshot; the next quiet read can establish a cache.
+            self._stats_cache = None
+            return self._stats_uncached(catalog_key)
 
 
 __all__ = ["AgentMemory", "catalog_fingerprint"]
