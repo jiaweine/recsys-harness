@@ -358,6 +358,49 @@ def test_older_recovery_write_cannot_roll_back_newer_source_observation(tmp_path
     assert snapshot["memory_items"][0]["catalog_revision"] == "rev-new"
 
 
+def test_batch_context_memory_write_keeps_canonical_source_semantics(tmp_path):
+    store = WorkspaceStore(tmp_path / "workspace.db")
+    cid = store.create_conversation("batch-memory", "audit")["id"]
+
+    store.remember_context_items(
+        cid,
+        [
+            {
+                "source_id": "att-a",
+                "source_kind": "attachment_text",
+                "content": "old A",
+                "catalog_revision": "rev-1",
+                "created_at": 10.0,
+            },
+            {
+                "source_id": "att-b",
+                "source_kind": "attachment_text",
+                "content": "B",
+                "catalog_revision": "rev-1",
+                "created_at": 11.0,
+            },
+            {
+                "source_id": "att-a",
+                "source_kind": "attachment_text",
+                "content": "new A",
+                "catalog_revision": "rev-2",
+                "created_at": 20.0,
+            },
+        ],
+    )
+
+    snapshot = store.context_snapshot(
+        cid,
+        query_terms=context_query_terms("A B"),
+        recent_limit=8,
+        memory_limit=16,
+    )
+    rows = {row["source_id"]: row for row in snapshot["memory_items"]}
+    assert set(rows) == {"att-a", "att-b"}
+    assert rows["att-a"]["content"] == "new A"
+    assert rows["att-a"]["catalog_revision"] == "rev-2"
+
+
 def test_context_memory_store_has_bounded_retention(tmp_path, monkeypatch):
     monkeypatch.setattr(store_module, "CONTEXT_MEMORY_ITEM_BUDGET", 3)
     store = WorkspaceStore(tmp_path / "workspace.db")
