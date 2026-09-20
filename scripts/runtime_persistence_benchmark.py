@@ -118,6 +118,18 @@ def run_benchmark(
             ),
             repeats,
         )
+        save_fenced = _timed(
+            lambda: store.save_run_fenced(
+                run_id,
+                cid,
+                snapshot["goal"],
+                "running",
+                snapshot,
+                owner_id=owner,
+                lease_seconds=30,
+            ),
+            repeats,
+        )
         run_status = _timed(lambda: store.run_status(run_id), repeats * 4)
         full_run = _timed(lambda: store.get_run(run_id), repeats)
 
@@ -158,6 +170,7 @@ def run_benchmark(
             ),
             "save_plus_renew": _summary(save_plus_renew),
             "save_only": _summary(save_only),
+            "save_fenced": _summary(save_fenced),
             "run_status": _summary(run_status),
             "get_run": _summary(full_run),
             "deepcopy_run": _summary(deep_copy),
