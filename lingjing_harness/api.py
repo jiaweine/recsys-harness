@@ -482,7 +482,6 @@ _core._recover_on_startup = _recover_on_startup_hardened
 _core._execute = _execute_with_run_lease_fence
 _core._compact_run_snapshot = _compact_run_snapshot
 _core._inflate_checkpoint = _inflate_checkpoint
-_core._clone_run_value = _clone_run_value
 _core._PERSIST_META = _PERSIST_META
 _core._RunLeaseLost = _RunLeaseLost
 
@@ -509,6 +508,9 @@ def _clone_run_value(value: Any) -> Any:
     if value is None or value_type in {str, int, float, bool}:
         return value
     return copy.deepcopy(value)
+
+
+_core._clone_run_value = _clone_run_value
 
 
 def _snapshot_in_memory_run(run_id: str) -> dict[str, Any] | None:
