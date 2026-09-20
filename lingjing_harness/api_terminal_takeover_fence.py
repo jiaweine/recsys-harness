@@ -114,6 +114,14 @@ def install_terminal_takeover_execution_fence(core: Any) -> None:
             persist_meta.pop(run_id, None)
 
     def snapshot_in_memory_run(run_id: str) -> dict[str, Any] | None:
+        canonical = getattr(core, "_snapshot_in_memory_run", None)
+        if callable(canonical):
+            return canonical(run_id)
+
+        # Compatibility fallback for integrations that install this fence against
+        # api_core directly without the stable api wrapper's canonical snapshot
+        # reader. Production uses the shared helper so takeover reads and ordinary
+        # active polling cannot drift onto different clone implementations.
         for attempt in range(_RUN_SNAPSHOT_RETRIES):
             with core.RUN_LOCK:
                 row = core.RUNS.get(run_id)
