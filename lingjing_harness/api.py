@@ -558,6 +558,9 @@ def _snapshot_in_memory_run(run_id: str) -> dict[str, Any] | None:
         raise HTTPException(404, "执行任务不存在") from exc
 
 
+_core._snapshot_in_memory_run = _snapshot_in_memory_run
+
+
 def _coherent_get_run(run_id: str):
     """Never expose a terminal status with an older in-memory payload.
 
