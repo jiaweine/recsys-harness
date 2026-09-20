@@ -1,0 +1,38 @@
+name: Context Memory Performance
+
+on:
+  push:
+    branches:
+      - perf/context-memory-hotpath
+  pull_request:
+    paths:
+      - "lingjing_harness/runtime/context_memory.py"
+      - "lingjing_harness/store.py"
+      - "scripts/context_memory_benchmark.py"
+      - ".github/workflows/context-memory-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e . --no-deps
+      - name: Long context benchmark
+        run: |
+          python scripts/context_memory_benchmark.py \
+            --messages 50000 \
+            --memory-items 256 \
+            --repeats 40 \
+            --workers 8
