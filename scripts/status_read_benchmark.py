@@ -278,6 +278,9 @@ def main() -> None:
     parser.add_argument("--credit-arms", type=int, default=10_000)
     parser.add_argument("--credit-events", type=int, default=100_000)
     parser.add_argument("--repeats", type=int, default=24)
+    parser.add_argument("--max-warm-summary-p50-ms", type=float, default=0.0)
+    parser.add_argument("--max-cached-combined-p50-ms", type=float, default=0.0)
+    parser.add_argument("--min-combined-speedup", type=float, default=0.0)
     args = parser.parse_args()
 
     result = run_benchmark(
@@ -290,7 +293,28 @@ def main() -> None:
         credit_events=max(1_000, args.credit_events),
         repeats=max(5, args.repeats),
     )
+    uncached = float(result["combined_status_data"]["p50_ms"])
+    cached = float(result["combined_status_cached_catalog"]["p50_ms"])
+    warm = float(result["catalog_summary_cached_warm"]["p50_ms"])
+    speedup = uncached / max(cached, 1e-9)
+    result["combined_speedup_p50"] = round(speedup, 2)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+
+    failures: list[str] = []
+    if args.max_warm_summary_p50_ms > 0 and warm > args.max_warm_summary_p50_ms:
+        failures.append(
+            f"warm catalog summary p50={warm} > {args.max_warm_summary_p50_ms}"
+        )
+    if args.max_cached_combined_p50_ms > 0 and cached > args.max_cached_combined_p50_ms:
+        failures.append(
+            f"cached combined p50={cached} > {args.max_cached_combined_p50_ms}"
+        )
+    if args.min_combined_speedup > 0 and speedup < args.min_combined_speedup:
+        failures.append(
+            f"combined speedup={speedup:.2f} < {args.min_combined_speedup}"
+        )
+    if failures:
+        raise SystemExit("status read performance guardrail failed: " + "; ".join(failures))
 
 
 if __name__ == "__main__":
