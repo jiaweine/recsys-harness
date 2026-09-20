@@ -19,6 +19,9 @@ _PAYLOAD_FILE = re.compile(
 def install_attachment_integrity_boundary(core: Any) -> None:
     """Keep attachment payload bytes distinct from metadata and recover crash orphans."""
 
+    full_gc_interval_seconds = 3600.0
+    gc_state = {"last_full_gc_at": 0.0}
+
     def gc_attachments(now: float | None = None) -> dict[str, int]:
         now = time.time() if now is None else float(now)
         referenced: set[str] = set()
@@ -127,6 +130,7 @@ def install_attachment_integrity_boundary(core: Any) -> None:
                             break
 
             final_total = core._attachment_storage_bytes()
+            gc_state["last_full_gc_at"] = now
             return {
                 "bytes": final_total,
                 "removed": removed,
@@ -135,6 +139,28 @@ def install_attachment_integrity_boundary(core: Any) -> None:
                 # quota enforcement and do not depend on an eager history count.
                 "referenced": len(referenced),
             }
+
+    def attachment_storage_for_upload(
+        incoming_bytes: int,
+        *,
+        now: float | None = None,
+    ) -> dict[str, int]:
+        """Keep normal uploads filesystem-cheap while preserving GC safety fences."""
+
+        now = time.time() if now is None else float(now)
+        incoming_bytes = max(0, int(incoming_bytes))
+        with core.ATTACHMENT_LOCK:
+            total = core._attachment_storage_bytes()
+            full_gc_due = (
+                gc_state["last_full_gc_at"] <= 0.0
+                or now - gc_state["last_full_gc_at"] >= full_gc_interval_seconds
+            )
+            capacity_pressure = (
+                total + incoming_bytes > core.MAX_ATTACHMENT_STORAGE_BYTES
+            )
+            if full_gc_due or capacity_pressure:
+                return gc_attachments(now=now)
+            return {"bytes": total, "removed": 0, "referenced": 0}
 
     async def upload_attachment(file: UploadFile = File(...)):
         raw = await file.read(core.MAX_ATTACHMENT_BYTES + 1)
@@ -170,7 +196,7 @@ def install_attachment_integrity_boundary(core: Any) -> None:
         meta_path = core._attachment_meta_path(attachment_id)
 
         with core.ATTACHMENT_LOCK:
-            storage = gc_attachments()
+            storage = attachment_storage_for_upload(len(raw))
             if storage["bytes"] + len(raw) > core.MAX_ATTACHMENT_STORAGE_BYTES:
                 raise HTTPException(507, "附件存储空间已达到上限，请清理未使用附件后再试")
 
@@ -192,6 +218,9 @@ def install_attachment_integrity_boundary(core: Any) -> None:
             core.app.router.routes.remove(route)
 
     core._gc_attachments = gc_attachments
+    core._attachment_storage_for_upload = attachment_storage_for_upload
+    core._ATTACHMENT_GC_STATE = gc_state
+    core.ATTACHMENT_GC_INTERVAL_SECONDS = full_gc_interval_seconds
     core.upload_attachment = upload_attachment
     core.app.add_api_route(
         "/api/attachments",
