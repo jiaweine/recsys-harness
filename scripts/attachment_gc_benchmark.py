@@ -145,6 +145,8 @@ def main() -> None:
     parser.add_argument("--messages", type=int, default=100_000)
     parser.add_argument("--attachments", type=int, default=500)
     parser.add_argument("--repeats", type=int, default=8)
+    parser.add_argument("--max-upload-fast-p50-ms", type=float, default=0.0)
+    parser.add_argument("--min-full-gc-speedup", type=float, default=0.0)
     args = parser.parse_args()
 
     with tempfile.TemporaryDirectory(prefix="xushu-attachment-gc-") as directory:
@@ -155,7 +157,24 @@ def main() -> None:
             attachments=max(10, args.attachments),
             repeats=max(3, args.repeats),
         )
+
+    fast_p50 = float(result["upload_fast_check"]["p50_ms"])
+    full_p50 = float(result["full_gc"]["p50_ms"])
+    speedup = full_p50 / max(fast_p50, 1e-9)
+    result["upload_vs_full_speedup_p50"] = round(speedup, 2)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+
+    failures: list[str] = []
+    if args.max_upload_fast_p50_ms > 0 and fast_p50 > args.max_upload_fast_p50_ms:
+        failures.append(
+            f"upload fast-check p50={fast_p50} > {args.max_upload_fast_p50_ms}"
+        )
+    if args.min_full_gc_speedup > 0 and speedup < args.min_full_gc_speedup:
+        failures.append(
+            f"full/fast speedup={speedup:.2f} < {args.min_full_gc_speedup}"
+        )
+    if failures:
+        raise SystemExit("attachment GC performance guardrail failed: " + "; ".join(failures))
 
 
 if __name__ == "__main__":
