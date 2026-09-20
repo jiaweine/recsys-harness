@@ -5,6 +5,7 @@ import sqlite3
 import time
 
 import lingjing_harness.api as api_module
+import lingjing_harness.store as store_module
 from lingjing_harness.store import WorkspaceStore
 
 
@@ -149,3 +150,29 @@ def test_run_status_cache_observes_external_sqlite_commit(tmp_path):
         connection.commit()
 
     assert store.run_status(run_id) == "cancel_requested"
+
+
+def test_run_status_watcher_reopens_after_process_identity_changes(tmp_path, monkeypatch):
+    store = WorkspaceStore(tmp_path / "run-status-fork.db")
+    conversation = store.create_conversation("fork watcher", "search")
+    run_id = "job-status-fork"
+    running = _running_row(run_id, conversation["id"])
+    assert store.reserve_run(
+        run_id,
+        conversation["id"],
+        running["goal"],
+        running,
+        owner_id="worker-a",
+        lease_seconds=30,
+    )
+
+    assert store.run_status(run_id) == "running"
+    original_watcher = store._read_watch_connection
+    original_pid = store._read_watch_pid
+    assert original_watcher is not None
+
+    monkeypatch.setattr(store_module.os, "getpid", lambda: original_pid + 1000)
+    assert store.run_status(run_id) == "running"
+    assert store._read_watch_connection is not None
+    assert store._read_watch_connection is not original_watcher
+    assert store._read_watch_pid == original_pid + 1000
