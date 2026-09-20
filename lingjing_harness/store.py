@@ -641,15 +641,19 @@ class WorkspaceStore:
         # and re-reads the row before mutating it.
         with self._connect() as connection:
             observed = connection.execute(
-                "select window_start,count from rate_limits where scope_key=?",
+                "select window_start,count,updated_at from rate_limits where scope_key=?",
                 (scope_key,),
             ).fetchone()
         if observed is not None:
             observed_start = float(observed["window_start"])
+            observed_updated = float(observed["updated_at"])
+            denial_touch_interval = min(window_seconds, 60.0)
             if (
                 observed_start <= now
                 and now - observed_start < window_seconds
                 and int(observed["count"]) >= limit
+                and observed_updated <= now
+                and now - observed_updated < denial_touch_interval
             ):
                 return False
 
@@ -676,6 +680,10 @@ class WorkspaceStore:
                 )
                 allowed = True
             elif int(row["count"]) >= limit:
+                connection.execute(
+                    "update rate_limits set updated_at=? where scope_key=?",
+                    (now, scope_key),
+                )
                 allowed = False
             else:
                 connection.execute(
