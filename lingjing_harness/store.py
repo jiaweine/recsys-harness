@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from hashlib import blake2b
 import sqlite3
 import threading
@@ -20,6 +21,7 @@ class WorkspaceStore:
         self._lock = threading.RLock()
         self._read_watch_lock = threading.Lock()
         self._read_watch_connection: sqlite3.Connection | None = None
+        self._read_watch_pid = os.getpid()
         self._run_status_cache: dict[str, tuple[int, str | None]] = {}
         self._init()
 
@@ -1166,6 +1168,15 @@ class WorkspaceStore:
         if self.path == ":memory:":
             return None
         connection = self._read_watch_connection
+        current_pid = os.getpid()
+        if connection is not None and self._read_watch_pid != current_pid:
+            try:
+                connection.close()
+            except sqlite3.Error:
+                pass
+            connection = None
+            self._read_watch_connection = None
+            self._run_status_cache.clear()
         if connection is None:
             connection = sqlite3.connect(
                 self.path,
@@ -1175,6 +1186,7 @@ class WorkspaceStore:
             connection.execute("pragma busy_timeout=10000")
             connection.execute("pragma query_only=1")
             self._read_watch_connection = connection
+            self._read_watch_pid = current_pid
             self._run_status_cache.clear()
         try:
             row = connection.execute("pragma data_version").fetchone()
@@ -1193,6 +1205,7 @@ class WorkspaceStore:
             connection.execute("pragma busy_timeout=10000")
             connection.execute("pragma query_only=1")
             self._read_watch_connection = connection
+            self._read_watch_pid = current_pid
             row = connection.execute("pragma data_version").fetchone()
         return int(row[0]) if row else 0
 
