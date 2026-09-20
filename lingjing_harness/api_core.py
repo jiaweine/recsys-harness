@@ -99,8 +99,7 @@ async def _lease_heartbeat_loop() -> None:
                 run_id for run_id, row in RUNS.items()
                 if row.get("status") in ACTIVE_RUN_STATUSES
             ]
-        for run_id in active_ids:
-            store.renew_run_lease(run_id, WORKER_ID, RUN_LEASE_SECONDS)
+        store.renew_run_leases(active_ids, WORKER_ID, RUN_LEASE_SECONDS)
 
 
 @asynccontextmanager
