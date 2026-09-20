@@ -195,18 +195,20 @@ def run_stress(
         # Cross-process writes intentionally race older and newer observations for
         # the same source. The latest timestamp must win regardless of commit order.
         rounds = 8
-        stamps = (10.0, 50.0, 20.0, 80.0, 30.0, 70.0, 40.0, 60.0)
+        race_base = float(messages + 10_000_000)
+        stamp_offsets = (10.0, 50.0, 20.0, 80.0, 30.0, 70.0, 40.0, 60.0)
         with ProcessPoolExecutor(max_workers=processes) as executor:
             for round_id in range(rounds):
+                round_base = race_base + round_id * 1_000.0
                 futures = [
                     executor.submit(
                         _process_same_source_write,
                         database,
                         cid,
                         round_id,
-                        timestamp,
+                        round_base + offset,
                     )
-                    for timestamp in stamps
+                    for offset in stamp_offsets
                 ]
                 for future in futures:
                     future.result()
@@ -231,7 +233,11 @@ def run_stress(
             )
         for round_id in range(rounds):
             row = race_rows[f"race-source-{round_id}"]
-            if float(row["created_at"]) != 80.0 or row["content"] != "value-80":
+            expected = race_base + round_id * 1_000.0 + 80.0
+            if (
+                float(row["created_at"]) != expected
+                or row["content"] != f"value-{int(expected)}"
+            ):
                 raise AssertionError(
                     f"temporal rollback detected for race-source-{round_id}: {dict(row)}"
                 )
