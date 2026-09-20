@@ -332,6 +332,10 @@ def _prune_runs_locked() -> None:
         RUNS.pop(row["run_id"], None)
 
 
+def _mark_run_persisted(row: dict[str, Any]) -> None:
+    """Record an already-durable initial snapshot without another write."""
+
+
 def _persist_run(row: dict[str, Any]) -> None:
     persisted_status = store.save_run(
         row["run_id"],
@@ -863,12 +867,8 @@ async def _recover_on_startup() -> None:
 @app.post("/api/conversations/{cid}/messages")
 async def add_message(cid: str, req: ChatRequest):
     _require_workspace_ready()
-    if store.workspace_update_active():
-        raise HTTPException(409, "工作区数据正在更新，请稍后再开始任务")
-    try:
-        store.get_conversation(cid)
-    except KeyError as exc:
-        raise HTTPException(404, "任务不存在") from exc
+    if not store.conversation_exists(cid):
+        raise HTTPException(404, "任务不存在")
 
     attachment_rows = _resolve_attachments(req.attachments)
     public_attachments = [_public_attachment(row) for row in attachment_rows]
@@ -891,26 +891,29 @@ async def add_message(cid: str, req: ChatRequest):
         "created_at": now,
         "updated_at": now,
     }
-    if not store.reserve_run(
-        run_id, cid, req.content, row,
-        owner_id=WORKER_ID, lease_seconds=RUN_LEASE_SECONDS,
-    ):
+    start_status, user, persisted = store.start_run_with_user_message(
+        run_id,
+        cid,
+        req.content,
+        row,
+        {"attachments": public_attachments, "allow_network": req.allow_network},
+        owner_id=WORKER_ID,
+        lease_seconds=RUN_LEASE_SECONDS,
+    )
+    if start_status == "missing":
+        raise HTTPException(404, "任务不存在")
+    if start_status == "workspace_busy":
+        raise HTTPException(409, "工作区数据正在更新，请稍后再开始任务")
+    if start_status == "active":
         raise HTTPException(409, "当前任务仍在执行，请等待完成或切换到另一个任务")
-    try:
-        user = store.add_message(
-            cid,
-            "user",
-            req.content,
-            {"attachments": public_attachments, "allow_network": req.allow_network},
-        )
-    except Exception:
-        store.delete_run(run_id, owner_id=WORKER_ID)
-        raise
-    row["user_message_id"] = user["id"]
+    if start_status != "accepted" or user is None or persisted is None:
+        raise RuntimeError(f"任务启动事务返回未知状态: {start_status}")
+
+    row = persisted
     with RUN_LOCK:
         _prune_runs_locked()
         RUNS[run_id] = row
-        _persist_run(row)
+        _mark_run_persisted(row)
     asyncio.create_task(
         _execute(
             run_id,

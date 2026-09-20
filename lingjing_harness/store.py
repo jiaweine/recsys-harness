@@ -181,6 +181,14 @@ class WorkspaceStore:
             "updated_at": now,
         }
 
+    def conversation_exists(self, conversation_id: str) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                "select 1 from conversations where id=? limit 1",
+                (conversation_id,),
+            ).fetchone()
+        return row is not None
+
     def get_conversation(self, conversation_id: str) -> dict[str, Any]:
         # This is a composite read across two short-lived SQLite connections. Keep
         # the process-local writer mutex for the full read so this store instance's
@@ -546,6 +554,59 @@ class WorkspaceStore:
             self._prune_context_items(connection, conversation_id)
 
 
+    def _insert_message_transaction(
+        self,
+        connection: sqlite3.Connection,
+        conversation_id: str,
+        role: str,
+        content: str,
+        payload: dict[str, Any],
+        *,
+        created_at: float,
+        message_id: str | None = None,
+    ) -> dict[str, Any]:
+        message_id = message_id or f"msg-{uuid.uuid4().hex[:12]}"
+        if role == "user":
+            has_message = connection.execute(
+                "select 1 from messages where conversation_id=? limit 1",
+                (conversation_id,),
+            ).fetchone()
+            if has_message is None:
+                connection.execute(
+                    "update conversations set title=?,updated_at=? where id=?",
+                    (content.replace("\n", " ")[:34], created_at, conversation_id),
+                )
+            else:
+                connection.execute(
+                    "update conversations set updated_at=? where id=?",
+                    (created_at, conversation_id),
+                )
+        else:
+            connection.execute(
+                "update conversations set updated_at=? where id=?",
+                (created_at, conversation_id),
+            )
+        connection.execute(
+            "insert into messages(id,conversation_id,role,content,payload,created_at) "
+            "values(?,?,?,?,?,?)",
+            (
+                message_id,
+                conversation_id,
+                role,
+                content,
+                json.dumps(payload, ensure_ascii=False),
+                created_at,
+            ),
+        )
+        return {
+            "id": message_id,
+            "conversation_id": conversation_id,
+            "role": role,
+            "content": content,
+            "payload": payload,
+            "created_at": created_at,
+        }
+
     def add_message(
         self,
         conversation_id: str,
@@ -553,49 +614,17 @@ class WorkspaceStore:
         content: str,
         payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        message_id = f"msg-{uuid.uuid4().hex[:12]}"
         now = time.time()
-        payload = payload or {}
+        message_payload = payload or {}
         with self._lock, self._connect() as connection:
-            if role == "user":
-                count = connection.execute(
-                    "select count(*) from messages where conversation_id=?",
-                    (conversation_id,),
-                ).fetchone()[0]
-                if count == 0:
-                    connection.execute(
-                        "update conversations set title=?,updated_at=? where id=?",
-                        (content.replace("\n", " ")[:34], now, conversation_id),
-                    )
-                else:
-                    connection.execute(
-                        "update conversations set updated_at=? where id=?",
-                        (now, conversation_id),
-                    )
-            else:
-                connection.execute(
-                    "update conversations set updated_at=? where id=?",
-                    (now, conversation_id),
-                )
-            connection.execute(
-                "insert into messages values(?,?,?,?,?,?)",
-                (
-                    message_id,
-                    conversation_id,
-                    role,
-                    content,
-                    json.dumps(payload, ensure_ascii=False),
-                    now,
-                ),
+            return self._insert_message_transaction(
+                connection,
+                conversation_id,
+                role,
+                content,
+                message_payload,
+                created_at=now,
             )
-        return {
-            "id": message_id,
-            "conversation_id": conversation_id,
-            "role": role,
-            "content": content,
-            "payload": payload,
-            "created_at": now,
-        }
 
     def consume_rate_limit(
         self, scope_key: str, *, limit: int, window_seconds: float, now: float | None = None
@@ -831,6 +860,95 @@ class WorkspaceStore:
             )
             connection.commit()
         return True
+
+    def start_run_with_user_message(
+        self,
+        run_id: str,
+        conversation_id: str,
+        goal: str,
+        snapshot: dict[str, Any],
+        message_payload: dict[str, Any],
+        *,
+        owner_id: str,
+        lease_seconds: float,
+    ) -> tuple[str, dict[str, Any] | None, dict[str, Any] | None]:
+        """Atomically reserve one run and persist its initiating user message."""
+
+        now = time.time()
+        created = min(float(snapshot.get("created_at") or now), now)
+        lease_until = now + max(1.0, float(lease_seconds))
+        with self._lock, self._connect() as connection:
+            connection.execute("begin immediate")
+            workspace = self._workspace_update_row(connection, now)
+            if (
+                workspace
+                and workspace.get("update_owner")
+                and float(workspace.get("update_until") or 0.0) > now
+            ):
+                connection.rollback()
+                return "workspace_busy", None, None
+
+            conversation = connection.execute(
+                "select 1 from conversations where id=? limit 1",
+                (conversation_id,),
+            ).fetchone()
+            if conversation is None:
+                connection.rollback()
+                return "missing", None, None
+
+            active = connection.execute(
+                """
+                select run_id from runs
+                where conversation_id=?
+                  and status in ('running','interrupted','cancel_requested')
+                limit 1
+                """,
+                (conversation_id,),
+            ).fetchone()
+            if active:
+                connection.rollback()
+                return "active", None, None
+
+            message = self._insert_message_transaction(
+                connection,
+                conversation_id,
+                "user",
+                goal,
+                dict(message_payload),
+                created_at=now,
+            )
+            payload = dict(snapshot)
+            payload.update(
+                {
+                    "run_id": run_id,
+                    "conversation_id": conversation_id,
+                    "goal": goal,
+                    "status": "running",
+                    "user_message_id": message["id"],
+                    "created_at": created,
+                    "updated_at": now,
+                }
+            )
+            connection.execute(
+                """
+                insert into runs(
+                  run_id,conversation_id,goal,status,snapshot,created_at,updated_at,owner_id,lease_until
+                ) values(?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    run_id,
+                    conversation_id,
+                    goal,
+                    "running",
+                    json.dumps(payload, ensure_ascii=False),
+                    created,
+                    now,
+                    owner_id,
+                    lease_until,
+                ),
+            )
+            connection.commit()
+        return "accepted", message, payload
 
     def delete_run(self, run_id: str, *, owner_id: str | None = None) -> None:
         with self._lock, self._connect() as connection:
