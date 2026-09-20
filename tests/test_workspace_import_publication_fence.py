@@ -133,3 +133,64 @@ def test_run_reservation_rechecks_publication_fence_inside_write_transaction(
     assert errors == []
     assert reserved == [False]
     assert writer.workspace_publication_pending("rev-b") is True
+
+
+class _NoWriteReadConnection:
+    def __init__(self, connection):
+        self._connection = connection
+
+    def execute(self, sql, *args, **kwargs):
+        if sql.strip().lower().startswith("begin immediate"):
+            raise AssertionError("steady readiness check must not acquire a write transaction")
+        return self._connection.execute(sql, *args, **kwargs)
+
+    def __enter__(self):
+        self._connection.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return self._connection.__exit__(exc_type, exc, tb)
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+
+def test_steady_workspace_readiness_checks_do_not_take_write_lock(tmp_path, monkeypatch):
+    store = WorkspaceStore(tmp_path / "workspace-readiness-read-only.db")
+    assert store.ensure_workspace_revision("rev-a") == "rev-a"
+
+    original_connect = store._connect
+
+    def read_only_connect():
+        return _NoWriteReadConnection(original_connect())
+
+    monkeypatch.setattr(store, "_connect", read_only_connect)
+
+    assert store.ensure_workspace_revision("rev-a") == "rev-a"
+    assert store.workspace_update_active() is False
+
+
+def test_workspace_update_active_repairs_future_clock_only_when_needed(tmp_path):
+    store = WorkspaceStore(tmp_path / "workspace-readiness-future-clock.db")
+    assert store.ensure_workspace_revision("rev-a") == "rev-a"
+    assert store.begin_workspace_update("writer-a", lease_seconds=30, now=100.0)
+
+    with store._lock, store._connect() as connection:  # noqa: SLF001 - skew fixture
+        connection.execute(
+            """
+            update workspace_state
+            set updated_at=?,update_until=?
+            where id=1
+            """,
+            (1000.0, 1030.0),
+        )
+        connection.commit()
+
+    assert store.workspace_update_active(now=200.0) is True
+
+    with store._connect() as connection:
+        row = connection.execute(
+            "select updated_at,update_until from workspace_state where id=1"
+        ).fetchone()
+    assert float(row["updated_at"]) == 200.0
+    assert float(row["update_until"]) == 230.0
