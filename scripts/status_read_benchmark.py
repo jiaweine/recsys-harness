@@ -210,6 +210,14 @@ def run_benchmark(
     )
     expected_catalog = catalog.summary()
 
+    import lingjing_harness.api_core as api_core
+
+    api_core.catalog = catalog
+    api_core.CATALOG_REVISION = "status-benchmark-revision"
+    api_core._CATALOG_SUMMARY_CACHE = None
+    cold_cached_catalog = _timed(api_core._catalog_summary, 1)
+    warm_cached_catalog = _timed(api_core._catalog_summary, repeats)
+
     with tempfile.TemporaryDirectory(prefix="xushu-status-read-") as directory:
         memory = AgentMemory(Path(directory) / "agent-memory.db")
         key = "catalog-benchmark"
@@ -229,6 +237,10 @@ def run_benchmark(
             lambda: (catalog.summary(), memory.stats(key)),
             repeats,
         )
+        combined_cached_catalog = _timed(
+            lambda: (api_core._catalog_summary(), memory.stats(key)),
+            repeats,
+        )
 
         if catalog.summary() != expected_catalog:
             raise AssertionError("catalog summary changed during benchmark")
@@ -244,8 +256,11 @@ def run_benchmark(
             "credit_arms": credit_arms,
             "credit_events": credit_events,
             "catalog_summary": _summary(catalog_samples),
+            "catalog_summary_cached_cold": _summary(cold_cached_catalog),
+            "catalog_summary_cached_warm": _summary(warm_cached_catalog),
             "memory_stats": _summary(memory_samples),
             "combined_status_data": _summary(combined_samples),
+            "combined_status_cached_catalog": _summary(combined_cached_catalog),
             "catalog_result": expected_catalog,
             "memory_result": expected_memory,
         }
