@@ -1,0 +1,43 @@
+name: Rate Limit Performance
+
+on:
+  push:
+    branches:
+      - perf/rate-limit-deny-hotpath
+  pull_request:
+    paths:
+      - "lingjing_harness/store.py"
+      - "lingjing_harness/rate_limit_maintenance.py"
+      - "tests/test_rate_limit_maintenance.py"
+      - "scripts/rate_limit_benchmark.py"
+      - ".github/workflows/rate-limit-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Benchmark saturated rate limiting
+        run: |
+          for pass in 1 2 3; do
+            echo "rate-limit performance pass $pass/3"
+            python scripts/rate_limit_benchmark.py \
+              --sequential 300 \
+              --concurrent-ops 240 \
+              --workers 8 \
+              --max-sequential-p50-ms 0.6 \
+              --max-concurrent-p95-ms 25 \
+              --min-concurrent-rps 1200 \
+              --max-fresh-allowed-p50-ms 3.0
+          done
