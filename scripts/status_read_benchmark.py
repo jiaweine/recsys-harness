@@ -232,9 +232,10 @@ def run_benchmark(
         expected_memory = memory.stats(key)
 
         catalog_samples = _timed(catalog.summary, repeats)
+        memory_uncached_samples = _timed(lambda: memory._stats_uncached(key), repeats)
         memory_samples = _timed(lambda: memory.stats(key), repeats)
         combined_samples = _timed(
-            lambda: (catalog.summary(), memory.stats(key)),
+            lambda: (catalog.summary(), memory._stats_uncached(key)),
             repeats,
         )
         combined_cached_catalog = _timed(
@@ -258,6 +259,7 @@ def run_benchmark(
             "catalog_summary": _summary(catalog_samples),
             "catalog_summary_cached_cold": _summary(cold_cached_catalog),
             "catalog_summary_cached_warm": _summary(warm_cached_catalog),
+            "memory_stats_uncached": _summary(memory_uncached_samples),
             "memory_stats": _summary(memory_samples),
             "combined_status_data": _summary(combined_samples),
             "combined_status_cached_catalog": _summary(combined_cached_catalog),
@@ -279,7 +281,9 @@ def main() -> None:
     parser.add_argument("--credit-events", type=int, default=100_000)
     parser.add_argument("--repeats", type=int, default=24)
     parser.add_argument("--max-warm-summary-p50-ms", type=float, default=0.0)
+    parser.add_argument("--max-warm-memory-p50-ms", type=float, default=0.0)
     parser.add_argument("--max-cached-combined-p50-ms", type=float, default=0.0)
+    parser.add_argument("--min-memory-speedup", type=float, default=0.0)
     parser.add_argument("--min-combined-speedup", type=float, default=0.0)
     args = parser.parse_args()
 
@@ -296,7 +300,11 @@ def main() -> None:
     uncached = float(result["combined_status_data"]["p50_ms"])
     cached = float(result["combined_status_cached_catalog"]["p50_ms"])
     warm = float(result["catalog_summary_cached_warm"]["p50_ms"])
+    memory_uncached = float(result["memory_stats_uncached"]["p50_ms"])
+    memory_cached = float(result["memory_stats"]["p50_ms"])
+    memory_speedup = memory_uncached / max(memory_cached, 1e-9)
     speedup = uncached / max(cached, 1e-9)
+    result["memory_speedup_p50"] = round(memory_speedup, 2)
     result["combined_speedup_p50"] = round(speedup, 2)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
 
@@ -305,9 +313,17 @@ def main() -> None:
         failures.append(
             f"warm catalog summary p50={warm} > {args.max_warm_summary_p50_ms}"
         )
+    if args.max_warm_memory_p50_ms > 0 and memory_cached > args.max_warm_memory_p50_ms:
+        failures.append(
+            f"warm memory stats p50={memory_cached} > {args.max_warm_memory_p50_ms}"
+        )
     if args.max_cached_combined_p50_ms > 0 and cached > args.max_cached_combined_p50_ms:
         failures.append(
             f"cached combined p50={cached} > {args.max_cached_combined_p50_ms}"
+        )
+    if args.min_memory_speedup > 0 and memory_speedup < args.min_memory_speedup:
+        failures.append(
+            f"memory speedup={memory_speedup:.2f} < {args.min_memory_speedup}"
         )
     if args.min_combined_speedup > 0 and speedup < args.min_combined_speedup:
         failures.append(
