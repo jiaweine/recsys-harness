@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable
 
+import lingjing_harness.runtime.context_memory as context_memory_module
 from lingjing_harness.runtime.context_memory import (
     build_governed_context,
     context_query_terms,
@@ -187,6 +188,7 @@ def run_benchmark(
             ),
             max(20, repeats),
         )
+        build_warm_samples = build_samples[1:] or build_samples
 
         concurrency_repeats = max(4, repeats // max(1, workers))
         started = time.perf_counter()
@@ -258,12 +260,20 @@ def run_benchmark(
             "database_bytes": os.path.getsize(database),
             "context_snapshot": _summary(read_samples),
             "context_build": _summary(build_samples),
+            "context_build_cold_ms": round(build_samples[0], 3),
+            "context_build_warm": _summary(build_warm_samples),
             "memory_write": _summary(write_samples),
             "memory_batch_8": _summary(batch_samples),
             "concurrent_reads": {
                 "count": concurrent_reads,
                 "elapsed_ms": round(concurrent_elapsed * 1000.0, 3),
                 "reads_per_second": round(concurrent_reads / concurrent_elapsed, 1),
+            },
+            "vector_cache": {
+                "maxsize": context_memory_module._context_vector.cache_info().maxsize,
+                "currsize": context_memory_module._context_vector.cache_info().currsize,
+                "hits": context_memory_module._context_vector.cache_info().hits,
+                "misses": context_memory_module._context_vector.cache_info().misses,
             },
         }
 
@@ -276,6 +286,10 @@ def main() -> None:
     parser.add_argument("--memory-items", type=int, default=256)
     parser.add_argument("--repeats", type=int, default=40)
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--max-snapshot-p95-ms", type=float, default=0.0)
+    parser.add_argument("--max-build-warm-p95-ms", type=float, default=0.0)
+    parser.add_argument("--min-concurrent-rps", type=float, default=0.0)
+    parser.add_argument("--max-batch-p50-ms", type=float, default=0.0)
     args = parser.parse_args()
     result = run_benchmark(
         messages=max(1_000, args.messages),
@@ -284,6 +298,44 @@ def main() -> None:
         workers=max(1, args.workers),
     )
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+
+    checks = [
+        (
+            args.max_snapshot_p95_ms <= 0
+            or result["context_snapshot"]["p95_ms"] <= args.max_snapshot_p95_ms,
+            "context_snapshot p95",
+            result["context_snapshot"]["p95_ms"],
+            args.max_snapshot_p95_ms,
+        ),
+        (
+            args.max_build_warm_p95_ms <= 0
+            or result["context_build_warm"]["p95_ms"] <= args.max_build_warm_p95_ms,
+            "context_build warm p95",
+            result["context_build_warm"]["p95_ms"],
+            args.max_build_warm_p95_ms,
+        ),
+        (
+            args.min_concurrent_rps <= 0
+            or result["concurrent_reads"]["reads_per_second"] >= args.min_concurrent_rps,
+            "concurrent reads/s",
+            result["concurrent_reads"]["reads_per_second"],
+            args.min_concurrent_rps,
+        ),
+        (
+            args.max_batch_p50_ms <= 0
+            or result["memory_batch_8"]["p50_ms"] <= args.max_batch_p50_ms,
+            "batch-8 p50",
+            result["memory_batch_8"]["p50_ms"],
+            args.max_batch_p50_ms,
+        ),
+    ]
+    failures = [
+        f"{name}: observed={observed} threshold={threshold}"
+        for ok, name, observed, threshold in checks
+        if not ok
+    ]
+    if failures:
+        raise SystemExit("performance guardrail failed: " + "; ".join(failures))
 
 
 if __name__ == "__main__":
