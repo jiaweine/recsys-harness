@@ -1,0 +1,40 @@
+name: Attachment GC Performance
+
+on:
+  push:
+    branches:
+      - perf/attachment-gc-hotpath-v2
+  pull_request:
+    paths:
+      - "lingjing_harness/api_attachment_integrity.py"
+      - "tests/test_api_attachment_payload_integrity.py"
+      - "scripts/attachment_gc_benchmark.py"
+      - ".github/workflows/attachment-gc-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Benchmark scheduled attachment GC
+        run: |
+          for pass in 1 2 3; do
+            echo "attachment GC performance pass $pass/3"
+            python scripts/attachment_gc_benchmark.py \
+              --messages 100000 \
+              --attachments 500 \
+              --repeats 8 \
+              --max-upload-fast-p50-ms 20 \
+              --min-full-gc-speedup 3.0
+          done
