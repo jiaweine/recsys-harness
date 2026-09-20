@@ -777,16 +777,7 @@ async def _execute(
         if expected_revision != current_revision:
             raise RuntimeError("工作区数据已更新，本次旧数据执行结果未写入当前工作区")
         result["catalog_revision"] = expected_revision
-        for memory_record in memory_records:
-            store.remember_context_item(
-                cid,
-                source_id=memory_record["source_id"],
-                source_kind=memory_record["source_kind"],
-                content=memory_record["content"],
-                trust=memory_record["trust"],
-                catalog_revision=memory_record.get("catalog_revision"),
-                created_at=memory_record.get("created_at"),
-            )
+        store.remember_context_items(cid, memory_records)
         message = store.add_message(cid, "assistant", result["answer"], result)
         with RUN_LOCK:
             row = RUNS.get(run_id)
