@@ -424,18 +424,49 @@ class AgentMemory:
                 return row["config"]
         return None
 
+    @staticmethod
+    def _base_stats(
+        conn: sqlite3.Connection,
+        catalog_key: str | None,
+    ) -> dict[str, int]:
+        if catalog_key:
+            episodes = conn.execute(
+                "select count(*) from agent_episodes where catalog_key=?",
+                (catalog_key,),
+            ).fetchone()[0]
+            skills = conn.execute(
+                """
+                select
+                  count(*) as skills,
+                  coalesce(sum(case when status='active' then 1 else 0 end),0) as active
+                from agent_skills
+                where catalog_key=? and status in ('trusted','active')
+                """,
+                (catalog_key,),
+            ).fetchone()
+        else:
+            episodes = conn.execute(
+                "select count(*) from agent_episodes"
+            ).fetchone()[0]
+            skills = conn.execute(
+                """
+                select
+                  count(*) as skills,
+                  coalesce(sum(case when status='active' then 1 else 0 end),0) as active
+                from agent_skills
+                where status in ('trusted','active')
+                """
+            ).fetchone()
+        return {
+            "episodes": int(episodes),
+            "skills": int(skills["skills"]),
+            "active_strategies": int(skills["active"]),
+        }
+
     def stats(self, catalog_key: str | None = None) -> dict[str, Any]:
         with self._lock:
             conn = self._connect()
             try:
-                if catalog_key:
-                    episodes = conn.execute("select count(*) from agent_episodes where catalog_key=?", (catalog_key,)).fetchone()[0]
-                    skills = conn.execute("select count(*) from agent_skills where catalog_key=? and status in ('trusted','active')", (catalog_key,)).fetchone()[0]
-                    active = conn.execute("select count(*) from agent_skills where catalog_key=? and status='active'", (catalog_key,)).fetchone()[0]
-                else:
-                    episodes = conn.execute("select count(*) from agent_episodes").fetchone()[0]
-                    skills = conn.execute("select count(*) from agent_skills where status in ('trusted','active')").fetchone()[0]
-                    active = conn.execute("select count(*) from agent_skills where status='active'").fetchone()[0]
+                return self._base_stats(conn, catalog_key)
             finally:
                 self._close(conn)
-        return {"episodes": episodes, "skills": skills, "active_strategies": active}
