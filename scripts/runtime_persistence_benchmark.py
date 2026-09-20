@@ -241,19 +241,67 @@ def main() -> None:
     parser.add_argument("--event-count", type=int, default=80)
     parser.add_argument("--event-payload-bytes", type=int, default=1024)
     parser.add_argument("--messages", type=int, default=10000)
+    parser.add_argument("--max-save-fenced-p50-ms", type=float, default=0.0)
+    parser.add_argument("--max-assistant-lookup-miss-p50-ms", type=float, default=0.0)
+    parser.add_argument("--max-heartbeat-batch-p50-ms", type=float, default=0.0)
+    parser.add_argument("--min-heartbeat-speedup", type=float, default=0.0)
     args = parser.parse_args()
-    print(
-        json.dumps(
-            run_benchmark(
-                repeats=max(10, args.repeats),
-                event_count=max(1, args.event_count),
-                event_payload_bytes=max(0, args.event_payload_bytes),
-                messages=max(1000, args.messages),
-            ),
-            ensure_ascii=False,
-            sort_keys=True,
-        )
+    result = run_benchmark(
+        repeats=max(10, args.repeats),
+        event_count=max(1, args.event_count),
+        event_payload_bytes=max(0, args.event_payload_bytes),
+        messages=max(1000, args.messages),
     )
+    heartbeat_batch_p50 = float(result["heartbeat_batch_100"]["p50_ms"])
+    heartbeat_individual_p50 = float(result["heartbeat_individual_100"]["p50_ms"])
+    heartbeat_speedup = (
+        heartbeat_individual_p50 / max(heartbeat_batch_p50, 1e-9)
+    )
+    result["heartbeat_speedup_p50"] = round(heartbeat_speedup, 2)
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+
+    failures: list[str] = []
+    checks = [
+        (
+            args.max_save_fenced_p50_ms <= 0
+            or result["save_fenced"]["p50_ms"] <= args.max_save_fenced_p50_ms,
+            "save_fenced p50",
+            result["save_fenced"]["p50_ms"],
+            args.max_save_fenced_p50_ms,
+        ),
+        (
+            args.max_assistant_lookup_miss_p50_ms <= 0
+            or result["assistant_lookup_miss"]["p50_ms"]
+            <= args.max_assistant_lookup_miss_p50_ms,
+            "assistant lookup miss p50",
+            result["assistant_lookup_miss"]["p50_ms"],
+            args.max_assistant_lookup_miss_p50_ms,
+        ),
+        (
+            args.max_heartbeat_batch_p50_ms <= 0
+            or heartbeat_batch_p50 <= args.max_heartbeat_batch_p50_ms,
+            "heartbeat batch p50",
+            heartbeat_batch_p50,
+            args.max_heartbeat_batch_p50_ms,
+        ),
+        (
+            args.min_heartbeat_speedup <= 0
+            or heartbeat_speedup >= args.min_heartbeat_speedup,
+            "heartbeat p50 speedup",
+            round(heartbeat_speedup, 2),
+            args.min_heartbeat_speedup,
+        ),
+    ]
+    for ok, name, observed, threshold in checks:
+        if not ok:
+            failures.append(
+                f"{name}: observed={observed} threshold={threshold}"
+            )
+    if failures:
+        raise SystemExit(
+            "runtime persistence performance guardrail failed: "
+            + "; ".join(failures)
+        )
 
 
 if __name__ == "__main__":
