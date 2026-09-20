@@ -37,6 +37,8 @@ class WorkspaceStore:
           content text not null,payload text not null,created_at real not null
         );
         create index if not exists idx_messages_conversation on messages(conversation_id,created_at);
+        create index if not exists idx_messages_user_created
+          on messages(conversation_id,created_at) where role='user';
         create table if not exists context_memory_items(
           id text primary key,
           conversation_id text not null,
@@ -212,17 +214,17 @@ class WorkspaceStore:
         return f"%{escaped}%"
 
     @staticmethod
-    def _lexical_match_sql(terms: list[str], column: str = "content") -> tuple[str, str, list[str]]:
-        """Build escaped LIKE clauses plus a deterministic relevance expression."""
+    def _lexical_match_sql(
+        terms: list[str],
+        column: str = "content",
+    ) -> tuple[str, list[str]]:
+        """Build escaped LIKE clauses for a high-recall first-stage scan."""
 
         patterns = [WorkspaceStore._like_pattern(term) for term in terms]
-        clauses = " or ".join(f"{column} like ? escape '\\'" for _ in patterns)
-        weights = list(range(len(patterns), 0, -1))
-        score = " + ".join(
-            f"(case when {column} like ? escape '\\' then {weight} else 0 end)"
-            for weight in weights
+        clauses = " or ".join(
+            f"{column} like ? escape '\\'" for _ in patterns
         )
-        return clauses, score, patterns
+        return clauses, patterns
 
     def context_snapshot(
         self,
@@ -286,25 +288,48 @@ class WorkspaceStore:
                     message_rows[str(row["id"])] = row
 
             if terms and search_limit:
-                clauses, score_sql, patterns = self._lexical_match_sql(terms)
-                params = [*patterns, conversation_id]
+                # Probe the strongest lexical term independently so a rare old
+                # technical anchor cannot be crowded out by many recent matches on
+                # broader terms. The broader query is recency-ordered and stops as
+                # soon as enough candidates are found; semantic/trust ranking lives
+                # in runtime.context_memory rather than being recomputed in SQLite.
+                priority_pattern = self._like_pattern(terms[0])
+                params = [conversation_id]
                 excluded_sql = ""
                 if excluded:
                     excluded_sql = " and id<>?"
                     params.append(excluded)
-                params.extend(patterns)
-                params.append(search_limit)
-                matches = connection.execute(
-                    f"""select id,conversation_id,role,content,created_at,
-                               ({score_sql}) as lexical_score
+                params.extend((priority_pattern, min(16, search_limit)))
+                priority_matches = connection.execute(
+                    f"""select id,conversation_id,role,content,created_at
                         from messages
                         where conversation_id=? and role='user'{excluded_sql}
-                          and ({clauses})
-                        order by lexical_score desc, created_at desc limit ?""",
+                          and content like ? escape '\\'
+                        order by created_at desc limit ?""",
                     tuple(params),
                 ).fetchall()
-                for row in matches:
+                for row in priority_matches:
                     message_rows[str(row["id"])] = row
+
+                if len(terms) > 1:
+                    clauses, patterns = self._lexical_match_sql(terms)
+                    params = [conversation_id]
+                    excluded_sql = ""
+                    if excluded:
+                        excluded_sql = " and id<>?"
+                        params.append(excluded)
+                    params.extend(patterns)
+                    params.append(search_limit)
+                    matches = connection.execute(
+                        f"""select id,conversation_id,role,content,created_at
+                            from messages
+                            where conversation_id=? and role='user'{excluded_sql}
+                              and ({clauses})
+                            order by created_at desc limit ?""",
+                        tuple(params),
+                    ).fetchall()
+                    for row in matches:
+                        message_rows[str(row["id"])] = row
 
             if memory_limit:
                 recent_memory = connection.execute(
@@ -317,13 +342,12 @@ class WorkspaceStore:
                     memory_rows[str(row["id"])] = row
 
                 if terms:
-                    clauses, score_sql, patterns = self._lexical_match_sql(terms)
+                    clauses, patterns = self._lexical_match_sql(terms)
                     match_memory = connection.execute(
-                        f"""select *, ({score_sql}) as lexical_score
-                            from context_memory_items
+                        f"""select * from context_memory_items
                             where conversation_id=? and ({clauses})
-                            order by lexical_score desc, created_at desc limit ?""",
-                        (*patterns, conversation_id, *patterns, memory_limit),
+                            order by created_at desc limit ?""",
+                        (conversation_id, *patterns, memory_limit),
                     ).fetchall()
                     for row in match_memory:
                         memory_rows[str(row["id"])] = row
@@ -331,7 +355,6 @@ class WorkspaceStore:
         messages: list[dict[str, Any]] = []
         for row in sorted(message_rows.values(), key=lambda value: float(value["created_at"])):
             data = dict(row)
-            data.pop("lexical_score", None)
             messages.append(data)
 
         memories: list[dict[str, Any]] = []
