@@ -62,11 +62,25 @@ class PerceptionEngine:
                 status = "degraded"
                 observation = "附件已接收，但本次感知时间预算已用尽；不要猜测未完成解析的内容。"
             elif mime.startswith(TEXT_MIME_PREFIXES) or mime in TEXT_MIMES:
-                observation = self._read_text(path)
+                try:
+                    observation = self._read_text(path)
+                    if not observation:
+                        status = "degraded"
+                        observation = "附件已接收，但没有可用于感知的文本内容。"
+                except FileNotFoundError:
+                    status = "degraded"
+                    observation = "附件元信息存在，但文件内容不可用；不要猜测附件内容。"
             elif mime.startswith("image/"):
                 if self.configured:
                     try:
-                        observation = self._describe_image(path, mime, timeout=min(self.timeout, max(0.5, remaining)))
+                        observation = self._describe_image(
+                            path,
+                            mime,
+                            timeout=min(self.timeout, max(0.5, remaining)),
+                        )
+                        if not observation:
+                            status = "degraded"
+                            observation = "图像已接收，但视觉感知没有返回可用观察；不要猜测图像内容。"
                     except Exception as exc:
                         status = "degraded"
                         observation = f"图像已接收，但视觉感知调用失败：{type(exc).__name__}。不要猜测图像内容。"
@@ -87,6 +101,15 @@ class PerceptionEngine:
                 "kind": "image" if mime.startswith("image/") else "document",
                 "perception": status,
             }
+            # Private fields are consumed by the API context-memory boundary before
+            # the public attachment metadata is persisted.  Keeping the observation
+            # tied to the immutable attachment id lets later turns retrieve the
+            # original perception without trusting a generated assistant summary.
+            if observation and status == "ready":
+                public["_memory_text"] = observation
+                public["_memory_kind"] = (
+                    "attachment_image" if mime.startswith("image/") else "attachment_text"
+                )
             observations.append(public)
             if observation:
                 chunks.append(f"附件：{name}\n观察：{observation}")
@@ -101,7 +124,7 @@ class PerceptionEngine:
     @staticmethod
     def _read_text(path: Path) -> str:
         if not path.exists() or not path.is_file():
-            return "附件文件不存在。"
+            raise FileNotFoundError(path)
         with path.open("rb") as handle:
             raw = handle.read(96_000)
         try:
@@ -109,7 +132,7 @@ class PerceptionEngine:
         except UnicodeDecodeError:
             text = raw.decode("utf-8", errors="replace")
         text = " ".join(text.split())
-        return text[:7000] or "附件没有可读文本。"
+        return text[:7000]
 
     def _describe_image(self, path: Path, mime: str, *, timeout: float | None = None) -> str:
         if not path.exists() or not path.is_file():
@@ -157,4 +180,4 @@ class PerceptionEngine:
                 else:
                     parts.append(str(row))
             content = " ".join(parts)
-        return str(content).strip() or "视觉感知没有返回可用观察。"
+        return str(content).strip()

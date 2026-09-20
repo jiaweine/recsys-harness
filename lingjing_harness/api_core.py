@@ -29,6 +29,7 @@ from .sample_data import build_sample_catalog
 from .store import WorkspaceStore
 from .runtime import AgentHarness, AgentMemory, RunCancelled, catalog_fingerprint
 from .runtime.perception import PerceptionEngine
+from .runtime.context_memory import build_governed_context, context_query_terms
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = Path(frontend_package.__file__).resolve().parent
@@ -645,6 +646,7 @@ async def _execute(
     allow_network: bool = False,
     resume: dict[str, Any] | None = None,
     catalog_revision: str | None = None,
+    current_message_id: str | None = None,
 ) -> None:
     loop = asyncio.get_running_loop()
 
@@ -672,20 +674,67 @@ async def _execute(
             return True
         return False
 
+    # Build a bounded candidate pool before model/tool execution.  The store
+    # retrieves a recent tail + project anchors + lexical matches, while the
+    # runtime ledger performs trust-aware ranking and context budgeting.
+    query_terms = context_query_terms(text)
+    context_snapshot = store.context_snapshot(
+        cid,
+        query_terms=query_terms,
+        exclude_message_id=current_message_id,
+    )
+
     attachment_rows = _resolve_attachments(list(attachment_ids or []), strict=False)
-    context = ""
-    observed_attachments: list[dict[str, Any]] = []
+    raw_observations: list[dict[str, Any]] = []
     if attachment_rows:
-        context, observed_attachments = await _perceive_with_cancel(attachment_rows, should_stop)
-        for row in observed_attachments:
-            row["url"] = f"/api/attachments/{row['id']}"
-        with RUN_LOCK:
-            current = RUNS.get(run_id)
-            if current is not None:
-                current["attachments"] = observed_attachments
-                current["multimodal_context"] = context
-                current["updated_at"] = time.time()
-                _persist_run(current)
+        _, raw_observations = await _perceive_with_cancel(
+            attachment_rows,
+            should_stop,
+        )
+
+    memory_records: list[dict[str, Any]] = []
+    observed_attachments: list[dict[str, Any]] = []
+    for row in raw_observations:
+        private_text = str(row.get("_memory_text") or "").strip()
+        if private_text:
+            memory_records.append(
+                {
+                    "source_id": str(row.get("id") or ""),
+                    "source_kind": str(row.get("_memory_kind") or "attachment_observation"),
+                    "content": f"{row.get('name') or '附件'}\n{private_text}",
+                    "trust": 0.55,
+                    "catalog_revision": str(catalog_revision or ""),
+                    "created_at": time.time(),
+                }
+            )
+        public = {key: value for key, value in row.items() if not str(key).startswith("_")}
+        public["url"] = f"/api/attachments/{public['id']}"
+        observed_attachments.append(public)
+
+    # A retried run may already have persisted its own attachment observation in
+    # the tiny crash window after execution.  Exclude current immutable sources so
+    # recovery cannot inject the same observation twice.
+    current_attachment_ids = {str(row.get("id") or "") for row in attachment_rows}
+    historical_multimodal = [
+        row
+        for row in context_snapshot.get("memory_items", [])
+        if str(row.get("source_id") or "") not in current_attachment_ids
+    ]
+    context, context_report = build_governed_context(
+        text,
+        messages=context_snapshot.get("messages", []),
+        multimodal_items=historical_multimodal,
+        current_multimodal_items=memory_records,
+        catalog_revision=catalog_revision,
+    )
+
+    with RUN_LOCK:
+        current = RUNS.get(run_id)
+        if current is not None:
+            current["attachments"] = observed_attachments
+            current["context_memory_records"] = memory_records
+            current["updated_at"] = time.time()
+            _persist_run(current)
 
     def sink(event: dict[str, Any]):
         with RUN_LOCK:
@@ -712,6 +761,7 @@ async def _execute(
             lambda: runner.run(
                 text,
                 context=context,
+                context_report=context_report,
                 allow_network=allow_network,
                 sink=sink,
                 checkpoint_sink=checkpoint,
@@ -727,6 +777,16 @@ async def _execute(
         if expected_revision != current_revision:
             raise RuntimeError("工作区数据已更新，本次旧数据执行结果未写入当前工作区")
         result["catalog_revision"] = expected_revision
+        for memory_record in memory_records:
+            store.remember_context_item(
+                cid,
+                source_id=memory_record["source_id"],
+                source_kind=memory_record["source_kind"],
+                content=memory_record["content"],
+                trust=memory_record["trust"],
+                catalog_revision=memory_record.get("catalog_revision"),
+                created_at=memory_record.get("created_at"),
+            )
         message = store.add_message(cid, "assistant", result["answer"], result)
         with RUN_LOCK:
             row = RUNS.get(run_id)
@@ -799,6 +859,7 @@ async def _recover_on_startup() -> None:
                 allow_network=bool(snapshot.get("allow_network")),
                 resume=snapshot.get("checkpoint"),
                 catalog_revision=saved_revision,
+                current_message_id=snapshot.get("user_message_id"),
             )
         )
 
@@ -849,9 +910,11 @@ async def add_message(cid: str, req: ChatRequest):
     except Exception:
         store.delete_run(run_id, owner_id=WORKER_ID)
         raise
+    row["user_message_id"] = user["id"]
     with RUN_LOCK:
         _prune_runs_locked()
         RUNS[run_id] = row
+        _persist_run(row)
     asyncio.create_task(
         _execute(
             run_id,
@@ -861,6 +924,7 @@ async def add_message(cid: str, req: ChatRequest):
             attachment_ids=list(req.attachments),
             allow_network=req.allow_network,
             catalog_revision=revision,
+            current_message_id=user["id"],
         )
     )
     return {"status": "accepted", "run_id": run_id, "message": user}

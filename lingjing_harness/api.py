@@ -120,7 +120,7 @@ def _persistence_meta(row: dict[str, Any]) -> tuple[Any, ...]:
         row.get("result") is not None,
         row.get("message") is not None,
         len(attachments) if isinstance(attachments, list) else 0,
-        bool(row.get("multimodal_context")),
+        bool(row.get("context_memory_records")),
         bool(row.get("error")),
     )
 
@@ -142,6 +142,7 @@ def _compact_run_snapshot(row: dict[str, Any]) -> dict[str, Any]:
         snapshot["checkpoint"] = compact
     if str(snapshot.get("status") or "") not in _core.ACTIVE_RUN_STATUSES:
         snapshot.pop("checkpoint", None)
+        snapshot.pop("context_memory_records", None)
     return snapshot
 
 
@@ -318,6 +319,27 @@ async def _recover_on_startup_hardened() -> None:
             result["attachments"] = copy.deepcopy(snapshot.get("attachments") or [])
             result["catalog_revision"] = saved_revision
             _renew_execution_fence(run_id)
+            for memory_record in snapshot.get("context_memory_records") or []:
+                if not isinstance(memory_record, dict):
+                    continue
+                _core.store.remember_context_item(
+                    cid,
+                    source_id=str(memory_record.get("source_id") or ""),
+                    source_kind=str(
+                        memory_record.get("source_kind") or "attachment_observation"
+                    ),
+                    content=str(memory_record.get("content") or ""),
+                    trust=float(memory_record.get("trust", 0.52) or 0.52),
+                    catalog_revision=str(
+                        memory_record.get("catalog_revision") or saved_revision
+                    ),
+                    created_at=float(
+                        memory_record.get("created_at")
+                        or snapshot.get("created_at")
+                        or time.time()
+                    ),
+                )
+            _renew_execution_fence(run_id)
             existing = _core.store.assistant_for_job(cid, run_id)
             if existing is None:
                 message = _core.store.add_message(cid, "assistant", str(result.get("answer") or ""), result)
@@ -337,6 +359,8 @@ async def _recover_on_startup_hardened() -> None:
                 }
             )
             snapshot.pop("checkpoint", None)
+            snapshot.pop("context_memory_records", None)
+            snapshot.pop("context_memory_report", None)
             _core.store.save_run(
                 run_id,
                 cid,
@@ -370,6 +394,7 @@ async def _recover_on_startup_hardened() -> None:
                 allow_network=bool(snapshot.get("allow_network")),
                 resume=checkpoint,
                 catalog_revision=saved_revision,
+                current_message_id=snapshot.get("user_message_id"),
             )
         )
 
@@ -387,6 +412,7 @@ async def _execute_with_run_lease_fence(
     allow_network: bool = False,
     resume: dict[str, Any] | None = None,
     catalog_revision: str | None = None,
+    current_message_id: str | None = None,
 ) -> None:
     """Fence tool, learning, and assistant side effects to the current lease owner."""
 
@@ -413,6 +439,7 @@ async def _execute_with_run_lease_fence(
             allow_network=allow_network,
             resume=resume,
             catalog_revision=catalog_revision,
+            current_message_id=current_message_id,
         )
     except _RunLeaseLost:
         with _core.RUN_LOCK:

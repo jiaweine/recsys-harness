@@ -51,8 +51,10 @@ class ResultVerifier:
         *,
         allow_adaptation: bool,
         critic: dict[str, Any] | None = None,
+        context_report: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         critic = critic or {}
+        context_report = context_report or {}
         completed_actions = [row for row in actions if row.get("status") == "completed"]
         completed_audits = [
             row for row in completed_actions if str(row.get("tool") or "").endswith("audit")
@@ -68,6 +70,16 @@ class ResultVerifier:
         # failed audit is not.
         evidence_backed = bool(local_evidence) or bool(completed_audits)
         external_only = bool(external_evidence) and not evidence_backed
+        context_memory_safe = (
+            not context_report
+            or (
+                context_report.get("evidence_eligible") is False
+                and not bool(context_report.get("authority_from_history"))
+                and int(context_report.get("chars", 0) or 0)
+                <= int(context_report.get("max_chars", 0) or 0)
+                and bool(context_report.get("structural_injection_escaped"))
+            )
+        )
         checks = {
             "executed_tools": bool(actions),
             "no_failed_tools": not any(row.get("status") == "failed" for row in actions),
@@ -77,6 +89,7 @@ class ResultVerifier:
             or not any(row.get("result", {}).get("activated") for row in actions),
             "mission_terminal": bool(critic.get("ready", True)),
             "contradictions_resolved": not bool(critic.get("unresolved_contradictions")),
+            "context_memory_safe": context_memory_safe,
         }
         severe = [x for x in findings if "非有限" in x or "重复内容" in x or "权限" in x]
         confidence = 0.46
@@ -99,6 +112,14 @@ class ResultVerifier:
                 "external": len(external_evidence),
                 "completed_audits": len(completed_audits),
                 "external_only": external_only,
+            },
+            "context_memory": {
+                "used": bool(context_report.get("used")),
+                "safe": context_memory_safe,
+                "counts_as_evidence": False,
+                "selected_count": int(context_report.get("selected_count", 0) or 0),
+                "stale_rejected": int(context_report.get("stale_rejected", 0) or 0),
+                "truncated": bool(context_report.get("truncated")),
             },
             "trajectory": {
                 "evidence_coverage": critic.get("evidence_coverage"),
