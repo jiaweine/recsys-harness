@@ -96,18 +96,32 @@ def install_workspace_publication_fence(store_module: Any) -> None:
 
     def workspace_update_active(self, now: float | None = None) -> bool:
         now = time.time() if now is None else float(now)
-        with self._lock, self._connect() as connection:
-            connection.execute("begin immediate")
-            row = self._workspace_update_row(connection, now)
-            connection.commit()
+        # Health/readiness probes should not contend with normal writers. Read the
+        # durable lease first and upgrade to BEGIN IMMEDIATE only when a future
+        # wall-clock value requires the existing repair path.
+        with self._connect() as connection:
+            raw = connection.execute(
+                """
+                select update_owner,update_until,updated_at,publication_revision
+                from workspace_state where id=1
+                """
+            ).fetchone()
+        if not raw:
+            return False
+        row = dict(raw)
+        if row.get("publication_revision"):
+            return True
+        if row.get("update_owner") and float(row.get("updated_at") or 0.0) > now:
+            with self._lock, self._connect() as connection:
+                connection.execute("begin immediate")
+                repaired = self._workspace_update_row(connection, now)
+                connection.commit()
+            row = repaired or {}
         return bool(
-            row
-            and (
-                row.get("publication_revision")
-                or (
-                    row.get("update_owner")
-                    and float(row.get("update_until") or 0.0) > now
-                )
+            row.get("publication_revision")
+            or (
+                row.get("update_owner")
+                and float(row.get("update_until") or 0.0) > now
             )
         )
 
