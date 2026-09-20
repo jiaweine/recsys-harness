@@ -499,14 +499,29 @@ def _clone_run_value(value: Any) -> Any:
     """
 
     value_type = type(value)
-    if value_type is dict:
-        return {key: _clone_run_value(child) for key, child in value.items()}
-    if value_type is list:
-        return [_clone_run_value(child) for child in value]
-    if value_type is tuple:
-        return tuple(_clone_run_value(child) for child in value)
-    if value is None or value_type in {str, int, float, bool}:
+    if value is None or value_type in (str, int, float, bool):
         return value
+    if value_type is dict:
+        cloned = value.copy()
+        for key, child in value.items():
+            child_type = type(child)
+            if child is not None and child_type not in (str, int, float, bool):
+                cloned[key] = _clone_run_value(child)
+        return cloned
+    if value_type is list:
+        cloned = value.copy()
+        for index, child in enumerate(value):
+            child_type = type(child)
+            if child is not None and child_type not in (str, int, float, bool):
+                cloned[index] = _clone_run_value(child)
+        return cloned
+    if value_type is tuple:
+        if all(
+            child is None or type(child) in (str, int, float, bool)
+            for child in value
+        ):
+            return value
+        return tuple(_clone_run_value(child) for child in value)
     return copy.deepcopy(value)
 
 
