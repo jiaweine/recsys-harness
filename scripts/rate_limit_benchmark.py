@@ -89,6 +89,20 @@ def run_benchmark(*, sequential: int, concurrent_ops: int, workers: int) -> dict
             sequential,
         )
 
+        fresh_index = 0
+
+        def fresh_allowed() -> bool:
+            nonlocal fresh_index
+            fresh_index += 1
+            return store.consume_rate_limit(
+                f"task:fresh-{fresh_index}",
+                limit=limit,
+                window_seconds=60,
+                now=now + 2.0,
+            )
+
+        fresh_allowed_samples = _timed(fresh_allowed, max(50, sequential // 2))
+
         stores = [WorkspaceStore(path) for _ in range(max(1, workers))]
         for candidate in stores:
             install_rate_limit_maintenance(candidate)
@@ -125,6 +139,7 @@ def run_benchmark(*, sequential: int, concurrent_ops: int, workers: int) -> dict
 
         return {
             "sequential_denied": _summary(denied_seq),
+            "fresh_allowed": _summary(fresh_allowed_samples),
             "concurrent_denied": _summary(concurrent_samples),
             "concurrent_ops": concurrent_ops,
             "workers": workers,
@@ -142,6 +157,7 @@ def main() -> None:
     parser.add_argument("--max-sequential-p50-ms", type=float, default=0.0)
     parser.add_argument("--max-concurrent-p95-ms", type=float, default=0.0)
     parser.add_argument("--min-concurrent-rps", type=float, default=0.0)
+    parser.add_argument("--max-fresh-allowed-p50-ms", type=float, default=0.0)
     args = parser.parse_args()
 
     result = run_benchmark(
@@ -155,6 +171,7 @@ def main() -> None:
     sequential_p50 = float(result["sequential_denied"]["p50_ms"])
     concurrent_p95 = float(result["concurrent_denied"]["p95_ms"])
     concurrent_rps = float(result["concurrent_rps"])
+    fresh_allowed_p50 = float(result["fresh_allowed"]["p50_ms"])
     if args.max_sequential_p50_ms > 0 and sequential_p50 > args.max_sequential_p50_ms:
         failures.append(
             f"sequential denied p50={sequential_p50} > {args.max_sequential_p50_ms}"
@@ -166,6 +183,13 @@ def main() -> None:
     if args.min_concurrent_rps > 0 and concurrent_rps < args.min_concurrent_rps:
         failures.append(
             f"concurrent denied rps={concurrent_rps} < {args.min_concurrent_rps}"
+        )
+    if (
+        args.max_fresh_allowed_p50_ms > 0
+        and fresh_allowed_p50 > args.max_fresh_allowed_p50_ms
+    ):
+        failures.append(
+            f"fresh allowed p50={fresh_allowed_p50} > {args.max_fresh_allowed_p50_ms}"
         )
     if failures:
         raise SystemExit("rate-limit performance guardrail failed: " + "; ".join(failures))
