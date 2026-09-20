@@ -139,6 +139,9 @@ def main() -> None:
     parser.add_argument("--sequential", type=int, default=300)
     parser.add_argument("--concurrent-ops", type=int, default=240)
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--max-sequential-p50-ms", type=float, default=0.0)
+    parser.add_argument("--max-concurrent-p95-ms", type=float, default=0.0)
+    parser.add_argument("--min-concurrent-rps", type=float, default=0.0)
     args = parser.parse_args()
 
     result = run_benchmark(
@@ -147,6 +150,25 @@ def main() -> None:
         workers=max(1, args.workers),
     )
     print(json.dumps(result, sort_keys=True))
+
+    failures: list[str] = []
+    sequential_p50 = float(result["sequential_denied"]["p50_ms"])
+    concurrent_p95 = float(result["concurrent_denied"]["p95_ms"])
+    concurrent_rps = float(result["concurrent_rps"])
+    if args.max_sequential_p50_ms > 0 and sequential_p50 > args.max_sequential_p50_ms:
+        failures.append(
+            f"sequential denied p50={sequential_p50} > {args.max_sequential_p50_ms}"
+        )
+    if args.max_concurrent_p95_ms > 0 and concurrent_p95 > args.max_concurrent_p95_ms:
+        failures.append(
+            f"concurrent denied p95={concurrent_p95} > {args.max_concurrent_p95_ms}"
+        )
+    if args.min_concurrent_rps > 0 and concurrent_rps < args.min_concurrent_rps:
+        failures.append(
+            f"concurrent denied rps={concurrent_rps} < {args.min_concurrent_rps}"
+        )
+    if failures:
+        raise SystemExit("rate-limit performance guardrail failed: " + "; ".join(failures))
 
 
 if __name__ == "__main__":
