@@ -1121,12 +1121,32 @@ class WorkspaceStore:
         ]
 
     def assistant_for_job(self, conversation_id: str, job_id: str) -> dict[str, Any] | None:
-        for message in reversed(self.list_messages(conversation_id)):
-            if (
-                message["role"] == "assistant"
-                and message.get("payload", {}).get("job_id") == job_id
-            ):
-                return message
+        """Return the newest assistant result for one job without decoding history."""
+
+        job_id = str(job_id or "")
+        if not job_id:
+            return None
+        # Search for the JSON-escaped literal first, then verify the decoded
+        # payload exactly. This keeps malformed/unrelated payloads harmless while
+        # avoiding O(history) Python JSON decoding on every run start/recovery.
+        needle = json.dumps(job_id, ensure_ascii=False)[1:-1]
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                select id,conversation_id,role,content,payload,created_at
+                from messages
+                where conversation_id=? and role='assistant'
+                  and instr(payload, ?) > 0
+                order by created_at desc
+                """,
+                (conversation_id, needle),
+            )
+            for row in rows:
+                data = dict(row)
+                payload = self._loads(data.pop("payload"))
+                if payload.get("job_id") == job_id:
+                    data["payload"] = payload
+                    return data
         return None
 
     def referenced_attachment_ids(self) -> set[str]:
