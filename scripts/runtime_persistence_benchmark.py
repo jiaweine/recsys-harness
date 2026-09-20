@@ -153,6 +153,20 @@ def run_benchmark(
             connection.commit()
 
         conversation_detail = _timed(lambda: store.get_conversation(cid), max(5, repeats // 4))
+        store.add_message(
+            cid,
+            "assistant",
+            "idempotency lookup target",
+            {"job_id": "benchmark-job-id", "blob": "z" * 512},
+        )
+        assistant_lookup_hit = _timed(
+            lambda: store.assistant_for_job(cid, "benchmark-job-id"),
+            repeats,
+        )
+        assistant_lookup_miss = _timed(
+            lambda: store.assistant_for_job(cid, "missing-benchmark-job-id"),
+            repeats,
+        )
         list_plus_active = _timed(
             lambda: (store.list_conversations(), store.active_conversation_ids()),
             repeats * 2,
@@ -175,6 +189,8 @@ def run_benchmark(
             "get_run": _summary(full_run),
             "deepcopy_run": _summary(deep_copy),
             "conversation_detail": _summary(conversation_detail),
+            "assistant_lookup_hit": _summary(assistant_lookup_hit),
+            "assistant_lookup_miss": _summary(assistant_lookup_miss),
             "list_plus_active": _summary(list_plus_active),
         }
 
