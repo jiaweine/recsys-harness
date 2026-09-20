@@ -1,0 +1,46 @@
+name: Status Read Performance
+
+on:
+  push:
+    branches:
+      - perf/status-read-hotpath
+  pull_request:
+    paths:
+      - "lingjing_harness/api_core.py"
+      - "tests/test_status_catalog_summary_cache.py"
+      - "scripts/status_read_benchmark.py"
+      - ".github/workflows/status-read-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Benchmark revision-cached status aggregation
+        run: |
+          for pass in 1 2 3; do
+            echo "status read performance pass $pass/3"
+            python scripts/status_read_benchmark.py \
+              --items 10000 \
+              --interactions 100000 \
+              --events 100000 \
+              --episodes 100000 \
+              --skills 10000 \
+              --credit-arms 10000 \
+              --credit-events 100000 \
+              --repeats 24 \
+              --max-warm-summary-p50-ms 0.05 \
+              --max-cached-combined-p50-ms 30 \
+              --min-combined-speedup 1.5
+          done

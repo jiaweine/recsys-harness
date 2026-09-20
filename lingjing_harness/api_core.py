@@ -66,6 +66,7 @@ CATALOG_REVISION = catalog_fingerprint(catalog)
 RUNS: dict[str, dict[str, Any]] = {}
 RUN_LOCK = threading.RLock()
 ATTACHMENT_LOCK = threading.RLock()
+_CATALOG_SUMMARY_CACHE: tuple[tuple[Any, ...], dict[str, Any]] | None = None
 WORKER_ID = os.environ.get("LINGJING_WORKER_ID") or f"worker-{uuid.uuid4().hex[:10]}"
 RUN_LEASE_SECONDS = max(6.0, float(os.environ.get("LINGJING_RUN_LEASE_SECONDS", "30")))
 WORKSPACE_UPDATE_LEASE_SECONDS = max(30.0, float(os.environ.get("LINGJING_WORKSPACE_UPDATE_LEASE_SECONDS", "120")))
@@ -506,13 +507,36 @@ def auth_logout(response: Response):
     return {"ok": True}
 
 
+def _catalog_summary() -> dict[str, Any]:
+    """Return an exact workspace-revision-scoped catalog summary snapshot."""
+
+    global _CATALOG_SUMMARY_CACHE
+    with WORKSPACE_LOCK:
+        signature = (
+            str(CATALOG_REVISION),
+            id(catalog),
+            str(catalog.name),
+            len(catalog.items),
+            len(catalog.interactions),
+            len(catalog.query_labels),
+            len(catalog.events),
+            id(catalog.reward_spec),
+        )
+        cached = _CATALOG_SUMMARY_CACHE
+        if cached is not None and cached[0] == signature:
+            return dict(cached[1])
+        summary = catalog.summary()
+        _CATALOG_SUMMARY_CACHE = (signature, dict(summary))
+        return summary
+
+
 @app.get("/api/status")
 def status():
     _require_workspace_ready()
     key = CATALOG_REVISION
     return {
         "status": "ok",
-        "data": catalog.summary(),
+        "data": _catalog_summary(),
         "owned_policy": True,
         "external_model_required": False,
         "autonomous_decision": True,
