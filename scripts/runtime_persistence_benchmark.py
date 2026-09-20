@@ -175,6 +175,16 @@ def run_benchmark(
         copy_source = store.get_run(run_id)
         deep_copy = _timed(lambda: copy.deepcopy(copy_source), repeats * 2)
 
+        store.ensure_workspace_revision("benchmark-revision")
+        readiness_store_checks = _timed(
+            lambda: (
+                store.ensure_workspace_revision("benchmark-revision"),
+                store.workspace_revision(),
+                store.workspace_update_active(),
+            ),
+            repeats * 4,
+        )
+
         heartbeat_run_ids: list[str] = []
         for index in range(100):
             heartbeat_cid = store.create_conversation(
@@ -224,6 +234,7 @@ def run_benchmark(
             "run_status": _summary(run_status),
             "get_run": _summary(full_run),
             "deepcopy_run": _summary(deep_copy),
+            "readiness_store_checks": _summary(readiness_store_checks),
             "conversation_detail": _summary(conversation_detail),
             "assistant_lookup_hit": _summary(assistant_lookup_hit),
             "assistant_lookup_miss": _summary(assistant_lookup_miss),
