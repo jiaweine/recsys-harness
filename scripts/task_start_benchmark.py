@@ -110,6 +110,40 @@ def _store_start_benchmark(repeats: int) -> dict[str, float]:
         return _summary(samples)
 
 
+def _store_atomic_start_benchmark(repeats: int) -> dict[str, float]:
+    with tempfile.TemporaryDirectory(prefix="xushu-task-start-atomic-") as directory:
+        store = WorkspaceStore(Path(directory) / "workspace.db")
+        cid = store.create_conversation("task-start-atomic", "search")["id"]
+        store.add_message(cid, "assistant", "seed", {"seed": True})
+        owner = "task-start-atomic-owner"
+        samples: list[float] = []
+
+        for index in range(repeats):
+            run_id = f"task-start-atomic-{index}"
+            goal = f"检查搜索露营灯 #{index}"
+            snapshot = _snapshot(run_id, cid, goal)
+
+            started = time.perf_counter()
+            status, user, persisted = store.start_run_with_user_message(
+                run_id,
+                cid,
+                goal,
+                snapshot,
+                {"attachments": [], "allow_network": False},
+                owner_id=owner,
+                lease_seconds=30,
+            )
+            samples.append((time.perf_counter() - started) * 1000.0)
+
+            if status != "accepted" or user is None or persisted is None:
+                raise AssertionError(f"atomic start failed: {status}")
+            if persisted.get("user_message_id") != user["id"]:
+                raise AssertionError("atomic start lost user_message_id")
+            store.delete_run(run_id, owner_id=owner)
+
+        return _summary(samples)
+
+
 async def _api_start_benchmark(repeats: int) -> dict[str, float]:
     from httpx import ASGITransport, AsyncClient
     import lingjing_harness.api as api_module
@@ -180,6 +214,7 @@ def main() -> None:
         result = {
             "repeats": repeats,
             "store_three_write_start": _store_start_benchmark(repeats),
+            "store_atomic_start": _store_atomic_start_benchmark(repeats),
             "api_task_start": asyncio.run(_api_start_benchmark(repeats)),
         }
 
