@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import lingjing_harness.store as store_module
 from lingjing_harness.runtime.context_memory import (
     build_governed_context,
@@ -399,6 +400,49 @@ def test_batch_context_memory_write_keeps_canonical_source_semantics(tmp_path):
     assert set(rows) == {"att-a", "att-b"}
     assert rows["att-a"]["content"] == "new A"
     assert rows["att-a"]["catalog_revision"] == "rev-2"
+
+
+def test_cross_store_memory_writes_keep_latest_timestamp(tmp_path):
+    database = tmp_path / "workspace.db"
+    primary = WorkspaceStore(database)
+    cid = primary.create_conversation("cross-store-memory", "audit")["id"]
+    stores = [primary, WorkspaceStore(database)]
+
+    writes = [
+        (10.0, "old-10"),
+        (40.0, "latest"),
+        (20.0, "old-20"),
+        (30.0, "old-30"),
+    ] * 8
+
+    def write(index_and_row):
+        index, (created_at, content) = index_and_row
+        stores[index % len(stores)].remember_context_item(
+            cid,
+            source_id="shared-att",
+            source_kind="attachment_text",
+            content=content,
+            catalog_revision=f"rev-{int(created_at)}",
+            created_at=created_at,
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(write, enumerate(writes)))
+
+    snapshot = primary.context_snapshot(
+        cid,
+        query_terms=context_query_terms("latest"),
+        recent_limit=8,
+        memory_limit=8,
+    )
+    rows = [
+        row for row in snapshot["memory_items"]
+        if row["source_id"] == "shared-att"
+    ]
+    assert len(rows) == 1
+    assert rows[0]["created_at"] == 40.0
+    assert rows[0]["content"] == "latest"
+    assert rows[0]["catalog_revision"] == "rev-40"
 
 
 def test_context_memory_store_has_bounded_retention(tmp_path, monkeypatch):
