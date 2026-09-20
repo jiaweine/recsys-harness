@@ -133,3 +133,173 @@ def test_run_reservation_rechecks_publication_fence_inside_write_transaction(
     assert errors == []
     assert reserved == [False]
     assert writer.workspace_publication_pending("rev-b") is True
+
+
+class _NoWriteReadConnection:
+    def __init__(self, connection):
+        self._connection = connection
+
+    def execute(self, sql, *args, **kwargs):
+        if sql.strip().lower().startswith("begin immediate"):
+            raise AssertionError("steady readiness check must not acquire a write transaction")
+        return self._connection.execute(sql, *args, **kwargs)
+
+    def __enter__(self):
+        self._connection.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return self._connection.__exit__(exc_type, exc, tb)
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+
+def test_steady_workspace_readiness_checks_do_not_take_write_lock(tmp_path, monkeypatch):
+    store = WorkspaceStore(tmp_path / "workspace-readiness-read-only.db")
+    assert store.ensure_workspace_revision("rev-a") == "rev-a"
+
+    original_connect = store._connect
+
+    def read_only_connect():
+        return _NoWriteReadConnection(original_connect())
+
+    monkeypatch.setattr(store, "_connect", read_only_connect)
+
+    assert store.ensure_workspace_revision("rev-a") == "rev-a"
+    assert store.workspace_update_active() is False
+
+
+def test_workspace_update_active_repairs_future_clock_only_when_needed(tmp_path):
+    store = WorkspaceStore(tmp_path / "workspace-readiness-future-clock.db")
+    assert store.ensure_workspace_revision("rev-a") == "rev-a"
+    assert store.begin_workspace_update("writer-a", lease_seconds=30, now=100.0)
+
+    with store._lock, store._connect() as connection:  # noqa: SLF001 - skew fixture
+        connection.execute(
+            """
+            update workspace_state
+            set updated_at=?,update_until=?
+            where id=1
+            """,
+            (1000.0, 1030.0),
+        )
+        connection.commit()
+
+    assert store.workspace_update_active(now=200.0) is True
+
+    with store._connect() as connection:
+        row = connection.execute(
+            "select updated_at,update_until from workspace_state where id=1"
+        ).fetchone()
+    assert float(row["updated_at"]) == 200.0
+    assert float(row["update_until"]) == 230.0
+
+
+def test_steady_readiness_does_not_contend_with_reserved_writer(tmp_path):
+    path = tmp_path / "workspace-readiness-writer-contention.db"
+    store = WorkspaceStore(path)
+    peer = WorkspaceStore(path)
+    assert store.ensure_workspace_revision("rev-a") == "rev-a"
+
+    blocker = store._connect()  # noqa: SLF001 - deterministic lock fixture
+    try:
+        blocker.execute("begin immediate")
+        # A RESERVED writer still permits readers. These checks must stay pure
+        # reads in steady state instead of waiting for a second writer slot.
+        assert peer.ensure_workspace_revision("rev-a") == "rev-a"
+        assert peer.workspace_update_active() is False
+    finally:
+        blocker.rollback()
+        blocker.close()
+
+
+class _FirstRevisionReadBarrierConnection:
+    def __init__(self, connection, barrier=None):
+        self._connection = connection
+        self._barrier = barrier
+        self._first_revision_read = True
+
+    def execute(self, sql, *args, **kwargs):
+        cursor = self._connection.execute(sql, *args, **kwargs)
+        normalized = " ".join(sql.strip().lower().split())
+        if (
+            self._barrier is not None
+            and self._first_revision_read
+            and normalized.startswith("select catalog_revision from workspace_state")
+        ):
+            self._first_revision_read = False
+            self._barrier.wait(timeout=10)
+        return cursor
+
+    def __enter__(self):
+        self._connection.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return self._connection.__exit__(exc_type, exc, tb)
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+
+def test_concurrent_empty_revision_initialization_has_one_durable_winner(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "workspace-initial-revision-race.db"
+    one = WorkspaceStore(path)
+    two = WorkspaceStore(path)
+    barrier = threading.Barrier(2)
+
+    one_connect = one._connect
+    two_connect = two._connect
+    one_first = True
+    two_first = True
+
+    def connect_one():
+        nonlocal one_first
+        current = one_first
+        one_first = False
+        return _FirstRevisionReadBarrierConnection(
+            one_connect(),
+            barrier if current else None,
+        )
+
+    def connect_two():
+        nonlocal two_first
+        current = two_first
+        two_first = False
+        return _FirstRevisionReadBarrierConnection(
+            two_connect(),
+            barrier if current else None,
+        )
+
+    monkeypatch.setattr(one, "_connect", connect_one)
+    monkeypatch.setattr(two, "_connect", connect_two)
+
+    results: list[str] = []
+    errors: list[BaseException] = []
+
+    def initialize(store, revision):
+        try:
+            results.append(store.ensure_workspace_revision(revision))
+        except BaseException as exc:  # noqa: BLE001 - surface race failures
+            errors.append(exc)
+
+    workers = [
+        threading.Thread(target=initialize, args=(one, "rev-a")),
+        threading.Thread(target=initialize, args=(two, "rev-b")),
+    ]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=15)
+
+    assert all(not worker.is_alive() for worker in workers)
+    assert errors == []
+    assert len(results) == 2
+    assert results[0] == results[1]
+    assert results[0] in {"rev-a", "rev-b"}
+
+    durable = WorkspaceStore(path).workspace_revision()
+    assert durable == results[0]

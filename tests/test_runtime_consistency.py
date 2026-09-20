@@ -191,11 +191,11 @@ def test_run_persistence_coalesces_decide_and_reflect_writes(monkeypatch):
     api_module._PERSIST_META.pop(run_id, None)
     snapshots = []
 
-    def fake_save_run(_run_id, _cid, _goal, status, snapshot, **_kwargs):
+    def fake_save_run_fenced(_run_id, _cid, _goal, status, snapshot, **_kwargs):
         snapshots.append(copy.deepcopy(snapshot))
-        return status
+        return status, True
 
-    monkeypatch.setattr(api_module.store, "save_run", fake_save_run)
+    monkeypatch.setattr(api_module.store, "save_run_fenced", fake_save_run_fenced)
 
     api_module._persist_run(row)
     row["events"].append({"phase": "decide", "progress": 18})
@@ -225,6 +225,37 @@ def test_run_persistence_coalesces_decide_and_reflect_writes(monkeypatch):
     assert snapshots[-1]["status"] == "completed"
     assert "checkpoint" not in snapshots[-1]
     assert run_id not in api_module._PERSIST_META
+
+
+def test_run_persistence_does_not_issue_second_lease_write(monkeypatch):
+    run_id = "job-single-persistence-transaction"
+    row = {
+        "run_id": run_id,
+        "conversation_id": "cv-single-persistence-transaction",
+        "goal": "single transaction",
+        "status": "running",
+        "events": [{"phase": "execute", "progress": 20}],
+        "result": None,
+        "created_at": time.time(),
+        "updated_at": time.time(),
+    }
+    api_module._PERSIST_META.pop(run_id, None)
+    calls = {"save": 0, "renew": 0}
+
+    def fake_save_run_fenced(_run_id, _cid, _goal, status, _snapshot, **_kwargs):
+        calls["save"] += 1
+        return status, True
+
+    def fake_renew(*_args, **_kwargs):
+        calls["renew"] += 1
+        return True
+
+    monkeypatch.setattr(api_module.store, "save_run_fenced", fake_save_run_fenced)
+    monkeypatch.setattr(api_module.store, "renew_run_lease", fake_renew)
+
+    api_module._persist_run(row)
+
+    assert calls == {"save": 1, "renew": 0}
 
 
 def test_completed_checkpoint_recovery_finalizes_without_replaying_harness(monkeypatch):

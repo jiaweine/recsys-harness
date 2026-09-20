@@ -645,13 +645,25 @@ class WorkspaceStore:
 
     def ensure_workspace_revision(self, revision: str) -> str:
         revision = str(revision or "").strip()
+        # Steady-state readiness is read-only. Upgrade to a write transaction
+        # only for the one-time empty-revision initialization, then recheck under
+        # BEGIN IMMEDIATE so competing workers cannot publish different initial
+        # revisions.
+        with self._connect() as connection:
+            row = connection.execute(
+                "select catalog_revision from workspace_state where id=1"
+            ).fetchone()
+        current = str(row["catalog_revision"] or "") if row else ""
+        if current or not revision:
+            return current
+
         with self._lock, self._connect() as connection:
             connection.execute("begin immediate")
             row = connection.execute(
                 "select catalog_revision from workspace_state where id=1"
             ).fetchone()
             current = str(row["catalog_revision"] or "") if row else ""
-            if not current and revision:
+            if not current:
                 connection.execute(
                     "update workspace_state set catalog_revision=?,updated_at=? where id=1",
                     (revision, time.time()),
@@ -829,7 +841,7 @@ class WorkspaceStore:
             else:
                 connection.execute("delete from runs where run_id=?", (run_id,))
 
-    def save_run(
+    def _save_run_transaction(
         self,
         run_id: str,
         conversation_id: str,
@@ -837,9 +849,11 @@ class WorkspaceStore:
         status: str,
         snapshot: dict[str, Any],
         *,
-        owner_id: str | None = None,
-        lease_seconds: float = 30.0,
-    ) -> str:
+        owner_id: str | None,
+        lease_seconds: float,
+    ) -> tuple[str, bool]:
+        """Persist one run and report whether this caller still owned the mutation."""
+
         decision_at = time.time()
         created = min(float(snapshot.get("created_at") or decision_at), decision_at)
         active = status in ACTIVE_RUN_STATUSES
@@ -850,7 +864,7 @@ class WorkspaceStore:
             ).fetchone()
             if existing and existing["status"] not in ACTIVE_RUN_STATUSES:
                 connection.rollback()
-                return str(existing["status"])
+                return str(existing["status"]), False
             if (
                 existing
                 and existing["status"] in ACTIVE_RUN_STATUSES
@@ -858,7 +872,8 @@ class WorkspaceStore:
                 and str(existing["owner_id"]) != str(owner_id or "")
             ):
                 connection.rollback()
-                return str(existing["status"])
+                return str(existing["status"]), False
+
             payload = dict(snapshot)
             if (
                 existing
@@ -866,7 +881,13 @@ class WorkspaceStore:
                 and status in {"running", "interrupted"}
             ):
                 status = "cancel_requested"
-            payload.update({"status": status, "created_at": created, "updated_at": decision_at})
+            payload.update(
+                {
+                    "status": status,
+                    "created_at": created,
+                    "updated_at": decision_at,
+                }
+            )
             current_owner = owner_id if active else None
             if active and existing and existing["owner_id"] and owner_id is None:
                 current_owner = existing["owner_id"]
@@ -902,7 +923,52 @@ class WorkspaceStore:
                 ),
             )
             connection.commit()
-        return status
+        return status, True
+
+    def save_run(
+        self,
+        run_id: str,
+        conversation_id: str,
+        goal: str,
+        status: str,
+        snapshot: dict[str, Any],
+        *,
+        owner_id: str | None = None,
+        lease_seconds: float = 30.0,
+    ) -> str:
+        persisted_status, _authorized = self._save_run_transaction(
+            run_id,
+            conversation_id,
+            goal,
+            status,
+            snapshot,
+            owner_id=owner_id,
+            lease_seconds=lease_seconds,
+        )
+        return persisted_status
+
+    def save_run_fenced(
+        self,
+        run_id: str,
+        conversation_id: str,
+        goal: str,
+        status: str,
+        snapshot: dict[str, Any],
+        *,
+        owner_id: str,
+        lease_seconds: float = 30.0,
+    ) -> tuple[str, bool]:
+        """Persist and fence ownership in the same SQLite write transaction."""
+
+        return self._save_run_transaction(
+            run_id,
+            conversation_id,
+            goal,
+            status,
+            snapshot,
+            owner_id=owner_id,
+            lease_seconds=lease_seconds,
+        )
 
     def renew_run_lease(self, run_id: str, owner_id: str, lease_seconds: float) -> bool:
         now = time.time()
@@ -916,6 +982,36 @@ class WorkspaceStore:
                 (now + max(1.0, float(lease_seconds)), now, run_id, owner_id),
             )
             return cursor.rowcount == 1
+
+    def renew_run_leases(
+        self,
+        run_ids: list[str],
+        owner_id: str,
+        lease_seconds: float,
+    ) -> int:
+        """Renew a bounded set of locally active runs in one SQLite UPDATE."""
+
+        ids = list(dict.fromkeys(str(run_id) for run_id in run_ids if str(run_id)))
+        if not ids:
+            return 0
+        now = time.time()
+        placeholders = ",".join("?" for _ in ids)
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                f"""
+                update runs set lease_until=?,updated_at=?
+                where owner_id=?
+                  and status in ('running','interrupted','cancel_requested')
+                  and run_id in ({placeholders})
+                """,
+                (
+                    now + max(1.0, float(lease_seconds)),
+                    now,
+                    owner_id,
+                    *ids,
+                ),
+            )
+            return int(cursor.rowcount)
 
     def run_status(self, run_id: str) -> str | None:
         with self._connect() as connection:
@@ -1067,12 +1163,32 @@ class WorkspaceStore:
         ]
 
     def assistant_for_job(self, conversation_id: str, job_id: str) -> dict[str, Any] | None:
-        for message in reversed(self.list_messages(conversation_id)):
-            if (
-                message["role"] == "assistant"
-                and message.get("payload", {}).get("job_id") == job_id
-            ):
-                return message
+        """Return the newest assistant result for one job without decoding history."""
+
+        job_id = str(job_id or "")
+        if not job_id:
+            return None
+        # Search for the JSON-escaped literal first, then verify the decoded
+        # payload exactly. This keeps malformed/unrelated payloads harmless while
+        # avoiding O(history) Python JSON decoding on every run start/recovery.
+        needle = json.dumps(job_id, ensure_ascii=False)[1:-1]
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                select id,conversation_id,role,content,payload,created_at
+                from messages
+                where conversation_id=? and role='assistant'
+                  and instr(payload, ?) > 0
+                order by created_at desc
+                """,
+                (conversation_id, needle),
+            )
+            for row in rows:
+                data = dict(row)
+                payload = self._loads(data.pop("payload"))
+                if payload.get("job_id") == job_id:
+                    data["payload"] = payload
+                    return data
         return None
 
     def referenced_attachment_ids(self) -> set[str]:

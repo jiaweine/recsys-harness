@@ -52,7 +52,7 @@ def test_fresh_run_assistant_lookup_never_scans_conversation_history(tmp_path, m
     assert store.assistant_for_job(conversation["id"], "job-fresh") is None
 
 
-def test_recovery_lookup_keeps_legacy_published_message_fallback(tmp_path, monkeypatch):
+def test_recovery_lookup_keeps_legacy_fallback_without_history_scan(tmp_path, monkeypatch):
     store = WorkspaceStore(tmp_path / "recovery-assistant-lookup.db")
     conversation = store.create_conversation("legacy recovery", "audit")
     run_id = "job-legacy-published"
@@ -110,4 +110,51 @@ def test_recovery_lookup_keeps_legacy_published_message_fallback(tmp_path, monke
     found = store.assistant_for_job(conversation["id"], run_id)
 
     assert found == expected
-    assert scans == 1
+    assert scans == 0
+
+
+def test_assistant_lookup_verifies_exact_job_id_after_sql_prefilter(tmp_path):
+    store = WorkspaceStore(tmp_path / "assistant-exact-lookup.db")
+    conversation = store.create_conversation("exact lookup", "audit")
+    now = time.time()
+
+    rows = [
+        (
+            "msg-malformed",
+            conversation["id"],
+            "assistant",
+            "malformed",
+            '{"job_id":"job-target"',
+            now + 3,
+        ),
+        (
+            "msg-substring",
+            conversation["id"],
+            "assistant",
+            "substring",
+            json.dumps({"job_id": "job-target-extra"}, ensure_ascii=False),
+            now + 2,
+        ),
+        (
+            "msg-exact",
+            conversation["id"],
+            "assistant",
+            "exact",
+            json.dumps({"job_id": "job-target", "answer": "exact"}, ensure_ascii=False),
+            now + 1,
+        ),
+    ]
+    with store._lock, store._connect() as connection:  # noqa: SLF001 - direct fixture
+        connection.executemany(
+            """
+            insert into messages(id,conversation_id,role,content,payload,created_at)
+            values(?,?,?,?,?,?)
+            """,
+            rows,
+        )
+
+    found = store.assistant_for_job(conversation["id"], "job-target")
+
+    assert found is not None
+    assert found["id"] == "msg-exact"
+    assert found["payload"]["job_id"] == "job-target"

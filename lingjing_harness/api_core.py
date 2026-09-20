@@ -99,8 +99,7 @@ async def _lease_heartbeat_loop() -> None:
                 run_id for run_id, row in RUNS.items()
                 if row.get("status") in ACTIVE_RUN_STATUSES
             ]
-        for run_id in active_ids:
-            store.renew_run_lease(run_id, WORKER_ID, RUN_LEASE_SECONDS)
+        store.renew_run_leases(active_ids, WORKER_ID, RUN_LEASE_SECONDS)
 
 
 @asynccontextmanager
@@ -801,6 +800,12 @@ async def _execute(
                 row.update({"status": "cancelled", "events": events, "updated_at": time.time()})
                 _persist_run(row)
     except Exception as exc:
+        # Lease loss is execution-authority control flow owned by the stable API
+        # wrapper, not a run failure. Re-raise it without attempting a stale
+        # failed-snapshot write; the wrapper will retire or reconcile the local row.
+        lease_lost_type = globals().get("_RunLeaseLost")
+        if isinstance(lease_lost_type, type) and isinstance(exc, lease_lost_type):
+            raise
         with RUN_LOCK:
             row = RUNS.get(run_id)
             if row is not None:

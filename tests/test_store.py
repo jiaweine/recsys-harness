@@ -71,6 +71,71 @@ def test_run_recovery_claim_is_not_reentrant_for_same_owner(tmp_path):
     assert [row["run_id"] for row in claimed] == ["run-reentry"]
 
 
+def test_batch_lease_renewal_only_touches_owned_active_runs(tmp_path):
+    import time
+
+    path = tmp_path / "batch-heartbeat.db"
+    one = WorkspaceStore(path)
+    two = WorkspaceStore(path)
+    owned_ids = []
+    for index in range(3):
+        conversation = one.create_conversation(f"owned-{index}", "audit")
+        run_id = f"owned-run-{index}"
+        now = time.time()
+        snapshot = {
+            "run_id": run_id,
+            "conversation_id": conversation["id"],
+            "goal": "heartbeat",
+            "status": "running",
+            "events": [],
+            "created_at": now,
+            "updated_at": now,
+        }
+        assert one.reserve_run(
+            run_id,
+            conversation["id"],
+            "heartbeat",
+            snapshot,
+            owner_id="worker-one",
+            lease_seconds=5,
+        )
+        owned_ids.append(run_id)
+
+    other_conversation = two.create_conversation("other-owner", "audit")
+    other_now = time.time()
+    other_snapshot = {
+        "run_id": "other-run",
+        "conversation_id": other_conversation["id"],
+        "goal": "other",
+        "status": "running",
+        "events": [],
+        "created_at": other_now,
+        "updated_at": other_now,
+    }
+    assert two.reserve_run(
+        "other-run",
+        other_conversation["id"],
+        "other",
+        other_snapshot,
+        owner_id="worker-two",
+        lease_seconds=5,
+    )
+
+    before = {run_id: one.get_run(run_id)["lease_until"] for run_id in owned_ids}
+    other_before = two.get_run("other-run")["lease_until"]
+
+    renewed = one.renew_run_leases(
+        [*owned_ids, "other-run", owned_ids[0]],
+        "worker-one",
+        30,
+    )
+
+    assert renewed == len(owned_ids)
+    for run_id in owned_ids:
+        assert float(one.get_run(run_id)["lease_until"]) > float(before[run_id])
+    assert two.get_run("other-run")["lease_until"] == other_before
+
+
 def test_remote_cancel_wins_over_stale_running_checkpoint(tmp_path):
     import time
     path = tmp_path / "remote-cancel.db"
@@ -142,6 +207,73 @@ def test_terminal_run_cannot_be_overwritten_after_takeover_finishes(tmp_path):
     assert current["status"] == "completed"
     assert current["answer"] == "new owner result"
     assert "error" not in current
+
+
+def test_fenced_run_save_reports_owner_authorization(tmp_path):
+    import time
+
+    path = tmp_path / "fenced-save.db"
+    old_worker = WorkspaceStore(path)
+    new_worker = WorkspaceStore(path)
+    conversation = old_worker.create_conversation()
+    started = time.time()
+    snapshot = {
+        "run_id": "run-fenced-save",
+        "conversation_id": conversation["id"],
+        "goal": "fenced save",
+        "status": "running",
+        "events": [],
+        "created_at": started,
+        "updated_at": started,
+    }
+    assert old_worker.reserve_run(
+        "run-fenced-save",
+        conversation["id"],
+        "fenced save",
+        snapshot,
+        owner_id="old-worker",
+        lease_seconds=2,
+    )
+
+    status, authorized = old_worker.save_run_fenced(
+        "run-fenced-save",
+        conversation["id"],
+        "fenced save",
+        "running",
+        snapshot,
+        owner_id="old-worker",
+        lease_seconds=30,
+    )
+    assert status == "running"
+    assert authorized is True
+
+    leased = old_worker.get_run("run-fenced-save")
+    with old_worker._lock, old_worker._connect() as connection:  # noqa: SLF001
+        connection.execute(
+            "update runs set lease_until=? where run_id=?",
+            (started - 1.0, "run-fenced-save"),
+        )
+        connection.commit()
+    claimed = new_worker.claim_recoverable_runs(
+        owner_id="new-worker",
+        lease_seconds=30,
+        now=started + 3.0,
+    )
+    assert [row["run_id"] for row in claimed] == ["run-fenced-save"]
+
+    stale_status, stale_authorized = old_worker.save_run_fenced(
+        "run-fenced-save",
+        conversation["id"],
+        "fenced save",
+        "running",
+        snapshot,
+        owner_id="old-worker",
+        lease_seconds=30,
+    )
+    assert stale_status == "running"
+    assert stale_authorized is False
+    assert new_worker.get_run("run-fenced-save")["owner_id"] == "new-worker"
+    assert float(leased["lease_until"]) > started
 
 
 def test_workspace_update_lock_blocks_other_worker_and_new_runs(tmp_path):

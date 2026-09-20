@@ -65,6 +65,10 @@ class _RunLeaseLost(RuntimeError):
     """The durable run lease moved to another worker before a side effect."""
 
 
+class _FinalRunLeaseLost(_RunLeaseLost):
+    """The runner returned, but the final durable ownership fence was lost."""
+
+
 class _LeaseFencedMemory:
     """Fence non-idempotent final learning without changing shared tool memory."""
 
@@ -187,7 +191,8 @@ def _coalesced_persist_run(row: dict[str, Any]) -> None:
         return
 
     snapshot = _compact_run_snapshot(row)
-    persisted_status = _core.store.save_run(
+    run_id = str(row["run_id"])
+    persisted_status, mutation_authorized = _core.store.save_run_fenced(
         row["run_id"],
         row["conversation_id"],
         row.get("goal", ""),
@@ -200,23 +205,21 @@ def _coalesced_persist_run(row: dict[str, Any]) -> None:
         row["status"] = persisted_status
         current_meta = _persistence_meta(row)
 
+    # Persistence helpers are also unit-tested as pure snapshot coalescers.
+    # Production execution is present in RUNS; if another worker owns or has
+    # already terminalized the durable row, fail closed before the caller can
+    # continue to a side effect. The same SQLite transaction that stored the
+    # snapshot also refreshed the lease, so no second write transaction is needed.
+    with _core.RUN_LOCK:
+        locally_executing = run_id in _core.RUNS
+    if locally_executing and not mutation_authorized:
+        _PERSIST_META.pop(run_id, None)
+        raise _RunLeaseLost(f"run lease lost: {run_id}")
+
     if persisted_status in _core.ACTIVE_RUN_STATUSES:
-        run_id = str(row["run_id"])
-        # Persistence helpers are also unit-tested as pure snapshot coalescers.
-        # Execution authority only applies when this process is actually running
-        # the job in its local RUNS set; normal production execution always meets
-        # that condition after reserve/claim and before any side effect.
-        with _core.RUN_LOCK:
-            locally_executing = run_id in _core.RUNS
-        if locally_executing:
-            try:
-                _renew_execution_fence(run_id)
-            except _RunLeaseLost:
-                _PERSIST_META.pop(run_id, None)
-                raise
         _PERSIST_META[run_id] = current_meta
     else:
-        _PERSIST_META.pop(str(row["run_id"]), None)
+        _PERSIST_META.pop(run_id, None)
 
 
 def _inflate_checkpoint(snapshot: dict[str, Any]) -> dict[str, Any] | None:
@@ -411,7 +414,10 @@ async def _execute_with_run_lease_fence(
 
     def run_with_final_fence(*args: Any, **kwargs: Any) -> Any:
         result = original_run(*args, **kwargs)
-        _renew_execution_fence(run_id)
+        try:
+            _renew_execution_fence(run_id)
+        except _RunLeaseLost as exc:
+            raise _FinalRunLeaseLost(str(exc)) from exc
         return result
 
     runner.run = run_with_final_fence
@@ -427,7 +433,28 @@ async def _execute_with_run_lease_fence(
             catalog_revision=catalog_revision,
             current_message_id=current_message_id,
         )
+    except _FinalRunLeaseLost:
+        # The runner itself finished, so a successor terminal snapshot is safe to
+        # expose locally even though this worker no longer owns execution.
+        try:
+            durable = _core.store.get_run(run_id)
+        except KeyError:
+            durable = None
+        with _core.RUN_LOCK:
+            if (
+                isinstance(durable, dict)
+                and durable.get("status") not in _core.ACTIVE_RUN_STATUSES
+            ):
+                current = _core.RUNS.get(run_id)
+                if current is not None:
+                    current.clear()
+                    current.update(copy.deepcopy(durable))
+            else:
+                _core.RUNS.pop(run_id, None)
+        _PERSIST_META.pop(run_id, None)
     except _RunLeaseLost:
+        # Losing authority during execution is different: retire the stale local
+        # executor immediately so it cannot continue to the next side effect.
         with _core.RUN_LOCK:
             _core.RUNS.pop(run_id, None)
         _PERSIST_META.pop(run_id, None)
