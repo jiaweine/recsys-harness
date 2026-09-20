@@ -38,5 +38,6 @@ jobs:
               --workers 8 \
               --max-sequential-p50-ms 0.6 \
               --max-concurrent-p95-ms 25 \
-              --min-concurrent-rps 1200
+              --min-concurrent-rps 1200 \
+              --max-fresh-allowed-p50-ms 3.0
           done
