@@ -26,18 +26,32 @@ def _bucket(feature: str, dims: int) -> tuple[int, float]:
     return value % dims, 1.0 if ((value >> 9) & 1) else -1.0
 
 
-def hashed_vector(text: str, *, dims: int = 256) -> dict[int, float]:
-    feats = Counter(tokenize(text))
-    compact = re.sub(r"\s+", "", text.lower())
-    for n in (2, 3, 4):
-        for i in range(max(0, len(compact)-n+1)):
-            feats[f"g{n}:{compact[i:i+n]}"] += 0.35
+def _hashed_features(
+    feats: Counter[str],
+    *,
+    dims: int,
+) -> dict[int, float]:
     vec: dict[int, float] = {}
     for feat, weight in feats.items():
         idx, sign = _bucket(feat, dims)
         vec[idx] = vec.get(idx, 0.0) + sign * float(weight)
-    norm = sqrt(sum(v*v for v in vec.values())) or 1.0
-    return {k: v/norm for k, v in vec.items()}
+    norm = sqrt(sum(v * v for v in vec.values())) or 1.0
+    return {key: value / norm for key, value in vec.items()}
+
+
+def token_hashed_vector(text: str, *, dims: int = 256) -> dict[int, float]:
+    """Hash lexical/CJK tokens without the more expensive character n-gram pass."""
+
+    return _hashed_features(Counter(tokenize(text)), dims=dims)
+
+
+def hashed_vector(text: str, *, dims: int = 256) -> dict[int, float]:
+    feats = Counter(tokenize(text))
+    compact = re.sub(r"\s+", "", text.lower())
+    for n in (2, 3, 4):
+        for i in range(max(0, len(compact) - n + 1)):
+            feats[f"g{n}:{compact[i:i+n]}"] += 0.35
+    return _hashed_features(feats, dims=dims)
 
 
 def cosine(a: dict[int, float], b: dict[int, float]) -> float:
