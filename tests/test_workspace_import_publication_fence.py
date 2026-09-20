@@ -194,3 +194,21 @@ def test_workspace_update_active_repairs_future_clock_only_when_needed(tmp_path)
         ).fetchone()
     assert float(row["updated_at"]) == 200.0
     assert float(row["update_until"]) == 230.0
+
+
+def test_steady_readiness_does_not_contend_with_reserved_writer(tmp_path):
+    path = tmp_path / "workspace-readiness-writer-contention.db"
+    store = WorkspaceStore(path)
+    peer = WorkspaceStore(path)
+    assert store.ensure_workspace_revision("rev-a") == "rev-a"
+
+    blocker = store._connect()  # noqa: SLF001 - deterministic lock fixture
+    try:
+        blocker.execute("begin immediate")
+        # A RESERVED writer still permits readers. These checks must stay pure
+        # reads in steady state instead of waiting for a second writer slot.
+        assert peer.ensure_workspace_revision("rev-a") == "rev-a"
+        assert peer.workspace_update_active() is False
+    finally:
+        blocker.rollback()
+        blocker.close()
