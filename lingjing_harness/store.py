@@ -971,6 +971,36 @@ class WorkspaceStore:
             )
             return cursor.rowcount == 1
 
+    def renew_run_leases(
+        self,
+        run_ids: list[str],
+        owner_id: str,
+        lease_seconds: float,
+    ) -> int:
+        """Renew a bounded set of locally active runs in one SQLite UPDATE."""
+
+        ids = list(dict.fromkeys(str(run_id) for run_id in run_ids if str(run_id)))
+        if not ids:
+            return 0
+        now = time.time()
+        placeholders = ",".join("?" for _ in ids)
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                f"""
+                update runs set lease_until=?,updated_at=?
+                where owner_id=?
+                  and status in ('running','interrupted','cancel_requested')
+                  and run_id in ({placeholders})
+                """,
+                (
+                    now + max(1.0, float(lease_seconds)),
+                    now,
+                    owner_id,
+                    *ids,
+                ),
+            )
+            return int(cursor.rowcount)
+
     def run_status(self, run_id: str) -> str | None:
         with self._connect() as connection:
             row = connection.execute(
