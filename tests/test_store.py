@@ -370,3 +370,49 @@ def test_get_conversation_uses_process_local_store_lock(tmp_path):
 
     assert tracking.entries == 1
     assert loaded["messages"][-1]["content"] == "visible"
+
+
+
+def test_conversation_list_uses_recency_index_and_preserves_order(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "conversation-list-index.db"
+    store = WorkspaceStore(path)
+    rows = [
+        store.create_conversation(f"conversation-{index}", "audit")
+        for index in range(5)
+    ]
+
+    with store._lock, store._connect() as connection:  # noqa: SLF001
+        for index, row in enumerate(rows):
+            connection.execute(
+                "update conversations set updated_at=? where id=?",
+                (100.0 + index, row["id"]),
+            )
+        connection.commit()
+
+    listed = store.list_conversations(limit=3)
+    assert [row["id"] for row in listed] == [
+        rows[4]["id"],
+        rows[3]["id"],
+        rows[2]["id"],
+    ]
+
+    with sqlite3.connect(path) as connection:
+        indexes = {
+            row[1]
+            for row in connection.execute(
+                "pragma index_list(conversations)"
+            ).fetchall()
+        }
+        plan = " ".join(
+            str(part)
+            for row in connection.execute(
+                "explain query plan "
+                "select * from conversations order by updated_at desc limit 3"
+            ).fetchall()
+            for part in row
+        ).lower()
+
+    assert "idx_conversations_updated_at" in indexes
+    assert "idx_conversations_updated_at" in plan
