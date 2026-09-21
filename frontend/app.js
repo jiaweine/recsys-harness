@@ -5,6 +5,7 @@ const state = {
   scene:'search',
   lastResult:null,
   seenEvents:0,
+  liveEvents:[],
   activeRuns:new Map(),
   attachments:[],
   uploading:0,
@@ -82,7 +83,7 @@ async function loadHistory(){
 }
 
 function clearResult(){
-  state.lastResult=null;state.seenEvents=0;$('stateText').textContent='等待开始';$('running').hidden=true;$('copyBtn').disabled=true;
+  state.lastResult=null;state.seenEvents=0;state.liveEvents=[];$('stateText').textContent='等待开始';$('running').hidden=true;$('copyBtn').disabled=true;
   $('timeline').innerHTML='<div class="empty">开始一个任务后，这里会记录系统实际做过的每一步。</div>';
   $('evidenceList').innerHTML='<div class="empty">还没有执行结果。</div>';
   $('suggestions').innerHTML='<button>先做一次全局体检</button><button>检查一个具体搜索</button>';
@@ -97,10 +98,10 @@ function startDraft(scene=state.scene){
 }
 
 async function openConversation(id){
-  const c=await api(`/api/conversations/${id}`);state.conversation=c;state.scene=SCENES.has(c.scene)?c.scene:'audit';state.seenEvents=0;clearComposerContext();updateSceneNav();
+  const c=await api(`/api/conversations/${id}`);state.conversation=c;state.scene=SCENES.has(c.scene)?c.scene:'audit';state.seenEvents=0;state.liveEvents=[];clearComposerContext();updateSceneNav();
   state.lastResult=[...c.messages].reverse().find(x=>x.role==='assistant')?.payload||null;$('taskTitle').textContent=c.title;renderMessages(c.messages);
   if(state.lastResult)renderResult(state.lastResult);else clearResult();
-  if(c.active_run?.run_id&&!state.activeRuns.has(c.id)){state.activeRuns.set(c.id,c.active_run.run_id);if(c.active_run.events?.length)renderRunning(c.active_run.events);void pollRun(c.active_run.run_id,c.id)}
+  if(c.active_run?.run_id&&!state.activeRuns.has(c.id)){state.activeRuns.set(c.id,c.active_run.run_id);if(c.active_run.events?.length){state.liveEvents=[...c.active_run.events];renderRunning(state.liveEvents)}void pollRun(c.active_run.run_id,c.id)}
   updateSendState();await loadHistory();
 }
 
@@ -138,7 +139,8 @@ async function pollRun(id,conversationId){
   while(state.activeRuns.get(conversationId)===id){
     let r;
     try{
-      r=await api(`/api/runs/${id}`);failures=0;reconnectNotified=false;
+      const cursor=state.liveEvents.length;
+      r=await api(`/api/runs/${id}?after_event=${cursor}`);failures=0;reconnectNotified=false;
     }catch(e){
       if(e.status===401)return;
       failures+=1;const isCurrent=state.conversation?.id===conversationId;
@@ -149,7 +151,16 @@ async function pollRun(id,conversationId){
       continue;
     }
     const isCurrent=state.conversation?.id===conversationId;
-    if(isCurrent)renderRunning(r.events||[]);
+    if(isCurrent){
+      const from=Number.isInteger(r.events_from)?r.events_from:state.liveEvents.length;
+      const total=Number.isInteger(r.event_count)?r.event_count:from+(r.events||[]).length;
+      if(from!==state.liveEvents.length||total<state.liveEvents.length){
+        state.liveEvents=[];
+      }
+      if(Array.isArray(r.events)&&r.events.length)state.liveEvents.push(...r.events);
+      if(state.liveEvents.length>total)state.liveEvents=state.liveEvents.slice(0,total);
+      renderRunning(state.liveEvents);
+    }
     if(r.status==='completed'){
       state.activeRuns.delete(conversationId);if(isCurrent){appendAssistant(r.message);renderResult(r.result)}await loadHistory();updateSendState();return;
     }

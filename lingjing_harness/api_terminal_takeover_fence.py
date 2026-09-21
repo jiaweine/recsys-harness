@@ -140,12 +140,22 @@ def install_terminal_takeover_execution_fence(core: Any) -> None:
         except KeyError as exc:
             raise HTTPException(404, "执行任务不存在") from exc
 
-    def coherent_get_run_without_disarming_fence(run_id: str):
+    def coherent_get_run_without_disarming_fence(
+        run_id: str,
+        after_event: int | None = None,
+    ):
+        project = getattr(core, "_apply_run_delta", None)
+
+        def finish(payload: dict[str, Any]) -> dict[str, Any]:
+            if callable(project):
+                return project(payload, after_event)
+            return payload
+
         snapshot = snapshot_in_memory_run(run_id)
 
         if snapshot is None:
             try:
-                return core.store.get_run(run_id)
+                return finish(core.store.get_run(run_id))
             except KeyError as exc:
                 raise HTTPException(404, "执行任务不存在") from exc
 
@@ -159,11 +169,11 @@ def install_terminal_takeover_execution_fence(core: Any) -> None:
                     # leave the active local executor row untouched.  Read-side
                     # cache convergence cannot safely prove there is no executor
                     # about to enter its next fenced side-effect boundary.
-                    return core.store.get_run(run_id)
+                    return finish(core.store.get_run(run_id))
                 except KeyError as exc:
                     raise HTTPException(404, "执行任务不存在") from exc
             snapshot["status"] = persisted_status
-        return snapshot
+        return finish(snapshot)
 
     core._persist_run = persist_with_terminal_takeover_fence
     core._execute = execute_with_terminal_convergence
