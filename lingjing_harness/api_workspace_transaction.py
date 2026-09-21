@@ -195,16 +195,31 @@ def install_workspace_transaction_boundary(core: Any) -> None:
                     _discard_pending()
                     return _release_publication(shared)
 
+                # The overwhelmingly common steady state has no staging
+                # artifact and no publication fence. Do not manufacture a writer
+                # transaction merely to prove that there is nothing to delete.
+                # Keep both names in the check because a crashed writer can leave
+                # only the temporary staging file behind.
+                pending_temp = core.CATALOG_PENDING_FILE.with_name(
+                    f"{core.CATALOG_PENDING_FILE.name}.tmp"
+                )
+                if (
+                    not core.CATALOG_PENDING_FILE.exists()
+                    and not pending_temp.exists()
+                ):
+                    return True
+
                 # Without a publication fence, never perform a check-then-delete.
-                # Acquire a short durable update lease first. If another writer won
-                # the handoff, leave its staging untouched; if we win, cleanup is
-                # exclusive until abort releases the temporary lease.
+                # Acquire a short durable update lease only when an orphan staging
+                # artifact actually exists. If another writer won the handoff,
+                # leave its staging untouched; if we win, cleanup is exclusive
+                # until abort releases the temporary lease.
                 cleanup_owner = _begin_sync_cleanup()
                 if cleanup_owner is not None:
                     _discard_pending()
                     if not _abort_sync_cleanup(cleanup_owner):
                         return False
-                return _release_publication(shared)
+                return True
 
             pending_revision, pending = _pending_catalog()
             if pending_revision == shared and pending is not None:
