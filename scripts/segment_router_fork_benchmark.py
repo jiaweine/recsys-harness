@@ -100,6 +100,11 @@ def _legacy_fork(registry: ToolRegistry) -> ToolRegistry:
     clone.recommend = registry.recommend.with_config(clone._load_config("recommend", RecommendConfig))
     clone._specs = clone._build_specs()
     clone._refresh_portfolio()
+    if clone.catalog.reward_spec:
+        # The pre-optimization steady path partitioned both surfaces before it
+        # checked whether any active segment skill actually needed revalidation.
+        clone.segment_router.partition_events(clone.catalog.events, surface="search")
+        clone.segment_router.partition_events(clone.catalog.events, surface="recommend")
     clone._validate_active_portfolio()
     return clone
 
