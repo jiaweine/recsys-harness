@@ -561,7 +561,27 @@ def _snapshot_in_memory_run(run_id: str) -> dict[str, Any] | None:
 _core._snapshot_in_memory_run = _snapshot_in_memory_run
 
 
-def _coherent_get_run(run_id: str):
+def _apply_run_delta(snapshot: dict[str, Any], after_event: int | None) -> dict[str, Any]:
+    if after_event is None:
+        return snapshot
+    requested = max(0, int(after_event))
+    events = snapshot.get("events")
+    if not isinstance(events, list):
+        events = []
+    event_count = len(events)
+    start = min(requested, event_count)
+    snapshot["events"] = events[start:]
+    snapshot["events_from"] = start
+    snapshot["event_count"] = event_count
+    snapshot.pop("checkpoint", None)
+    snapshot.pop("context_memory_records", None)
+    return snapshot
+
+
+_core._apply_run_delta = _apply_run_delta
+
+
+def _coherent_get_run(run_id: str, after_event: int | None = None):
     """Never expose a terminal status with an older in-memory payload.
 
     Active runs are polled frequently by the UI.  Reading and decoding the whole
@@ -601,7 +621,8 @@ def _coherent_get_run(run_id: str):
                     current.update(copy.deepcopy(persisted))
         else:
             snapshot["status"] = persisted_status
-    return snapshot
+
+    return _apply_run_delta(snapshot, after_event)
 
 
 def _health_live() -> dict[str, str]:

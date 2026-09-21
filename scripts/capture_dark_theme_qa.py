@@ -32,14 +32,17 @@ def main() -> None:
         page.on("console", lambda msg: browser_errors.append(f"console: {msg.text}") if msg.type == "error" else None)
 
         page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30_000)
-        page.wait_for_function("document.body.classList.contains('ready')", timeout=15_000)
+        page.locator("body.ready").wait_for(state="attached", timeout=15_000)
 
         # Build a real completed search state instead of capturing an empty shell.
         page.locator("#newTaskBtn").click()
         page.locator('.scene[data-scene="search"]').click()
         page.locator("#input").fill(PROMPT)
         page.locator("#sendBtn").click()
-        page.wait_for_function("document.getElementById('stateText').textContent === '已完成'", timeout=30_000)
+        page.locator("#stateText").get_by_text("已完成", exact=True).wait_for(
+            state="visible",
+            timeout=30_000,
+        )
         for selector in (
             "#resultSnapshot:not([hidden])",
             "#resultAnalysis:not([hidden])",
@@ -49,7 +52,10 @@ def main() -> None:
             page.wait_for_selector(selector, state="attached", timeout=8_000)
 
         page.locator('[data-theme-choice="dark"]').click()
-        page.wait_for_function("document.documentElement.dataset.theme === 'dark'", timeout=3_000)
+        page.locator("html[data-theme='dark']").wait_for(
+            state="attached",
+            timeout=3_000,
+        )
 
         # The dark theme must read as a real surface ladder, not several nearly-black aliases.
         levels = {
