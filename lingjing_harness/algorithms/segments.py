@@ -116,6 +116,43 @@ class SegmentRouter:
             "unseen_spread": _spread(unseen),
         }
 
+    @staticmethod
+    def _search_routing_signature(search: SearchEngine) -> tuple[str, str]:
+        config = search.config
+        return (str(config.query_strategy), str(config.candidate_strategy))
+
+    def rebind(
+        self,
+        catalog: Catalog,
+        search: SearchEngine,
+        recommend: RecommendationEngine,
+    ) -> "SegmentRouter":
+        """Reuse traffic calibration when the routing basis is unchanged.
+
+        Search routing features depend on the query/candidate strategies used by
+        prepare; recommendation routing features depend only on catalog/user
+        history. Forked engines share the same catalog features, so a fork can
+        reuse the expensive production-traffic calibration unless one of the
+        search routing strategies changed.
+        """
+
+        if (
+            catalog is not self.catalog
+            or self._search_routing_signature(search)
+            != self._search_routing_signature(self.search)
+        ):
+            return type(self)(catalog, search, recommend)
+
+        clone = object.__new__(type(self))
+        clone.catalog = catalog
+        clone.search = search
+        clone.recommend = recommend
+        clone._search_calibration = self._search_calibration
+        clone.search_thresholds = self.search_thresholds
+        clone._recommend_calibration = self._recommend_calibration
+        clone.recommend_thresholds = self.recommend_thresholds
+        return clone
+
     def search_features(self, query: str) -> SearchRequestFeatures:
         prepare = getattr(self.search, "routing_prepare", self.search.prepare)
         prepared = prepare((query or "").strip())
