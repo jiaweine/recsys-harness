@@ -1,0 +1,59 @@
+name: Run Poll Performance
+
+on:
+  push:
+    branches:
+      - perf/run-poll-hotpath
+  pull_request:
+    paths:
+      - "lingjing_harness/api.py"
+      - "lingjing_harness/store.py"
+      - "scripts/run_poll_benchmark.py"
+      - ".github/workflows/run-poll-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: medium
+            events: 80
+            payload_bytes: 4096
+            max_poll_p50_ms: 0.8
+            min_concurrent_rps: 900
+          - label: large
+            events: 160
+            payload_bytes: 8192
+            max_poll_p50_ms: 1.0
+            min_concurrent_rps: 700
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Benchmark active run polling (${{ matrix.label }})
+        run: |
+          for pass in 1 2 3; do
+            echo "run poll performance ${{ matrix.label }} pass $pass/3"
+            python scripts/run_poll_benchmark.py \
+              --events ${{ matrix.events }} \
+              --payload-bytes ${{ matrix.payload_bytes }} \
+              --repeats 120 \
+              --workers 8 \
+              --max-status-p50-ms 0.05 \
+              --max-poll-p50-ms ${{ matrix.max_poll_p50_ms }} \
+              --min-status-speedup 8 \
+              --min-copy-speedup 1.5 \
+              --min-poll-speedup 2.0 \
+              --min-concurrent-rps ${{ matrix.min_concurrent_rps }}
+          done

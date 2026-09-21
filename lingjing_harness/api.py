@@ -489,6 +489,45 @@ _core._RunLeaseLost = _RunLeaseLost
 _RUN_SNAPSHOT_RETRIES = 3
 
 
+def _clone_run_value(value: Any) -> Any:
+    """Clone the JSON-shaped run state without generic deepcopy overhead.
+
+    Persisted run snapshots are JSON-compatible. Exact built-in dict/list nodes
+    can therefore be copied recursively without deepcopy's memo/type machinery.
+    Subclasses and unexpected objects still fall back to deepcopy so custom
+    mutation/error semantics remain visible to the bounded retry boundary.
+    """
+
+    value_type = type(value)
+    if value is None or value_type in (str, int, float, bool):
+        return value
+    if value_type is dict:
+        cloned = value.copy()
+        for key, child in value.items():
+            child_type = type(child)
+            if child is not None and child_type not in (str, int, float, bool):
+                cloned[key] = _clone_run_value(child)
+        return cloned
+    if value_type is list:
+        cloned = value.copy()
+        for index, child in enumerate(value):
+            child_type = type(child)
+            if child is not None and child_type not in (str, int, float, bool):
+                cloned[index] = _clone_run_value(child)
+        return cloned
+    if value_type is tuple:
+        if all(
+            child is None or type(child) in (str, int, float, bool)
+            for child in value
+        ):
+            return value
+        return tuple(_clone_run_value(child) for child in value)
+    return copy.deepcopy(value)
+
+
+_core._clone_run_value = _clone_run_value
+
+
 def _snapshot_in_memory_run(run_id: str) -> dict[str, Any] | None:
     """Copy one run without letting a transient nested-mutation race escape.
 
@@ -506,7 +545,7 @@ def _snapshot_in_memory_run(run_id: str) -> dict[str, Any] | None:
             if row is None:
                 return None
             try:
-                return copy.deepcopy(row)
+                return _clone_run_value(row)
             except RuntimeError as exc:
                 if "dictionary changed size during iteration" not in str(exc):
                     raise
@@ -517,6 +556,9 @@ def _snapshot_in_memory_run(run_id: str) -> dict[str, Any] | None:
         return _core.store.get_run(run_id)
     except KeyError as exc:
         raise HTTPException(404, "执行任务不存在") from exc
+
+
+_core._snapshot_in_memory_run = _snapshot_in_memory_run
 
 
 def _coherent_get_run(run_id: str):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from hashlib import blake2b
 import sqlite3
 import threading
@@ -18,6 +19,10 @@ class WorkspaceStore:
         self.path = str(path)
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._read_watch_lock = threading.Lock()
+        self._read_watch_connection: sqlite3.Connection | None = None
+        self._read_watch_pid = os.getpid()
+        self._run_status_cache: dict[str, tuple[int, str | None]] = {}
         self._init()
 
     def _connect(self) -> sqlite3.Connection:
@@ -1192,12 +1197,95 @@ class WorkspaceStore:
             )
             return int(cursor.rowcount)
 
+    def _read_data_version_locked(self) -> int | None:
+        """Return one durable invalidation token from a persistent read watcher."""
+
+        if self.path == ":memory:":
+            return None
+        connection = self._read_watch_connection
+        current_pid = os.getpid()
+        if connection is not None and self._read_watch_pid != current_pid:
+            try:
+                connection.close()
+            except sqlite3.Error:
+                pass
+            connection = None
+            self._read_watch_connection = None
+            self._run_status_cache.clear()
+        if connection is None:
+            connection = sqlite3.connect(
+                self.path,
+                check_same_thread=False,
+                timeout=10.0,
+            )
+            connection.execute("pragma busy_timeout=10000")
+            connection.execute("pragma query_only=1")
+            self._read_watch_connection = connection
+            self._read_watch_pid = current_pid
+            self._run_status_cache.clear()
+        try:
+            row = connection.execute("pragma data_version").fetchone()
+        except sqlite3.Error:
+            try:
+                connection.close()
+            except sqlite3.Error:
+                pass
+            self._read_watch_connection = None
+            self._run_status_cache.clear()
+            connection = sqlite3.connect(
+                self.path,
+                check_same_thread=False,
+                timeout=10.0,
+            )
+            connection.execute("pragma busy_timeout=10000")
+            connection.execute("pragma query_only=1")
+            self._read_watch_connection = connection
+            self._read_watch_pid = current_pid
+            row = connection.execute("pragma data_version").fetchone()
+        return int(row[0]) if row else 0
+
     def run_status(self, run_id: str) -> str | None:
-        with self._connect() as connection:
-            row = connection.execute(
-                "select status from runs where run_id=?", (run_id,)
-            ).fetchone()
-        return str(row["status"]) if row else None
+        run_id = str(run_id)
+        if self.path == ":memory:":
+            with self._connect() as connection:
+                row = connection.execute(
+                    "select status from runs where run_id=?", (run_id,)
+                ).fetchone()
+            return str(row["status"]) if row else None
+
+        # Active runs are polled far more often than their durable status changes.
+        # SQLite data_version is exact for commits made by every other connection,
+        # including this store's normal short-lived write connections and other
+        # workers. Reuse the point-read result only while that durable version is
+        # unchanged; double-check around misses so a racing terminal transition is
+        # never hidden behind a stale cache entry.
+        with self._read_watch_lock:
+            for _ in range(2):
+                version = self._read_data_version_locked()
+                cached = self._run_status_cache.get(run_id)
+                if version is not None and cached is not None and cached[0] == version:
+                    return cached[1]
+
+                with self._connect() as connection:
+                    row = connection.execute(
+                        "select status from runs where run_id=?", (run_id,)
+                    ).fetchone()
+                status = str(row["status"]) if row else None
+                after = self._read_data_version_locked()
+                if version is not None and after == version:
+                    if run_id not in self._run_status_cache and len(self._run_status_cache) >= 512:
+                        self._run_status_cache.clear()
+                    self._run_status_cache[run_id] = (after, status)
+                    return status
+
+            # Under continuous commits, prefer one uncached point read to pinning
+            # any result to an unstable data-version sample.
+            self._run_status_cache.pop(run_id, None)
+            with self._connect() as connection:
+                row = connection.execute(
+                    "select status from runs where run_id=?", (run_id,)
+                ).fetchone()
+            return str(row["status"]) if row else None
 
     def request_cancel(self, run_id: str) -> str:
         now = time.time()
