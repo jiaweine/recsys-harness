@@ -10,6 +10,7 @@ on:
       - "lingjing_harness/store.py"
       - "lingjing_harness/store_conversation_detail_snapshot.py"
       - "scripts/conversation_read_benchmark.py"
+      - "tests/test_conversation_list_snapshot.py"
       - ".github/workflows/conversation-read-performance.yml"
   workflow_dispatch:
 
@@ -30,10 +31,15 @@ jobs:
       - run: pip install -e . --no-deps
       - name: Benchmark conversation reads
         run: |
-          python scripts/conversation_read_benchmark.py \
-            --conversations 40 \
-            --messages 200 \
-            --events 160 \
-            --payload-bytes 8192 \
-            --repeats 80 \
-            --workers 8
+          for pass in 1 2 3; do
+            echo "conversation read performance pass $pass/3"
+            python scripts/conversation_read_benchmark.py \
+              --conversations 40 \
+              --messages 200 \
+              --events 160 \
+              --payload-bytes 8192 \
+              --repeats 80 \
+              --workers 8 \
+              --max-list-p50-ms 0.5 \
+              --min-list-speedup 1.2
+          done
