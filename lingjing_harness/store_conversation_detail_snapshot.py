@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 from typing import Any
 
 
@@ -37,7 +39,60 @@ def install_conversation_detail_snapshot_boundary(store_module: Any) -> None:
             messages.append(data)
         return {**dict(conversation_row), "messages": messages}
 
+    def conversation_active_run_view(
+        self,
+        conversation_id: str,
+    ) -> dict[str, Any] | None:
+        """Return only the active-run fields rendered by conversation detail.
+
+        Active run snapshots can grow to megabytes with checkpoints and tool
+        observations. The detail surface only needs run_id/status/events, so let
+        SQLite's JSON engine project the events subtree instead of transferring and
+        decoding the entire snapshot in Python. Older SQLite builds fall back to
+        the existing full-snapshot reader without changing public semantics.
+        """
+
+        try:
+            with self._connect() as connection:
+                row = connection.execute(
+                    """
+                    select run_id,status,json_extract(snapshot,'$.events') as events
+                    from runs
+                    where conversation_id=?
+                      and status in ('running','interrupted','cancel_requested')
+                    order by updated_at desc limit 1
+                    """,
+                    (conversation_id,),
+                ).fetchone()
+        except sqlite3.OperationalError as exc:
+            if "json_extract" not in str(exc).lower():
+                raise
+            active = self.active_run_for_conversation(conversation_id)
+            if not active:
+                return None
+            return {
+                "run_id": active["run_id"],
+                "status": active["status"],
+                "events": active.get("events", []),
+            }
+
+        if not row:
+            return None
+        raw_events = row["events"]
+        try:
+            events = json.loads(raw_events) if raw_events else []
+        except (json.JSONDecodeError, TypeError):
+            events = []
+        if not isinstance(events, list):
+            events = []
+        return {
+            "run_id": str(row["run_id"]),
+            "status": str(row["status"]),
+            "events": events,
+        }
+
     cls.get_conversation = get_conversation
+    cls.conversation_active_run_view = conversation_active_run_view
     cls._CONVERSATION_DETAIL_SNAPSHOT_BOUNDARY_INSTALLED = True
 
 
