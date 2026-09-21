@@ -1,0 +1,36 @@
+name: Read API Performance
+
+on:
+  push:
+    branches:
+      - perf/read-api-hotpath
+  pull_request:
+    paths:
+      - "lingjing_harness/api_core.py"
+      - "lingjing_harness/store.py"
+      - "scripts/read_api_benchmark.py"
+      - ".github/workflows/read-api-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Benchmark conversation list
+        run: |
+          python scripts/read_api_benchmark.py \
+            --conversations 50000 \
+            --active-runs 20000 \
+            --repeats 30 \
+            --limit 40
