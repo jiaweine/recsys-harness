@@ -55,7 +55,7 @@ class RecommendationEngine:
             item.item_id: hashed_vector(" ".join([item.title, item.text, *item.categories]))
             for item in catalog.items
         }
-        self._popularity = {item.item_id: catalog.popularity_norm(item) for item in catalog.items}
+        self._popularity = catalog.popularity_norms()
         self._by_user: dict[str, list] = defaultdict(list)
         for event in catalog.interactions:
             self._by_user[event.user_id].append(event)
