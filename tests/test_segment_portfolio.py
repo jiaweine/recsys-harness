@@ -117,6 +117,34 @@ def test_segment_router_uses_traffic_quantiles_and_preserves_request_identity():
     assert len(set(all_request_ids)) == 24
 
 
+
+def test_segment_manifest_and_catalog_partition_reuse_calibrated_assignments(monkeypatch):
+    catalog = _portfolio_catalog(search_requests=24, recommend_requests=18)
+    router = SegmentRouter(catalog, SearchEngine(catalog), RecommendationEngine(catalog))
+    expected_search = router.manifest("search")
+    expected_recommend = router.manifest("recommend")
+
+    def fail(*args, **kwargs):
+        raise AssertionError("catalog routing should reuse calibrated request assignments")
+
+    monkeypatch.setattr(router, "search_features", fail)
+    monkeypatch.setattr(router, "recommend_features", fail)
+
+    assert router.manifest("search") == expected_search
+    assert router.manifest("recommend") == expected_recommend
+
+    search_partitions = router.partition_events(catalog.events, surface="search")
+    recommend_partitions = router.partition_events(catalog.events, surface="recommend")
+    assert {
+        segment: len(request_groups(rows, surface="search"))
+        for segment, rows in search_partitions.items()
+    } == expected_search["requests_by_segment"]
+    assert {
+        segment: len(request_groups(rows, surface="recommend"))
+        for segment, rows in recommend_partitions.items()
+    } == expected_recommend["requests_by_segment"]
+
+
 def test_unknown_recommend_user_routes_to_cold_start_without_a_numeric_cutoff():
     catalog = _portfolio_catalog()
     router = SegmentRouter(catalog, SearchEngine(catalog), RecommendationEngine(catalog))

@@ -50,6 +50,7 @@ class ToolRegistry:
             item_vectors=item_vectors,
         )
         self._validate_active_strategies()
+        self._catalog_inspection = self._build_catalog_inspection(catalog)
         self._specs = self._build_specs()
 
     def _build_specs(self) -> dict[str, ToolSpec]:
@@ -170,6 +171,30 @@ class ToolRegistry:
             return cls()
         return config
 
+    @staticmethod
+    def _build_catalog_inspection(catalog: Catalog) -> dict[str, Any]:
+        summary = catalog.summary()
+        issues: list[str] = []
+        if summary["interactions"] == 0:
+            issues.append("缺少用户行为记录，个性化结果会更多依赖内容本身")
+        elif summary["users"] < 3:
+            issues.append("可复核用户太少，推荐策略暂时不会进入自主激活")
+        if summary["queries"] == 0:
+            issues.append("缺少人工复核查询，搜索只能做结构性检查")
+        elif summary["queries"] < 3:
+            issues.append("人工复核查询太少，搜索策略暂时不会进入自主激活")
+        if summary["items"] < 12:
+            issues.append("内容规模较小，离线结论的稳定性有限")
+        duplicates = len(catalog.items) - len(
+            {item.title.strip().lower() for item in catalog.items}
+        )
+        if duplicates:
+            issues.append(f"发现 {duplicates} 条重复标题")
+        unavailable = sum(1 for item in catalog.items if not item.eligible)
+        if unavailable:
+            issues.append(f"有 {unavailable} 条内容当前不可展示")
+        return {"summary": dict(summary), "issues": tuple(issues)}
+
     def fork(self) -> "ToolRegistry":
         clone = object.__new__(ToolRegistry)
         clone.catalog = self.catalog
@@ -177,6 +202,7 @@ class ToolRegistry:
         clone.network = self.network
         clone.catalog_key = self.catalog_key
         clone.rollback_events = []
+        clone._catalog_inspection = self._catalog_inspection
         clone.search = self.search.with_config(clone._load_config("search", SearchConfig))
         clone.recommend = self.recommend.with_config(clone._load_config("recommend", RecommendConfig))
         clone._specs = clone._build_specs()
@@ -305,24 +331,8 @@ class ToolRegistry:
         return spec.handler(**args)
 
     def inspect_data(self) -> dict[str, Any]:
-        summary = self.catalog.summary()
-        issues = []
-        if summary["interactions"] == 0:
-            issues.append("缺少用户行为记录，个性化结果会更多依赖内容本身")
-        elif summary["users"] < 3:
-            issues.append("可复核用户太少，推荐策略暂时不会进入自主激活")
-        if summary["queries"] == 0:
-            issues.append("缺少人工复核查询，搜索只能做结构性检查")
-        elif summary["queries"] < 3:
-            issues.append("人工复核查询太少，搜索策略暂时不会进入自主激活")
-        if summary["items"] < 12:
-            issues.append("内容规模较小，离线结论的稳定性有限")
-        duplicates = len(self.catalog.items) - len({item.title.strip().lower() for item in self.catalog.items})
-        if duplicates:
-            issues.append(f"发现 {duplicates} 条重复标题")
-        unavailable = sum(1 for item in self.catalog.items if not item.eligible)
-        if unavailable:
-            issues.append(f"有 {unavailable} 条内容当前不可展示")
+        summary = dict(self._catalog_inspection["summary"])
+        issues = list(self._catalog_inspection["issues"])
         return {
             "summary": summary,
             "issues": issues,
