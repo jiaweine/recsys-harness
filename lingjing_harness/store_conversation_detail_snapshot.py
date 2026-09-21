@@ -37,7 +37,37 @@ def install_conversation_detail_snapshot_boundary(store_module: Any) -> None:
             messages.append(data)
         return {**dict(conversation_row), "messages": messages}
 
+    def list_conversations_with_active(
+        self,
+        limit: int = 40,
+    ) -> list[dict[str, Any]]:
+        """Return the conversation list and active marker from one DB snapshot."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                select c.*,
+                       exists(
+                         select 1 from runs r
+                         where r.conversation_id=c.id
+                           and r.status in ('running','interrupted','cancel_requested')
+                         limit 1
+                       ) as active
+                from conversations c
+                order by c.updated_at desc
+                limit ?
+                """,
+                (limit,),
+            ).fetchall()
+        output: list[dict[str, Any]] = []
+        for row in rows:
+            data = dict(row)
+            data["active"] = bool(data.get("active"))
+            output.append(data)
+        return output
+
     cls.get_conversation = get_conversation
+    cls.list_conversations_with_active = list_conversations_with_active
     cls._CONVERSATION_DETAIL_SNAPSHOT_BOUNDARY_INSTALLED = True
 
 
