@@ -32,6 +32,8 @@ class WorkspaceStore:
           id text primary key,title text not null,scene text not null,
           created_at real not null,updated_at real not null
         );
+        create index if not exists idx_conversations_updated_at
+          on conversations(updated_at desc);
         create table if not exists messages(
           id text primary key,conversation_id text not null,role text not null,
           content text not null,payload text not null,created_at real not null
@@ -164,6 +166,39 @@ class WorkspaceStore:
                 "select * from conversations order by updated_at desc limit ?", (limit,)
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def list_conversations_with_activity(self, limit: int = 40) -> list[dict[str, Any]]:
+        """Return the visible conversation window with indexed active-run state."""
+
+        limit = max(1, int(limit))
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                select
+                  c.id,c.title,c.scene,c.created_at,c.updated_at,
+                  exists(
+                    select 1 from runs r
+                    where r.conversation_id=c.id
+                      and r.status in ('running','interrupted','cancel_requested')
+                    limit 1
+                  ) as active
+                from conversations c
+                order by c.updated_at desc
+                limit ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [
+            {
+                "id": str(row["id"]),
+                "title": row["title"],
+                "scene": row["scene"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+                "active": bool(row["active"]),
+            }
+            for row in rows
+        ]
 
     def create_conversation(self, title: str = "新的体验任务", scene: str = "audit") -> dict[str, Any]:
         now = time.time()
