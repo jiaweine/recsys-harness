@@ -655,9 +655,18 @@ def get_conversation(cid: str):
         conversation = store.get_conversation(cid)
     except KeyError as exc:
         raise HTTPException(404, "任务不存在") from exc
-    active = store.active_run_for_conversation(cid)
+    active_view = getattr(store, "conversation_active_run_view", None)
+    active = (
+        active_view(cid)
+        if callable(active_view)
+        else store.active_run_for_conversation(cid)
+    )
     if active:
-        conversation["active_run"] = {"run_id": active["run_id"], "status": active["status"], "events": active.get("events", [])}
+        conversation["active_run"] = {
+            "run_id": active["run_id"],
+            "status": active["status"],
+            "events": active.get("events", []),
+        }
     else:
         conversation["active_run"] = None
     return conversation
