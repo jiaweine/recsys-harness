@@ -72,8 +72,8 @@ class ToolRegistry(_ProductionToolRegistry):
             return None
         return config
 
-    def _refresh_portfolio(self, *, segment_router: SegmentRouter | None = None) -> None:
-        self.segment_router = segment_router or SegmentRouter(self.catalog, self.search, self.recommend)
+    def _refresh_portfolio_with_router(self, segment_router: SegmentRouter) -> None:
+        self.segment_router = segment_router
         self.search_portfolio = {
             segment: config
             for segment in self.segment_router.known_segments("search")
@@ -84,6 +84,11 @@ class ToolRegistry(_ProductionToolRegistry):
             for segment in self.segment_router.known_segments("recommend")
             if (config := self._load_segment_config("recommend", segment, RecommendConfig)) is not None
         }
+
+    def _refresh_portfolio(self) -> None:
+        self._refresh_portfolio_with_router(
+            SegmentRouter(self.catalog, self.search, self.recommend)
+        )
 
     def _validate_active_portfolio(self) -> None:
         if not self.catalog.reward_spec:
@@ -182,12 +187,13 @@ class ToolRegistry(_ProductionToolRegistry):
         clone.search = self.search.with_config(clone._load_config("search", SearchConfig))
         clone.recommend = self.recommend.with_config(clone._load_config("recommend", RecommendConfig))
         clone._specs = clone._build_specs()
-        clone._refresh_portfolio(
-            segment_router=self.segment_router.rebind(
+        ToolRegistry._refresh_portfolio_with_router(
+            clone,
+            self.segment_router.rebind(
                 clone.catalog,
                 clone.search,
                 clone.recommend,
-            )
+            ),
         )
         clone._validate_active_portfolio()
         return clone
