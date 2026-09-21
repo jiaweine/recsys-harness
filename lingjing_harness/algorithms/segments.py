@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Iterable
 
@@ -84,10 +85,14 @@ class SegmentRouter:
         self.recommend = recommend
 
         search_rows = request_groups(catalog.events, surface="search")
-        self._search_calibration = [
-            self.search_features(next((row.query for row in rows if row.query), ""))
-            for _, rows in sorted(search_rows.items())
+        search_calibration = [
+            (
+                request_id,
+                self.search_features(next((row.query for row in rows if row.query), "")),
+            )
+            for request_id, rows in sorted(search_rows.items())
         ]
+        self._search_calibration = [features for _, features in search_calibration]
         search_candidates = [float(row.candidate_count) for row in self._search_calibration]
         search_anchors = [float(row.anchor_strength) for row in self._search_calibration]
         self.search_thresholds = {
@@ -99,21 +104,38 @@ class SegmentRouter:
         }
 
         recommend_rows = request_groups(catalog.events, surface="recommend")
-        warm_features = []
-        for _, rows in sorted(recommend_rows.items()):
+        recommend_calibration: list[tuple[str, RecommendRequestFeatures]] = []
+        for request_id, rows in sorted(recommend_rows.items()):
             user_id = next((row.user_id for row in rows if row.user_id), "")
-            features = self.recommend_features(user_id)
-            if features.history_events > 0:
-                warm_features.append(features)
-        self._recommend_calibration = warm_features
-        histories = [float(row.history_events) for row in warm_features]
-        unseen = [float(row.eligible_unseen) for row in warm_features]
+            recommend_calibration.append((request_id, self.recommend_features(user_id)))
+        self._recommend_calibration = [
+            features
+            for _, features in recommend_calibration
+            if features.history_events > 0
+        ]
+        histories = [float(row.history_events) for row in self._recommend_calibration]
+        unseen = [float(row.eligible_unseen) for row in self._recommend_calibration]
         self.recommend_thresholds = {
             "history_low": _quantile(histories, 1.0 / 3.0),
             "history_high": _quantile(histories, 2.0 / 3.0),
             "unseen_low": _quantile(unseen, 1.0 / 3.0),
             "history_spread": _spread(histories),
             "unseen_spread": _spread(unseen),
+        }
+
+        self._catalog_request_segments = {
+            "search": {
+                request_id: self._search_segment_for_features(features)
+                for request_id, features in search_calibration
+            },
+            "recommend": {
+                request_id: self._recommend_segment_for_features(features)
+                for request_id, features in recommend_calibration
+            },
+        }
+        self._catalog_segment_counts = {
+            surface: Counter(assignments.values())
+            for surface, assignments in self._catalog_request_segments.items()
         }
 
     @staticmethod
@@ -151,6 +173,8 @@ class SegmentRouter:
         clone.search_thresholds = self.search_thresholds
         clone._recommend_calibration = self._recommend_calibration
         clone.recommend_thresholds = self.recommend_thresholds
+        clone._catalog_request_segments = self._catalog_request_segments
+        clone._catalog_segment_counts = self._catalog_segment_counts
         return clone
 
     def search_features(self, query: str) -> SearchRequestFeatures:
@@ -179,8 +203,7 @@ class SegmentRouter:
             eligible_unseen=eligible_unseen,
         )
 
-    def search_segment(self, query: str) -> str:
-        features = self.search_features(query)
+    def _search_segment_for_features(self, features: SearchRequestFeatures) -> str:
         if features.candidate_count == 0:
             return "search/no-anchor"
         if len(self._search_calibration) < MIN_ROUTING_CONTEXTS:
@@ -194,8 +217,7 @@ class SegmentRouter:
             return "search/strong-anchor"
         return "search/mixed"
 
-    def recommend_segment(self, user_id: str) -> str:
-        features = self.recommend_features(user_id)
+    def _recommend_segment_for_features(self, features: RecommendRequestFeatures) -> str:
         if features.history_events == 0:
             return "recommend/cold-start"
         if len(self._recommend_calibration) < MIN_ROUTING_CONTEXTS:
@@ -209,44 +231,56 @@ class SegmentRouter:
             return "recommend/established"
         return "recommend/mixed"
 
+    def search_segment(self, query: str) -> str:
+        return self._search_segment_for_features(self.search_features(query))
+
+    def recommend_segment(self, user_id: str) -> str:
+        return self._recommend_segment_for_features(self.recommend_features(user_id))
+
     def partition_events(
         self,
         events: Iterable[ExposureEvent],
         *,
         surface: str,
     ) -> dict[str, list[ExposureEvent]]:
+        if surface not in {"search", "recommend"}:
+            raise ValueError("surface must be search or recommend")
         grouped = request_groups(events, surface=surface)
+        catalog_segments = self._catalog_request_segments[surface]
+        cached = (
+            catalog_segments
+            if events is self.catalog.events
+            and grouped.keys() == catalog_segments.keys()
+            else None
+        )
         partitions: dict[str, list[ExposureEvent]] = {}
         for request_id, rows in sorted(grouped.items()):
-            if surface == "search":
+            if cached is not None:
+                segment = cached[request_id]
+            elif surface == "search":
                 query = next((row.query for row in rows if row.query), "")
                 segment = self.search_segment(query)
-            elif surface == "recommend":
+            else:
                 user_id = next((row.user_id for row in rows if row.user_id), "")
                 segment = self.recommend_segment(user_id)
-            else:
-                raise ValueError("surface must be search or recommend")
             partitions.setdefault(segment, []).extend(rows)
         return partitions
 
     def manifest(self, surface: str) -> dict[str, Any]:
-        partitions = self.partition_events(self.catalog.events, surface=surface)
         if surface == "search":
             thresholds = dict(self.search_thresholds)
-            contexts = len(self._search_calibration)
         elif surface == "recommend":
             thresholds = dict(self.recommend_thresholds)
-            contexts = len(request_groups(self.catalog.events, surface="recommend"))
         else:
             raise ValueError("surface must be search or recommend")
         return {
             "surface": surface,
             "routing_basis": "production_traffic_quantiles",
-            "contexts": contexts,
+            "contexts": len(self._catalog_request_segments[surface]),
             "thresholds": thresholds,
             "requests_by_segment": {
-                segment: len(request_groups(rows, surface=surface))
-                for segment, rows in sorted(partitions.items())
+                segment: int(count)
+                for segment, count in sorted(self._catalog_segment_counts[surface].items())
             },
         }
 

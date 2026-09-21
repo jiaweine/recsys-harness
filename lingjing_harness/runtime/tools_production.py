@@ -60,6 +60,7 @@ class ToolRegistry(CoreToolRegistry):
         clone.network = self.network
         clone.catalog_key = self.catalog_key
         clone.rollback_events = []
+        clone._catalog_inspection = self._catalog_inspection
         clone.search = self.search.with_config(clone._load_config("search", SearchConfig))
         clone.recommend = self.recommend.with_config(clone._load_config("recommend", RecommendConfig))
         clone._specs = clone._build_specs()
