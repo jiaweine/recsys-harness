@@ -62,6 +62,16 @@ def run_benchmark(*, items: int, repeats: int) -> dict[str, object]:
         lambda: [catalog.popularity_norm(item) for item in catalog.items],
         repeats,
     )
+    popularity_batch_samples, popularity_batch = _timed(
+        catalog.popularity_norms,
+        repeats,
+    )
+    expected_batch = {
+        item.item_id: value
+        for item, value in zip(catalog.items, popularity_rows, strict=True)
+    }
+    if popularity_batch != expected_batch:
+        raise AssertionError("batch popularity normalization changed values")
 
     search_init_samples, search = _timed(
         lambda: SearchEngine(catalog),
@@ -101,6 +111,7 @@ def run_benchmark(*, items: int, repeats: int) -> dict[str, object]:
         "items": items,
         "repeats": repeats,
         "popularity_full_pass": _summary(popularity_samples),
+        "popularity_batch": _summary(popularity_batch_samples),
         "search_engine_init": _summary(search_init_samples),
         "search_prepare_common": _summary(prepare_samples),
         "recommend_engine_init": _summary(recommend_init_samples),
@@ -115,13 +126,55 @@ def main() -> None:
     )
     parser.add_argument("--items", type=int, default=6000)
     parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--max-batch-p50-ms", type=float, default=0.0)
+    parser.add_argument("--max-search-prepare-p50-ms", type=float, default=0.0)
+    parser.add_argument("--max-recommend-init-p50-ms", type=float, default=0.0)
+    parser.add_argument("--min-normalization-speedup", type=float, default=0.0)
     args = parser.parse_args()
 
     result = run_benchmark(
         items=max(1000, args.items),
         repeats=max(2, args.repeats),
     )
+    direct_p50 = float(result["popularity_full_pass"]["p50_ms"])
+    batch_p50 = float(result["popularity_batch"]["p50_ms"])
+    speedup = direct_p50 / max(batch_p50, 1e-9)
+    result["normalization_speedup_p50"] = round(speedup, 2)
     print(json.dumps(result, sort_keys=True))
+
+    failures: list[str] = []
+    if args.max_batch_p50_ms > 0 and batch_p50 > args.max_batch_p50_ms:
+        failures.append(
+            f"batch popularity p50={batch_p50} > {args.max_batch_p50_ms}"
+        )
+    search_prepare_p50 = float(result["search_prepare_common"]["p50_ms"])
+    if (
+        args.max_search_prepare_p50_ms > 0
+        and search_prepare_p50 > args.max_search_prepare_p50_ms
+    ):
+        failures.append(
+            f"search prepare p50={search_prepare_p50} > {args.max_search_prepare_p50_ms}"
+        )
+    recommend_init_p50 = float(result["recommend_engine_init"]["p50_ms"])
+    if (
+        args.max_recommend_init_p50_ms > 0
+        and recommend_init_p50 > args.max_recommend_init_p50_ms
+    ):
+        failures.append(
+            f"recommend init p50={recommend_init_p50} > {args.max_recommend_init_p50_ms}"
+        )
+    if (
+        args.min_normalization_speedup > 0
+        and speedup < args.min_normalization_speedup
+    ):
+        failures.append(
+            f"normalization speedup={speedup:.2f} < {args.min_normalization_speedup}"
+        )
+    if failures:
+        raise SystemExit(
+            "popularity hot-path performance guardrail failed: "
+            + "; ".join(failures)
+        )
 
 
 if __name__ == "__main__":
