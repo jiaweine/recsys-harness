@@ -22,10 +22,10 @@ def test_health_probes_are_public_even_when_api_auth_is_required(monkeypatch) ->
 def test_liveness_does_not_depend_on_durable_store(monkeypatch) -> None:
     client = TestClient(app)
 
-    def unavailable() -> str:
+    def unavailable(*args, **kwargs):
         raise RuntimeError("sqlite unavailable")
 
-    monkeypatch.setattr(api_module.store, "workspace_revision", unavailable)
+    monkeypatch.setattr(api_module.store, "workspace_readiness_snapshot", unavailable)
 
     assert client.get("/health/live").status_code == 200
     ready = client.get("/health/ready")
@@ -35,7 +35,15 @@ def test_liveness_does_not_depend_on_durable_store(monkeypatch) -> None:
 
 def test_readiness_fails_closed_on_workspace_revision_mismatch(monkeypatch) -> None:
     client = TestClient(app)
-    monkeypatch.setattr(api_module.store, "workspace_revision", lambda: "stale-revision")
+    monkeypatch.setattr(
+        api_module.store,
+        "workspace_readiness_snapshot",
+        lambda *args, **kwargs: {
+            "catalog_revision": "stale-revision",
+            "publication_revision": "",
+            "update_active": False,
+        },
+    )
 
     ready = client.get("/health/ready")
 
@@ -45,8 +53,15 @@ def test_readiness_fails_closed_on_workspace_revision_mismatch(monkeypatch) -> N
 
 def test_readiness_fails_while_workspace_update_lease_is_active(monkeypatch) -> None:
     client = TestClient(app)
-    monkeypatch.setattr(api_module.store, "workspace_revision", lambda: api_module.CATALOG_REVISION)
-    monkeypatch.setattr(api_module.store, "workspace_update_active", lambda: True)
+    monkeypatch.setattr(
+        api_module.store,
+        "workspace_readiness_snapshot",
+        lambda *args, **kwargs: {
+            "catalog_revision": api_module.CATALOG_REVISION,
+            "publication_revision": "",
+            "update_active": True,
+        },
+    )
 
     ready = client.get("/health/ready")
 
