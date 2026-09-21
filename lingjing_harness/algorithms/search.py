@@ -68,6 +68,7 @@ class SearchEngine:
                     self._postings.setdefault(token, []).append(item.item_id)
             self._vectors[item.item_id] = hashed_vector(body)
         self._avg_len = sum(map(len, self._doc_tokens.values())) / max(1, len(self._doc_tokens))
+        self._popularity = catalog.popularity_norms()
 
     def with_config(self, config: SearchConfig) -> "SearchEngine":
         clone = object.__new__(SearchEngine)
@@ -81,6 +82,7 @@ class SearchEngine:
         clone._df = self._df
         clone._vectors = self._vectors
         clone._avg_len = self._avg_len
+        clone._popularity = self._popularity
         return clone
 
     def capability_manifest(self) -> dict[str, list[dict]]:
@@ -162,7 +164,7 @@ class SearchEngine:
             )
         for row in rows:
             row["lex"] = row["lex_raw"] / max_lex
-            row["pop"] = self.catalog.popularity_norm(row["item"])
+            row["pop"] = self._popularity[row["item"].item_id]
         return [
             row
             for row in rows
