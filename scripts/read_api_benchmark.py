@@ -149,17 +149,39 @@ def run_benchmark(
         _candidate(store, limit)
 
         legacy_samples = _timed(lambda: _legacy(store, limit), repeats)
-        candidate_samples = _timed(lambda: _candidate(store, limit), repeats * 2)
+        candidate_samples = _timed(lambda: _candidate(store, limit), repeats)
+
+        with sqlite3.connect(store.path) as connection:
+            connection.execute(
+                "create index if not exists idx_conversations_updated_at "
+                "on conversations(updated_at desc)"
+            )
+            connection.commit()
+
+        _legacy(store, limit)
+        _candidate(store, limit)
+        indexed_legacy_samples = _timed(lambda: _legacy(store, limit), repeats)
+        indexed_candidate_samples = _timed(lambda: _candidate(store, limit), repeats * 2)
 
         legacy_p50 = _summary(legacy_samples)["p50_ms"]
-        candidate_p50 = _summary(candidate_samples)["p50_ms"]
+        indexed_legacy_p50 = _summary(indexed_legacy_samples)["p50_ms"]
+        indexed_candidate_p50 = _summary(indexed_candidate_samples)["p50_ms"]
         return {
             "conversations": conversations,
             "active_runs": active_runs,
             "limit": limit,
             "legacy_two_query": _summary(legacy_samples),
             "candidate_single_query": _summary(candidate_samples),
-            "p50_speedup": round(legacy_p50 / max(candidate_p50, 1e-9), 2),
+            "indexed_legacy_two_query": _summary(indexed_legacy_samples),
+            "indexed_candidate_single_query": _summary(indexed_candidate_samples),
+            "index_only_speedup": round(
+                legacy_p50 / max(indexed_legacy_p50, 1e-9),
+                2,
+            ),
+            "indexed_single_query_speedup": round(
+                legacy_p50 / max(indexed_candidate_p50, 1e-9),
+                2,
+            ),
         }
 
 
