@@ -32,6 +32,8 @@ class WorkspaceStore:
           id text primary key,title text not null,scene text not null,
           created_at real not null,updated_at real not null
         );
+        create index if not exists idx_conversations_updated_at
+          on conversations(updated_at desc);
         create table if not exists messages(
           id text primary key,conversation_id text not null,role text not null,
           content text not null,payload text not null,created_at real not null
