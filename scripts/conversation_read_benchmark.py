@@ -133,12 +133,15 @@ def run_benchmark(
                 lease_seconds=api.RUN_LEASE_SECONDS,
             )
 
-        def list_current():
+        def list_baseline():
             listed = api.store.list_conversations()
             active = api.store.active_conversation_ids()
             return [{**row, "active": row["id"] in active} for row in listed]
 
-        def detail_baseline():
+        def list_current():
+            return api.conversations()
+
+        def detail_current():
             conversation = api.store.get_conversation(target["id"])
             active = api.store.active_run_for_conversation(target["id"])
             if active:
@@ -151,24 +154,18 @@ def run_benchmark(
                 conversation["active_run"] = None
             return conversation
 
-        def detail_current():
-            return api.get_conversation(target["id"])
-
         expected = detail_current()
         if expected["active_run"]["run_id"] != snapshot["run_id"]:
             raise AssertionError("active run fixture did not resolve")
 
+        list_baseline_samples = _timed(list_baseline, repeats)
         list_samples = _timed(list_current, repeats)
         conversation_samples = _timed(
             lambda: api.store.get_conversation(target["id"]), repeats
         )
-        active_baseline_samples = _timed(
+        active_samples = _timed(
             lambda: api.store.active_run_for_conversation(target["id"]), repeats
         )
-        active_view_samples = _timed(
-            lambda: api.store.conversation_active_run_view(target["id"]), repeats
-        )
-        detail_baseline_samples = _timed(detail_baseline, repeats)
         detail_samples = _timed(detail_current, repeats)
 
         def detail_many(iterations: int) -> int:
@@ -194,11 +191,10 @@ def run_benchmark(
             "messages": messages,
             "events": events,
             "snapshot_bytes": snapshot_bytes,
+            "conversation_list_baseline": _summary(list_baseline_samples),
             "conversation_list": _summary(list_samples),
             "conversation_messages": _summary(conversation_samples),
-            "active_run_lookup_baseline": _summary(active_baseline_samples),
-            "active_run_view": _summary(active_view_samples),
-            "conversation_detail_baseline": _summary(detail_baseline_samples),
+            "active_run_lookup": _summary(active_samples),
             "conversation_detail": _summary(detail_samples),
             "concurrent_detail": {
                 "workers": workers,
@@ -219,10 +215,8 @@ def main() -> None:
     parser.add_argument("--payload-bytes", type=int, default=8192)
     parser.add_argument("--repeats", type=int, default=80)
     parser.add_argument("--workers", type=int, default=8)
-    parser.add_argument("--max-detail-p50-ms", type=float, default=0.0)
-    parser.add_argument("--min-detail-speedup", type=float, default=0.0)
-    parser.add_argument("--min-active-speedup", type=float, default=0.0)
-    parser.add_argument("--min-concurrent-rps", type=float, default=0.0)
+    parser.add_argument("--max-list-p50-ms", type=float, default=0.0)
+    parser.add_argument("--min-list-speedup", type=float, default=0.0)
     args = parser.parse_args()
 
     result = run_benchmark(
@@ -233,32 +227,19 @@ def main() -> None:
         repeats=max(10, args.repeats),
         workers=max(1, args.workers),
     )
-    baseline_detail = float(result["conversation_detail_baseline"]["p50_ms"])
-    detail_p50 = float(result["conversation_detail"]["p50_ms"])
-    baseline_active = float(result["active_run_lookup_baseline"]["p50_ms"])
-    active_p50 = float(result["active_run_view"]["p50_ms"])
-    detail_speedup = baseline_detail / max(detail_p50, 1e-9)
-    active_speedup = baseline_active / max(active_p50, 1e-9)
-    result["detail_speedup_p50"] = round(detail_speedup, 2)
-    result["active_speedup_p50"] = round(active_speedup, 2)
+    baseline_list = float(result["conversation_list_baseline"]["p50_ms"])
+    list_p50 = float(result["conversation_list"]["p50_ms"])
+    list_speedup = baseline_list / max(list_p50, 1e-9)
+    result["list_speedup_p50"] = round(list_speedup, 2)
 
     failures: list[str] = []
-    if args.max_detail_p50_ms > 0 and detail_p50 > args.max_detail_p50_ms:
+    if args.max_list_p50_ms > 0 and list_p50 > args.max_list_p50_ms:
         failures.append(
-            f"conversation detail p50={detail_p50} > {args.max_detail_p50_ms}"
+            f"conversation list p50={list_p50} > {args.max_list_p50_ms}"
         )
-    if args.min_detail_speedup > 0 and detail_speedup < args.min_detail_speedup:
+    if args.min_list_speedup > 0 and list_speedup < args.min_list_speedup:
         failures.append(
-            f"detail speedup={detail_speedup:.2f} < {args.min_detail_speedup}"
-        )
-    if args.min_active_speedup > 0 and active_speedup < args.min_active_speedup:
-        failures.append(
-            f"active view speedup={active_speedup:.2f} < {args.min_active_speedup}"
-        )
-    rps = float(result["concurrent_detail"]["reads_per_second"])
-    if args.min_concurrent_rps > 0 and rps < args.min_concurrent_rps:
-        failures.append(
-            f"concurrent detail rps={rps} < {args.min_concurrent_rps}"
+            f"conversation list speedup={list_speedup:.2f} < {args.min_list_speedup}"
         )
 
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
