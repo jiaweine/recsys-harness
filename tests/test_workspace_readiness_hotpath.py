@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import lingjing_harness.api as api_module
+from lingjing_harness.domain import Catalog
 from lingjing_harness.sample_data import build_sample_catalog
 from lingjing_harness.store import WorkspaceStore
 
@@ -71,3 +72,55 @@ def test_orphan_pending_temp_still_uses_exclusive_cleanup(monkeypatch, tmp_path)
     assert api_module._sync_workspace() is True
     assert calls == 1
     assert not pending_temp.exists()
+
+
+def test_workspace_sync_revalidates_when_active_catalog_file_drifts(monkeypatch, tmp_path):
+    store, _pending_file = _install_workspace(monkeypatch, tmp_path)
+
+    # First sync establishes the current active-file stat as trusted.
+    assert api_module._sync_workspace() is True
+
+    current = build_sample_catalog()
+    payload = current.to_payload()
+    payload["items"][0]["title"] = "out-of-band catalog drift"
+    drifted = Catalog.from_payload(payload, name=current.name)
+    api_module.CATALOG_FILE.write_text(
+        json.dumps(
+            {"name": drifted.name, "data": drifted.to_payload()},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    # Durable revision did not move. The stat change must force full parsing and
+    # reject the uncommitted active file instead of trusting the steady fast path.
+    assert store.workspace_revision() == api_module.CATALOG_REVISION
+    assert api_module._sync_workspace() is False
+
+
+def test_readiness_snapshot_repairs_future_clock_only_on_skew(tmp_path):
+    store = WorkspaceStore(tmp_path / "workspace-readiness-snapshot-clock.db")
+    assert store.ensure_workspace_revision("rev-a") == "rev-a"
+    assert store.begin_workspace_update("writer-a", lease_seconds=30, now=100.0)
+
+    with store._lock, store._connect() as connection:  # noqa: SLF001 - skew fixture
+        connection.execute(
+            """
+            update workspace_state
+            set updated_at=?,update_until=?
+            where id=1
+            """,
+            (1000.0, 1030.0),
+        )
+        connection.commit()
+
+    state = store.workspace_readiness_snapshot("rev-a", now=200.0)
+    assert state["catalog_revision"] == "rev-a"
+    assert state["update_active"] is True
+
+    with store._connect() as connection:
+        row = connection.execute(
+            "select updated_at,update_until from workspace_state where id=1"
+        ).fetchone()
+    assert float(row["updated_at"]) == 200.0
+    assert float(row["update_until"]) == 230.0
