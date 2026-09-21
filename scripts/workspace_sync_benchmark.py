@@ -145,12 +145,28 @@ def run_benchmark(*, items: int, interactions: int, events: int, repeats: int) -
             api_module.store.abort_workspace_update = original_abort
             api_module.store.finish_workspace_publication = original_finish
 
+        forced_drift_samples: list[float] = []
+        for index in range(3):
+            stat = catalog_file.stat()
+            os.utime(
+                catalog_file,
+                ns=(
+                    stat.st_atime_ns,
+                    stat.st_mtime_ns + 1_000_000 + index,
+                ),
+            )
+            started = time.perf_counter()
+            if not api_module._sync_workspace():
+                raise AssertionError("file-drift workspace sync failed")
+            forced_drift_samples.append((time.perf_counter() - started) * 1000.0)
+
         return {
             "items": items,
             "interactions": interactions,
             "events": events,
             "catalog_bytes": catalog_file.stat().st_size,
             "workspace_sync": _summary(sync_samples),
+            "forced_file_drift_sync": _summary(forced_drift_samples),
             "workspace_revision": _summary(revision_reads),
             "catalog_stat": _summary(file_stats),
             "sync_side_effect_calls": counters,
@@ -165,6 +181,8 @@ def main() -> None:
     parser.add_argument("--interactions", type=int, default=50000)
     parser.add_argument("--events", type=int, default=50000)
     parser.add_argument("--repeats", type=int, default=8)
+    parser.add_argument("--max-steady-p50-ms", type=float, default=0.0)
+    parser.add_argument("--min-drift-speedup", type=float, default=0.0)
     args = parser.parse_args()
 
     result = run_benchmark(
@@ -173,7 +191,28 @@ def main() -> None:
         events=max(1000, args.events),
         repeats=max(3, args.repeats),
     )
+    steady_p50 = float(result["workspace_sync"]["p50_ms"])
+    drift_p50 = float(result["forced_file_drift_sync"]["p50_ms"])
+    speedup = drift_p50 / max(steady_p50, 1e-9)
+    result["steady_vs_drift_speedup_p50"] = round(speedup, 2)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+
+    failures: list[str] = []
+    if args.max_steady_p50_ms > 0 and steady_p50 > args.max_steady_p50_ms:
+        failures.append(
+            f"steady workspace sync p50={steady_p50} > {args.max_steady_p50_ms}"
+        )
+    if args.min_drift_speedup > 0 and speedup < args.min_drift_speedup:
+        failures.append(
+            f"steady/drift speedup={speedup:.2f} < {args.min_drift_speedup}"
+        )
+    side_effects = result["sync_side_effect_calls"]
+    if any(int(value) != 0 for value in side_effects.values()):
+        failures.append(f"steady sync side effects are not zero: {side_effects}")
+    if failures:
+        raise SystemExit(
+            "workspace sync performance guardrail failed: " + "; ".join(failures)
+        )
 
 
 if __name__ == "__main__":
