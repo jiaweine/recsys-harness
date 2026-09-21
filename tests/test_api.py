@@ -387,3 +387,25 @@ def test_security_headers_are_present():
     assert response.headers['x-frame-options']=='DENY'
     assert response.headers['referrer-policy']=='no-referrer'
     assert "default-src 'self'" in response.headers['content-security-policy']
+
+
+
+def test_conversation_list_api_does_not_scan_global_active_set(monkeypatch):
+    def forbidden():
+        raise AssertionError("conversation list must not materialize global active ids")
+
+    monkeypatch.setattr(api_module.store, "active_conversation_ids", forbidden)
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/conversations",
+            json={"scene": "audit", "title": "bounded-list"},
+        )
+        assert created.status_code == 200
+
+        response = client.get("/api/conversations")
+
+    assert response.status_code == 200
+    rows = response.json()
+    assert any(row["id"] == created.json()["id"] for row in rows)
+    assert all(isinstance(row["active"], bool) for row in rows)

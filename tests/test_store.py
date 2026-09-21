@@ -370,3 +370,69 @@ def test_get_conversation_uses_process_local_store_lock(tmp_path):
 
     assert tracking.entries == 1
     assert loaded["messages"][-1]["content"] == "visible"
+
+
+
+def test_conversation_list_with_activity_preserves_order_and_flags(tmp_path):
+    import sqlite3
+    import time
+
+    store = WorkspaceStore(tmp_path / "conversation-list-activity.db")
+    first = store.create_conversation("first", "audit")
+    second = store.create_conversation("second", "search")
+    third = store.create_conversation("third", "recommend")
+    now = time.time()
+
+    with sqlite3.connect(store.path) as connection:
+        connection.execute(
+            "update conversations set updated_at=? where id=?",
+            (now + 1, first["id"]),
+        )
+        connection.execute(
+            "update conversations set updated_at=? where id=?",
+            (now + 2, second["id"]),
+        )
+        connection.execute(
+            "update conversations set updated_at=? where id=?",
+            (now + 3, third["id"]),
+        )
+        connection.commit()
+
+    snapshot = {
+        "run_id": "run-active-second",
+        "conversation_id": second["id"],
+        "goal": "active",
+        "status": "running",
+        "events": [],
+        "created_at": now,
+        "updated_at": now,
+    }
+    assert store.reserve_run(
+        "run-active-second",
+        second["id"],
+        "active",
+        snapshot,
+        owner_id="worker",
+        lease_seconds=30,
+    )
+
+    rows = store.list_conversations_with_activity(limit=3)
+
+    assert [row["id"] for row in rows] == [third["id"], second["id"], first["id"]]
+    assert [row["active"] for row in rows] == [False, True, False]
+
+
+def test_conversation_list_has_updated_at_index(tmp_path):
+    import sqlite3
+
+    store = WorkspaceStore(tmp_path / "conversation-list-index.db")
+
+    with sqlite3.connect(store.path) as connection:
+        indexes = {
+            row[1]
+            for row in connection.execute(
+                "pragma index_list(conversations)"
+            ).fetchall()
+        }
+
+    assert "idx_conversations_updated_at" in indexes
