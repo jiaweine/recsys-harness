@@ -72,8 +72,8 @@ class ToolRegistry(_ProductionToolRegistry):
             return None
         return config
 
-    def _refresh_portfolio(self) -> None:
-        self.segment_router = SegmentRouter(self.catalog, self.search, self.recommend)
+    def _refresh_portfolio(self, *, segment_router: SegmentRouter | None = None) -> None:
+        self.segment_router = segment_router or SegmentRouter(self.catalog, self.search, self.recommend)
         self.search_portfolio = {
             segment: config
             for segment in self.segment_router.known_segments("search")
@@ -94,12 +94,18 @@ class ToolRegistry(_ProductionToolRegistry):
             ("search", self.search_portfolio, self.search),
             ("recommend", self.recommend_portfolio, self.recommend),
         ):
-            partitions = self.segment_router.partition_events(self.catalog.events, surface=surface)
+            stale: list[tuple[str, Any, str, dict[str, Any]]] = []
             for segment, config in list(portfolio.items()):
                 domain = strategy_domain(surface, segment)
                 skill = self.memory.active_skill(self.catalog_key, domain)
                 if not skill or self._validation_is_fresh(skill):
                     continue
+                stale.append((segment, config, domain, skill))
+            if not stale:
+                continue
+
+            partitions = self.segment_router.partition_events(self.catalog.events, surface=surface)
+            for segment, config, domain, skill in stale:
                 events = partitions.get(segment, [])
                 requests = len(request_groups(events, surface=surface))
                 if requests < self.MIN_ACTIVE_SEGMENT_REQUESTS:
@@ -176,7 +182,13 @@ class ToolRegistry(_ProductionToolRegistry):
         clone.search = self.search.with_config(clone._load_config("search", SearchConfig))
         clone.recommend = self.recommend.with_config(clone._load_config("recommend", RecommendConfig))
         clone._specs = clone._build_specs()
-        clone._refresh_portfolio()
+        clone._refresh_portfolio(
+            segment_router=self.segment_router.rebind(
+                clone.catalog,
+                clone.search,
+                clone.recommend,
+            )
+        )
         clone._validate_active_portfolio()
         return clone
 
