@@ -639,6 +639,9 @@ def get_attachment(attachment_id: str):
 
 @app.get("/api/conversations")
 def conversations():
+    snapshot = getattr(store, "list_conversations_with_active", None)
+    if callable(snapshot):
+        return snapshot()
     rows = store.list_conversations()
     active = store.active_conversation_ids()
     return [{**row, "active": row["id"] in active} for row in rows]
