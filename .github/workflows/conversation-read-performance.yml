@@ -1,0 +1,39 @@
+name: Conversation Read Performance
+
+on:
+  push:
+    branches:
+      - perf/conversation-read-hotpath
+  pull_request:
+    paths:
+      - "lingjing_harness/api_core.py"
+      - "lingjing_harness/store.py"
+      - "lingjing_harness/store_conversation_detail_snapshot.py"
+      - "scripts/conversation_read_benchmark.py"
+      - ".github/workflows/conversation-read-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Benchmark conversation reads
+        run: |
+          python scripts/conversation_read_benchmark.py \
+            --conversations 40 \
+            --messages 200 \
+            --events 160 \
+            --payload-bytes 8192 \
+            --repeats 80 \
+            --workers 8
