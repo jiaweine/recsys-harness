@@ -30,6 +30,23 @@ def install_workspace_transaction_boundary(core: Any) -> None:
 
     core.CATALOG_PENDING_FILE = core.DATA / "catalog.pending.json"
 
+    def _catalog_file_signature() -> tuple[int, int, int, int, int] | None:
+        """Cheaply detect supported active-file replacement or manual drift."""
+
+        try:
+            stat = core.CATALOG_FILE.stat()
+        except OSError:
+            return None
+        return (
+            int(stat.st_dev),
+            int(stat.st_ino),
+            int(stat.st_size),
+            int(stat.st_mtime_ns),
+            int(stat.st_ctime_ns),
+        )
+
+    active_file_signature = _catalog_file_signature()
+
     def _write_catalog(path: Path, catalog: Any) -> None:
         temp = path.with_name(f"{path.name}.tmp")
         temp.write_text(
@@ -99,9 +116,11 @@ def install_workspace_transaction_boundary(core: Any) -> None:
             return None
 
     def _install_catalog(candidate: Any, revision: str) -> None:
+        nonlocal active_file_signature
         core.catalog = candidate
         core.harness = core.AgentHarness(candidate, memory=core.memory)
         core.CATALOG_REVISION = revision
+        active_file_signature = _catalog_file_signature()
 
     def _release_publication(revision: str) -> bool:
         finish = getattr(core.store, "finish_workspace_publication", None)
@@ -175,36 +194,67 @@ def install_workspace_transaction_boundary(core: Any) -> None:
             _abort_sync_cleanup(cleanup_owner)
 
     def _sync_workspace() -> bool:
+        nonlocal active_file_signature
+
         shared = core.store.ensure_workspace_revision(core.CATALOG_REVISION)
         if not shared:
             return True
 
         with core.WORKSPACE_LOCK:
+            # Re-read after taking the process-local workspace lock so a local
+            # publisher cannot change CATALOG_REVISION between the durable probe
+            # and the fast-path decision.
             shared = core.store.workspace_revision() or shared
+            publication_pending = _publication_pending(shared)
+            file_signature = _catalog_file_signature()
+
+            # In the normal steady state the durable revision, installed catalog,
+            # active file identity and publication phase are all unchanged.
+            # Avoid reparsing/re-fingerprinting the full catalog and, critically,
+            # avoid acquiring a cleanup write lease merely to delete a staging
+            # file that does not exist.
+            if (
+                shared == core.CATALOG_REVISION
+                and file_signature == active_file_signature
+                and not publication_pending
+                and not core.CATALOG_PENDING_FILE.exists()
+            ):
+                return True
+
             active = core._load_catalog()
             active_revision = core.catalog_fingerprint(active)
 
             if active_revision == shared:
                 if core.CATALOG_REVISION != shared:
                     _install_catalog(active, shared)
+                else:
+                    # A supported/manual rewrite may preserve the exact workspace
+                    # contents. Once verified by the full fingerprint, re-anchor
+                    # the cheap file signature so subsequent reads are fast again.
+                    active_file_signature = _catalog_file_signature()
 
                 # A matching publication fence is itself exclusive authority over
                 # the global pending path. Remove this publication's staging while
                 # that fence still blocks the next writer, then release it.
-                if _publication_pending(shared):
+                if publication_pending or _publication_pending(shared):
                     _discard_pending()
                     return _release_publication(shared)
 
-                # Without a publication fence, never perform a check-then-delete.
-                # Acquire a short durable update lease first. If another writer won
-                # the handoff, leave its staging untouched; if we win, cleanup is
-                # exclusive until abort releases the temporary lease.
+                # With no staging file there is nothing to clean. The historical
+                # path acquired and released a durable update lease on every
+                # readiness/status/task-start check even in this state.
+                if not core.CATALOG_PENDING_FILE.exists():
+                    return True
+
+                # A stale uncommitted pending file may be removed only after
+                # reacquiring exclusive cleanup authority. If a real writer owns
+                # the lease, leave its staging untouched.
                 cleanup_owner = _begin_sync_cleanup()
                 if cleanup_owner is not None:
                     _discard_pending()
                     if not _abort_sync_cleanup(cleanup_owner):
                         return False
-                return _release_publication(shared)
+                return True
 
             pending_revision, pending = _pending_catalog()
             if pending_revision == shared and pending is not None:
