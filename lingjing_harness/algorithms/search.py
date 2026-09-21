@@ -7,6 +7,7 @@ from math import log
 from lingjing_harness.domain import Catalog, Item
 from lingjing_harness.serving import normalize_serving_limit
 from .capabilities import CAPABILITIES, capability_field
+from .item_features import build_item_vectors
 from .text import cosine, hashed_vector, tokenize
 
 
@@ -41,7 +42,13 @@ class SearchEngine:
 
     GENERIC_QUERY_TOKENS = {"装备", "用品", "商品", "产品", "东西", "好物"}
 
-    def __init__(self, catalog: Catalog, config: SearchConfig | None = None) -> None:
+    def __init__(
+        self,
+        catalog: Catalog,
+        config: SearchConfig | None = None,
+        *,
+        item_vectors: dict[str, dict[int, float]] | None = None,
+    ) -> None:
         self.catalog = catalog
         self.config = config or SearchConfig()
         self._doc_tokens: dict[str, list[str]] = {}
@@ -50,9 +57,8 @@ class SearchEngine:
         self._title_lower: dict[str, str] = {}
         self._postings: dict[str, list[str]] = {}
         self._df: Counter[str] = Counter()
-        self._vectors: dict[str, dict[int, float]] = {}
+        self._vectors = item_vectors if item_vectors is not None else build_item_vectors(catalog.items)
         for item in catalog.items:
-            body = " ".join([item.title, item.text, *item.categories])
             title_tokens = tokenize(item.title)
             text_tokens = tokenize(item.text)
             category_tokens = tokenize(" ".join(item.categories))
@@ -66,7 +72,6 @@ class SearchEngine:
             if item.eligible:
                 for token in unique_tokens:
                     self._postings.setdefault(token, []).append(item.item_id)
-            self._vectors[item.item_id] = hashed_vector(body)
         self._avg_len = sum(map(len, self._doc_tokens.values())) / max(1, len(self._doc_tokens))
         self._popularity = catalog.popularity_norms()
 

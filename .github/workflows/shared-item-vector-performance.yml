@@ -1,0 +1,42 @@
+name: Shared Item Vector Performance
+
+on:
+  push:
+    branches:
+      - perf/shared-item-vectors
+  pull_request:
+    paths:
+      - "lingjing_harness/algorithms/item_features.py"
+      - "lingjing_harness/algorithms/search.py"
+      - "lingjing_harness/algorithms/recommend_core.py"
+      - "lingjing_harness/runtime/tools_core.py"
+      - "tests/test_shared_item_vectors.py"
+      - "scripts/shared_item_vectors_benchmark.py"
+      - ".github/workflows/shared-item-vector-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Benchmark shared runtime item vectors
+        run: |
+          for pass in 1 2 3; do
+            echo "shared item vector performance pass $pass/3"
+            python scripts/shared_item_vectors_benchmark.py \
+              --items 6000 \
+              --repeats 3 \
+              --max-registry-p50-ms 3500 \
+              --min-speedup 1.5
+          done

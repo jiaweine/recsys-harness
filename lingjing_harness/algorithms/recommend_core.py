@@ -8,7 +8,8 @@ from math import exp, sqrt
 from lingjing_harness.domain import Catalog, Item
 from lingjing_harness.serving import normalize_serving_limit
 from .capabilities import CAPABILITIES, capability_field, normalize_strategy_config
-from .text import cosine, hashed_vector
+from .item_features import build_item_vectors
+from .text import cosine
 
 
 _BLEND = {"evolve_group": "blend", "min": 0.005, "max": 0.75, "relative_step": 0.16}
@@ -48,13 +49,16 @@ class RecommendationEngine:
 
     MAX_GRAPH_HISTORY = 120
 
-    def __init__(self, catalog: Catalog, config: RecommendConfig | None = None) -> None:
+    def __init__(
+        self,
+        catalog: Catalog,
+        config: RecommendConfig | None = None,
+        *,
+        item_vectors: dict[str, dict[int, float]] | None = None,
+    ) -> None:
         self.catalog = catalog
         self.config = normalize_strategy_config(config or RecommendConfig())
-        self._vectors = {
-            item.item_id: hashed_vector(" ".join([item.title, item.text, *item.categories]))
-            for item in catalog.items
-        }
+        self._vectors = item_vectors if item_vectors is not None else build_item_vectors(catalog.items)
         self._popularity = catalog.popularity_norms()
         self._by_user: dict[str, list] = defaultdict(list)
         for event in catalog.interactions:

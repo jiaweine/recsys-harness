@@ -15,6 +15,7 @@ from lingjing_harness.algorithms import (
     evolve_search,
 )
 from lingjing_harness.algorithms.capabilities import config_from_mapping
+from lingjing_harness.algorithms.item_features import build_item_vectors
 from lingjing_harness.algorithms.text import tokenize
 from lingjing_harness.domain import Catalog
 from .contracts import ToolSpec
@@ -41,8 +42,13 @@ class ToolRegistry:
 
         search_cfg = self._load_config("search", SearchConfig)
         recommend_cfg = self._load_config("recommend", RecommendConfig)
-        self.search = SearchEngine(catalog, search_cfg)
-        self.recommend = RecommendationEngine(catalog, recommend_cfg)
+        item_vectors = build_item_vectors(catalog.items)
+        self.search = SearchEngine(catalog, search_cfg, item_vectors=item_vectors)
+        self.recommend = RecommendationEngine(
+            catalog,
+            recommend_cfg,
+            item_vectors=item_vectors,
+        )
         self._validate_active_strategies()
         self._specs = self._build_specs()
 
