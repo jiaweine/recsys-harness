@@ -138,7 +138,7 @@ def run_benchmark(
             active = api.store.active_conversation_ids()
             return [{**row, "active": row["id"] in active} for row in listed]
 
-        def detail_current():
+        def detail_baseline():
             conversation = api.store.get_conversation(target["id"])
             active = api.store.active_run_for_conversation(target["id"])
             if active:
@@ -151,6 +151,9 @@ def run_benchmark(
                 conversation["active_run"] = None
             return conversation
 
+        def detail_current():
+            return api.get_conversation(target["id"])
+
         expected = detail_current()
         if expected["active_run"]["run_id"] != snapshot["run_id"]:
             raise AssertionError("active run fixture did not resolve")
@@ -159,9 +162,13 @@ def run_benchmark(
         conversation_samples = _timed(
             lambda: api.store.get_conversation(target["id"]), repeats
         )
-        active_samples = _timed(
+        active_baseline_samples = _timed(
             lambda: api.store.active_run_for_conversation(target["id"]), repeats
         )
+        active_view_samples = _timed(
+            lambda: api.store.conversation_active_run_view(target["id"]), repeats
+        )
+        detail_baseline_samples = _timed(detail_baseline, repeats)
         detail_samples = _timed(detail_current, repeats)
 
         def detail_many(iterations: int) -> int:
@@ -189,7 +196,9 @@ def run_benchmark(
             "snapshot_bytes": snapshot_bytes,
             "conversation_list": _summary(list_samples),
             "conversation_messages": _summary(conversation_samples),
-            "active_run_lookup": _summary(active_samples),
+            "active_run_lookup_baseline": _summary(active_baseline_samples),
+            "active_run_view": _summary(active_view_samples),
+            "conversation_detail_baseline": _summary(detail_baseline_samples),
             "conversation_detail": _summary(detail_samples),
             "concurrent_detail": {
                 "workers": workers,
@@ -210,6 +219,10 @@ def main() -> None:
     parser.add_argument("--payload-bytes", type=int, default=8192)
     parser.add_argument("--repeats", type=int, default=80)
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--max-detail-p50-ms", type=float, default=0.0)
+    parser.add_argument("--min-detail-speedup", type=float, default=0.0)
+    parser.add_argument("--min-active-speedup", type=float, default=0.0)
+    parser.add_argument("--min-concurrent-rps", type=float, default=0.0)
     args = parser.parse_args()
 
     result = run_benchmark(
@@ -220,7 +233,39 @@ def main() -> None:
         repeats=max(10, args.repeats),
         workers=max(1, args.workers),
     )
+    baseline_detail = float(result["conversation_detail_baseline"]["p50_ms"])
+    detail_p50 = float(result["conversation_detail"]["p50_ms"])
+    baseline_active = float(result["active_run_lookup_baseline"]["p50_ms"])
+    active_p50 = float(result["active_run_view"]["p50_ms"])
+    detail_speedup = baseline_detail / max(detail_p50, 1e-9)
+    active_speedup = baseline_active / max(active_p50, 1e-9)
+    result["detail_speedup_p50"] = round(detail_speedup, 2)
+    result["active_speedup_p50"] = round(active_speedup, 2)
+
+    failures: list[str] = []
+    if args.max_detail_p50_ms > 0 and detail_p50 > args.max_detail_p50_ms:
+        failures.append(
+            f"conversation detail p50={detail_p50} > {args.max_detail_p50_ms}"
+        )
+    if args.min_detail_speedup > 0 and detail_speedup < args.min_detail_speedup:
+        failures.append(
+            f"detail speedup={detail_speedup:.2f} < {args.min_detail_speedup}"
+        )
+    if args.min_active_speedup > 0 and active_speedup < args.min_active_speedup:
+        failures.append(
+            f"active view speedup={active_speedup:.2f} < {args.min_active_speedup}"
+        )
+    rps = float(result["concurrent_detail"]["reads_per_second"])
+    if args.min_concurrent_rps > 0 and rps < args.min_concurrent_rps:
+        failures.append(
+            f"concurrent detail rps={rps} < {args.min_concurrent_rps}"
+        )
+
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    if failures:
+        raise SystemExit(
+            "conversation read performance guardrail failed: " + "; ".join(failures)
+        )
 
 
 if __name__ == "__main__":
