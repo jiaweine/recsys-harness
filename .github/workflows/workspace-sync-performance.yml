@@ -1,0 +1,35 @@
+name: Workspace Sync Performance
+
+on:
+  push:
+    branches:
+      - perf/workspace-sync-hotpath
+  pull_request:
+    paths:
+      - "lingjing_harness/api_workspace_transaction.py"
+      - "scripts/workspace_sync_benchmark.py"
+      - ".github/workflows/workspace-sync-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Benchmark steady workspace sync
+        run: |
+          python scripts/workspace_sync_benchmark.py \
+            --items 5000 \
+            --interactions 50000 \
+            --events 50000 \
+            --repeats 8
