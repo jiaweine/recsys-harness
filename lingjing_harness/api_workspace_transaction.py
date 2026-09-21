@@ -50,6 +50,20 @@ def install_workspace_transaction_boundary(core: Any) -> None:
             name=payload.get("name", "工作区数据"),
         )
 
+    def _catalog_file_signature() -> tuple[int, int, int, int] | None:
+        try:
+            stat = core.CATALOG_FILE.stat()
+        except OSError:
+            return None
+        return (
+            int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000))),
+            int(getattr(stat, "st_ctime_ns", int(stat.st_ctime * 1_000_000_000))),
+            int(stat.st_size),
+            int(getattr(stat, "st_ino", 0)),
+        )
+
+    verified_active_signature = _catalog_file_signature()
+
     def _pending_catalog() -> tuple[str | None, Any | None]:
         path = core.CATALOG_PENDING_FILE
         if not path.exists():
@@ -99,9 +113,11 @@ def install_workspace_transaction_boundary(core: Any) -> None:
             return None
 
     def _install_catalog(candidate: Any, revision: str) -> None:
+        nonlocal verified_active_signature
         core.catalog = candidate
         core.harness = core.AgentHarness(candidate, memory=core.memory)
         core.CATALOG_REVISION = revision
+        verified_active_signature = _catalog_file_signature()
 
     def _release_publication(revision: str) -> bool:
         finish = getattr(core.store, "finish_workspace_publication", None)
@@ -175,14 +191,47 @@ def install_workspace_transaction_boundary(core: Any) -> None:
             _abort_sync_cleanup(cleanup_owner)
 
     def _sync_workspace() -> bool:
-        shared = core.store.ensure_workspace_revision(core.CATALOG_REVISION)
-        if not shared:
-            return True
+        nonlocal verified_active_signature
 
         with core.WORKSPACE_LOCK:
-            shared = core.store.workspace_revision() or shared
+            readiness = getattr(core.store, "workspace_readiness_snapshot", None)
+            if callable(readiness):
+                state = readiness(core.CATALOG_REVISION)
+                shared = str(state.get("catalog_revision") or "")
+                publication_pending = bool(
+                    state.get("publication_revision")
+                    and str(state.get("publication_revision")) == shared
+                )
+            else:
+                shared = core.store.ensure_workspace_revision(core.CATALOG_REVISION)
+                shared = core.store.workspace_revision() or shared
+                publication_pending = _publication_pending(shared) if shared else False
+
+            if not shared:
+                return True
+
+            pending_temp = core.CATALOG_PENDING_FILE.with_name(
+                f"{core.CATALOG_PENDING_FILE.name}.tmp"
+            )
+            pending_artifact = (
+                core.CATALOG_PENDING_FILE.exists() or pending_temp.exists()
+            )
+
+            # Fast steady state: local and durable revisions agree, no publication
+            # recovery is pending, no staging artifact exists, and the active file
+            # is byte-identity-stable by stat. Any file drift falls back to full
+            # parse + fingerprint validation below.
+            if (
+                shared == core.CATALOG_REVISION
+                and not publication_pending
+                and not pending_artifact
+                and _catalog_file_signature() == verified_active_signature
+            ):
+                return True
+
             active = core._load_catalog()
             active_revision = core.catalog_fingerprint(active)
+            verified_active_signature = _catalog_file_signature()
 
             if active_revision == shared:
                 if core.CATALOG_REVISION != shared:
@@ -191,20 +240,29 @@ def install_workspace_transaction_boundary(core: Any) -> None:
                 # A matching publication fence is itself exclusive authority over
                 # the global pending path. Remove this publication's staging while
                 # that fence still blocks the next writer, then release it.
-                if _publication_pending(shared):
+                if publication_pending:
                     _discard_pending()
                     return _release_publication(shared)
 
+                # The overwhelmingly common steady state has no staging
+                # artifact and no publication fence. Do not manufacture a writer
+                # transaction merely to prove that there is nothing to delete.
+                # Keep both names in the check because a crashed writer can leave
+                # only the temporary staging file behind.
+                if not pending_artifact:
+                    return True
+
                 # Without a publication fence, never perform a check-then-delete.
-                # Acquire a short durable update lease first. If another writer won
-                # the handoff, leave its staging untouched; if we win, cleanup is
-                # exclusive until abort releases the temporary lease.
+                # Acquire a short durable update lease only when an orphan staging
+                # artifact actually exists. If another writer won the handoff,
+                # leave its staging untouched; if we win, cleanup is exclusive
+                # until abort releases the temporary lease.
                 cleanup_owner = _begin_sync_cleanup()
                 if cleanup_owner is not None:
                     _discard_pending()
                     if not _abort_sync_cleanup(cleanup_owner):
                         return False
-                return _release_publication(shared)
+                return True
 
             pending_revision, pending = _pending_catalog()
             if pending_revision == shared and pending is not None:

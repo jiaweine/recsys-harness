@@ -1,0 +1,41 @@
+name: Readiness Performance
+
+on:
+  push:
+    branches:
+      - perf/readiness-hotpath
+  pull_request:
+    paths:
+      - "lingjing_harness/api.py"
+      - "lingjing_harness/api_core.py"
+      - "lingjing_harness/store_workspace_publication.py"
+      - "scripts/readiness_benchmark.py"
+      - ".github/workflows/readiness-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Benchmark steady readiness
+        run: |
+          for pass in 1 2 3; do
+            echo "readiness performance pass $pass/3"
+            python scripts/readiness_benchmark.py \
+              --repeats 240 \
+              --workers 8 \
+              --max-ready-p50-ms 0.8 \
+              --min-ready-speedup 3.0 \
+              --min-concurrent-rps 700
+          done

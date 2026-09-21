@@ -577,8 +577,14 @@ def _health_ready() -> dict[str, str]:
     try:
         if not _core._sync_workspace():
             raise HTTPException(503, "workspace revision not ready")
-        durable_revision = _core.store.workspace_revision()
-        updating = _core.store.workspace_update_active()
+        readiness = getattr(_core.store, "workspace_readiness_snapshot", None)
+        if callable(readiness):
+            state = readiness()
+            durable_revision = str(state.get("catalog_revision") or "")
+            updating = bool(state.get("update_active"))
+        else:
+            durable_revision = _core.store.workspace_revision()
+            updating = _core.store.workspace_update_active()
     except HTTPException:
         raise
     except Exception as exc:
