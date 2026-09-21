@@ -79,19 +79,57 @@ def _catalog(*, items: int, interactions: int, events: int) -> Catalog:
     )
 
 
+def _cached_api_summary(catalog: Catalog, repeats: int) -> tuple[dict[str, float], float]:
+    import lingjing_harness.api_core as api_core
+
+    original_catalog = api_core.catalog
+    original_revision = api_core.CATALOG_REVISION
+    original_cache = api_core._CATALOG_SUMMARY_CACHE
+    try:
+        api_core.catalog = catalog
+        api_core.CATALOG_REVISION = "status-benchmark-revision"
+        api_core._CATALOG_SUMMARY_CACHE = None
+        expected = api_core._catalog_summary()
+        samples = _timed(api_core._catalog_summary, repeats)
+
+        appended = ExposureEvent(
+            request_id="request-appended",
+            timestamp=float(len(catalog.events) + 1),
+            surface="search",
+            item_id=catalog.items[0].item_id,
+            event="click",
+            query="cache invalidation",
+        )
+        catalog.events.append(appended)
+        started = time.perf_counter()
+        refreshed = api_core._catalog_summary()
+        invalidation_ms = (time.perf_counter() - started) * 1000.0
+        if refreshed["production_events"] != expected["production_events"] + 1:
+            raise AssertionError("API summary cache did not invalidate after event append")
+        return _summary(samples), round(invalidation_ms, 3)
+    finally:
+        api_core.catalog = original_catalog
+        api_core.CATALOG_REVISION = original_revision
+        api_core._CATALOG_SUMMARY_CACHE = original_cache
+
+
 def run_benchmark(*, items: int, interactions: int, events: int, repeats: int) -> dict[str, object]:
     catalog = _catalog(items=items, interactions=interactions, events=events)
     expected = catalog.summary()
-    samples = _timed(catalog.summary, repeats)
+    raw_samples = _timed(catalog.summary, repeats)
     observed = catalog.summary()
     if observed != expected:
         raise AssertionError("catalog summary changed during read-only benchmark")
+
+    cached_samples, invalidation_ms = _cached_api_summary(catalog, repeats * 4)
     return {
         "items": items,
         "interactions": interactions,
         "events": events,
         "summary": expected,
-        "catalog_summary": _summary(samples),
+        "catalog_summary_raw": _summary(raw_samples),
+        "catalog_summary_cached": cached_samples,
+        "cache_invalidation_ms": invalidation_ms,
     }
 
 
