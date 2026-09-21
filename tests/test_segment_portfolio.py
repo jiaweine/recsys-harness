@@ -175,6 +175,81 @@ def test_active_segment_strategy_routes_only_its_segment_and_survives_fork():
     assert forked["strategy_scope"] == "segment"
 
 
+
+def test_fork_reuses_router_calibration_and_skips_fresh_portfolio_partition(monkeypatch):
+    catalog = _portfolio_catalog(search_requests=80, recommend_requests=60)
+    memory = AgentMemory()
+    initial = ToolRegistry(catalog, memory=memory)
+    query = "运动耳机"
+    segment = initial.segment_router.search_segment(query)
+    config = asdict(SearchConfig())
+    config["diversity"] = 0.11
+    memory.remember_strategy(
+        initial.catalog_key,
+        strategy_domain("search", segment),
+        config,
+        score=0.8,
+        evidence=12,
+        status="active",
+        payload={"validated_at": time.time()},
+    )
+    registry = ToolRegistry(catalog, memory=memory)
+
+    calls = {"init": 0, "partition": 0}
+    original_init = SegmentRouter.__init__
+    original_partition = SegmentRouter.partition_events
+
+    def counted_init(self, *args, **kwargs):
+        calls["init"] += 1
+        return original_init(self, *args, **kwargs)
+
+    def counted_partition(self, *args, **kwargs):
+        calls["partition"] += 1
+        return original_partition(self, *args, **kwargs)
+
+    monkeypatch.setattr(SegmentRouter, "__init__", counted_init)
+    monkeypatch.setattr(SegmentRouter, "partition_events", counted_partition)
+
+    fork = registry.fork()
+
+    assert calls == {"init": 0, "partition": 0}
+    assert fork.segment_router is not registry.segment_router
+    assert fork.segment_router._search_calibration is registry.segment_router._search_calibration
+    assert fork.segment_router._recommend_calibration is registry.segment_router._recommend_calibration
+    assert fork.run_search(query)["segment"] == registry.run_search(query)["segment"]
+
+
+def test_fork_rebuilds_router_when_search_routing_strategy_changes(monkeypatch):
+    catalog = _portfolio_catalog(search_requests=32, recommend_requests=24)
+    memory = AgentMemory()
+    registry = ToolRegistry(catalog, memory=memory)
+    config = asdict(SearchConfig(candidate_strategy="semantic_rescue"))
+    memory.remember_strategy(
+        registry.catalog_key,
+        "search",
+        config,
+        score=0.8,
+        evidence=12,
+        status="active",
+        payload={"validated_at": time.time()},
+    )
+
+    calls = 0
+    original_init = SegmentRouter.__init__
+
+    def counted_init(self, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(SegmentRouter, "__init__", counted_init)
+    fork = registry.fork()
+
+    assert calls == 1
+    assert fork.search.config.candidate_strategy == "semantic_rescue"
+    assert fork.segment_router._search_calibration is not registry.segment_router._search_calibration
+
+
 def test_partial_production_log_cannot_activate_a_strategy_even_when_requested():
     catalog = _portfolio_catalog(search_requests=6, recommend_requests=0)
     registry = ToolRegistry(catalog)
