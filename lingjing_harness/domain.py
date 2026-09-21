@@ -295,3 +295,13 @@ class Catalog:
     def popularity_norm(self, item: Item) -> float:
         top = max((row.popularity for row in self.items), default=1.0)
         return log1p(item.popularity) / max(1e-9, log1p(max(1.0, top)))
+
+    def popularity_norms(self) -> dict[str, float]:
+        """Compute one consistent popularity-normalization snapshot in O(n)."""
+
+        top = max((row.popularity for row in self.items), default=1.0)
+        denominator = max(1e-9, log1p(max(1.0, top)))
+        return {
+            item.item_id: log1p(item.popularity) / denominator
+            for item in self.items
+        }
