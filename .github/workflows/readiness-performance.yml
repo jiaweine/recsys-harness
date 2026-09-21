@@ -30,4 +30,12 @@ jobs:
       - run: pip install -e . --no-deps
       - name: Benchmark steady readiness
         run: |
-          python scripts/readiness_benchmark.py --repeats 240 --workers 8
+          for pass in 1 2 3; do
+            echo "readiness performance pass $pass/3"
+            python scripts/readiness_benchmark.py \
+              --repeats 240 \
+              --workers 8 \
+              --max-ready-p50-ms 0.8 \
+              --min-ready-speedup 3.0 \
+              --min-concurrent-rps 700
+          done
