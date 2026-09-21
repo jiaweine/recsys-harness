@@ -639,9 +639,7 @@ def get_attachment(attachment_id: str):
 
 @app.get("/api/conversations")
 def conversations():
-    rows = store.list_conversations()
-    active = store.active_conversation_ids()
-    return [{**row, "active": row["id"] in active} for row in rows]
+    return store.list_conversations_with_activity()
 
 
 @app.post("/api/conversations")
