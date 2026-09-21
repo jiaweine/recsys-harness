@@ -6,8 +6,8 @@ on:
       - perf/conversation-list-hotpath
   pull_request:
     paths:
-      - "lingjing_harness/api_core.py"
       - "lingjing_harness/store.py"
+      - "tests/test_store.py"
       - "scripts/conversation_list_benchmark.py"
       - ".github/workflows/conversation-list-performance.yml"
   workflow_dispatch:
@@ -18,7 +18,7 @@ permissions:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
@@ -27,9 +27,14 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: pip install -e . --no-deps
-      - name: Benchmark conversation list
+      - name: Benchmark long-history conversation listing
         run: |
-          python scripts/conversation_list_benchmark.py \
-            --conversations 100000 \
-            --active-runs 40 \
-            --repeats 30
+          for pass in 1 2 3; do
+            echo "conversation-list performance pass $pass/3"
+            python scripts/conversation_list_benchmark.py \
+              --conversations 100000 \
+              --active-runs 40 \
+              --repeats 30 \
+              --max-list-p50-ms 2.0 \
+              --max-combined-p50-ms 3.0
+          done
