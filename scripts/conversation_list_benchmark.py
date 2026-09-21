@@ -126,13 +126,12 @@ def run_benchmark(
 
         list_samples = _timed(store.list_conversations, repeats)
         active_samples = _timed(store.active_conversation_ids, repeats)
-        combined_samples = _timed(
-            lambda: [
-                {**row, "active": row["id"] in store.active_conversation_ids()}
-                for row in store.list_conversations()
-            ],
-            repeats,
-        )
+        def endpoint_shape():
+            rows = store.list_conversations()
+            active_ids = store.active_conversation_ids()
+            return [{**row, "active": row["id"] in active_ids} for row in rows]
+
+        combined_samples = _timed(endpoint_shape, repeats)
 
         return {
             "conversations": conversations,
