@@ -94,6 +94,68 @@ def install_workspace_publication_fence(store_module: Any) -> None:
             revision
         )
 
+    def workspace_readiness_snapshot(
+        self,
+        revision: str = "",
+        *,
+        now: float | None = None,
+    ) -> dict[str, Any]:
+        """Read revision and update/publication state from one SQLite snapshot.
+
+        The steady path is a single read-only query. Empty-revision bootstrap still
+        delegates to the existing race-safe initializer, and future-clock repair
+        upgrades to a write transaction only when the persisted lease requires it.
+        """
+
+        now = time.time() if now is None else float(now)
+        requested_revision = str(revision or "").strip()
+
+        def read_row():
+            with self._connect() as connection:
+                return connection.execute(
+                    """
+                    select catalog_revision,update_owner,update_until,updated_at,
+                           publication_revision
+                    from workspace_state where id=1
+                    """
+                ).fetchone()
+
+        raw = read_row()
+        catalog_revision = str(raw["catalog_revision"] or "") if raw else ""
+        if not catalog_revision and requested_revision:
+            self.ensure_workspace_revision(requested_revision)
+            raw = read_row()
+
+        if not raw:
+            return {
+                "catalog_revision": "",
+                "publication_revision": "",
+                "update_active": False,
+            }
+
+        row = dict(raw)
+        if row.get("update_owner") and float(row.get("updated_at") or 0.0) > now:
+            with self._lock, self._connect() as connection:
+                connection.execute("begin immediate")
+                self._workspace_update_row(connection, now)
+                connection.commit()
+            raw = read_row()
+            row = dict(raw) if raw else {}
+
+        publication = str(row.get("publication_revision") or "")
+        update_active = bool(
+            publication
+            or (
+                row.get("update_owner")
+                and float(row.get("update_until") or 0.0) > now
+            )
+        )
+        return {
+            "catalog_revision": str(row.get("catalog_revision") or ""),
+            "publication_revision": publication,
+            "update_active": update_active,
+        }
+
     def workspace_update_active(self, now: float | None = None) -> bool:
         now = time.time() if now is None else float(now)
         # Health/readiness probes should not contend with normal writers. Read the
@@ -297,6 +359,7 @@ def install_workspace_publication_fence(store_module: Any) -> None:
     cls._init = _init
     cls._workspace_update_row = _workspace_update_row
     cls.workspace_publication_pending = workspace_publication_pending
+    cls.workspace_readiness_snapshot = workspace_readiness_snapshot
     cls.workspace_update_active = workspace_update_active
     cls.begin_workspace_update = begin_workspace_update
     cls.commit_workspace_revision_for_publication = (
