@@ -50,13 +50,14 @@ def install_workspace_transaction_boundary(core: Any) -> None:
             name=payload.get("name", "工作区数据"),
         )
 
-    def _catalog_file_signature() -> tuple[int, int, int] | None:
+    def _catalog_file_signature() -> tuple[int, int, int, int] | None:
         try:
             stat = core.CATALOG_FILE.stat()
         except OSError:
             return None
         return (
             int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000))),
+            int(getattr(stat, "st_ctime_ns", int(stat.st_ctime * 1_000_000_000))),
             int(stat.st_size),
             int(getattr(stat, "st_ino", 0)),
         )
