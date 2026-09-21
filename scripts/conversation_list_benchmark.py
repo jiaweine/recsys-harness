@@ -93,10 +93,43 @@ def _seed(store: WorkspaceStore, conversations: int, active_runs: int) -> None:
         connection.commit()
 
 
+def _message_write_samples(
+    indexed: WorkspaceStore,
+    unindexed: WorkspaceStore,
+    *,
+    conversation_id: str,
+    repeats: int,
+) -> tuple[list[float], list[float]]:
+    indexed_samples: list[float] = []
+    unindexed_samples: list[float] = []
+    for index in range(max(10, repeats)):
+        pairs = (
+            ((indexed, indexed_samples), (unindexed, unindexed_samples))
+            if index % 2 == 0
+            else ((unindexed, unindexed_samples), (indexed, indexed_samples))
+        )
+        for store, samples in pairs:
+            started = time.perf_counter()
+            store.add_message(
+                conversation_id,
+                "assistant",
+                f"write benchmark {index}",
+                {"index": index},
+            )
+            samples.append((time.perf_counter() - started) * 1000.0)
+    return indexed_samples, unindexed_samples
+
+
 def run_benchmark(*, conversations: int, active_runs: int, repeats: int) -> dict[str, object]:
     with tempfile.TemporaryDirectory(prefix="xushu-conversation-list-") as directory:
         store = WorkspaceStore(Path(directory) / "workspace.db")
         _seed(store, conversations, active_runs)
+
+        control = WorkspaceStore(Path(directory) / "workspace-control.db")
+        with sqlite3.connect(control.path) as connection:
+            connection.execute("drop index if exists idx_conversations_updated_at")
+            connection.commit()
+        _seed(control, conversations, active_runs)
 
         # Warm page cache.
         rows = store.list_conversations()
@@ -114,6 +147,14 @@ def run_benchmark(*, conversations: int, active_runs: int, repeats: int) -> dict
         list_only = _timed(store.list_conversations, repeats)
         active_only = _timed(store.active_conversation_ids, repeats)
 
+        newest_id = f"cv-bench-{conversations - 1:07d}"
+        indexed_writes, unindexed_writes = _message_write_samples(
+            store,
+            control,
+            conversation_id=newest_id,
+            repeats=max(20, repeats),
+        )
+
         with sqlite3.connect(store.path) as connection:
             indexes = [
                 row[1]
@@ -128,6 +169,13 @@ def run_benchmark(*, conversations: int, active_runs: int, repeats: int) -> dict
             "list_plus_active": _summary(combined),
             "list_only": _summary(list_only),
             "active_only": _summary(active_only),
+            "message_write_indexed": _summary(indexed_writes),
+            "message_write_unindexed": _summary(unindexed_writes),
+            "write_overhead_ratio_p50": round(
+                _percentile(indexed_writes, 0.50)
+                / max(_percentile(unindexed_writes, 0.50), 1e-9),
+                3,
+            ),
             "conversation_indexes": indexes,
         }
 
