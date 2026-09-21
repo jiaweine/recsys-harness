@@ -139,17 +139,33 @@ def main() -> None:
     parser.add_argument("--conversations", type=int, default=100_000)
     parser.add_argument("--active-runs", type=int, default=40)
     parser.add_argument("--repeats", type=int, default=30)
+    parser.add_argument("--max-list-p50-ms", type=float, default=0.0)
+    parser.add_argument("--max-combined-p50-ms", type=float, default=0.0)
     args = parser.parse_args()
-    print(
-        json.dumps(
-            run_benchmark(
-                conversations=max(1_000, args.conversations),
-                active_runs=max(1, min(args.active_runs, args.conversations)),
-                repeats=max(5, args.repeats),
-            ),
-            sort_keys=True,
-        )
+    result = run_benchmark(
+        conversations=max(1_000, args.conversations),
+        active_runs=max(1, min(args.active_runs, args.conversations)),
+        repeats=max(5, args.repeats),
     )
+    print(json.dumps(result, sort_keys=True))
+
+    failures: list[str] = []
+    list_p50 = float(result["list_only"]["p50_ms"])
+    combined_p50 = float(result["list_plus_active"]["p50_ms"])
+    if args.max_list_p50_ms > 0 and list_p50 > args.max_list_p50_ms:
+        failures.append(
+            f"conversation list p50={list_p50} > {args.max_list_p50_ms}"
+        )
+    if args.max_combined_p50_ms > 0 and combined_p50 > args.max_combined_p50_ms:
+        failures.append(
+            f"conversation list+active p50={combined_p50} > {args.max_combined_p50_ms}"
+        )
+    if "idx_conversations_updated_at" not in result["conversation_indexes"]:
+        failures.append("idx_conversations_updated_at is missing")
+    if failures:
+        raise SystemExit(
+            "conversation-list performance guardrail failed: " + "; ".join(failures)
+        )
 
 
 if __name__ == "__main__":
