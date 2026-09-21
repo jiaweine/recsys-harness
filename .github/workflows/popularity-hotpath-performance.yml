@@ -9,6 +9,7 @@ on:
       - "lingjing_harness/domain.py"
       - "lingjing_harness/algorithms/search.py"
       - "lingjing_harness/algorithms/recommend_core.py"
+      - "tests/test_popularity_hotpath.py"
       - "scripts/popularity_hotpath_benchmark.py"
       - ".github/workflows/popularity-hotpath-performance.yml"
   workflow_dispatch:
@@ -19,7 +20,7 @@ permissions:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
@@ -28,8 +29,15 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: pip install -e . --no-deps
-      - name: Benchmark popularity normalization
+      - name: Benchmark batch popularity normalization
         run: |
-          python scripts/popularity_hotpath_benchmark.py \
-            --items 6000 \
-            --repeats 3
+          for pass in 1 2 3; do
+            echo "popularity performance pass $pass/3"
+            python scripts/popularity_hotpath_benchmark.py \
+              --items 6000 \
+              --repeats 3 \
+              --max-batch-p50-ms 10 \
+              --max-search-prepare-p50-ms 150 \
+              --max-recommend-init-p50-ms 1500 \
+              --min-normalization-speedup 50
+          done
