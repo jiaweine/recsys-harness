@@ -103,29 +103,7 @@ def _legacy(store: WorkspaceStore, limit: int) -> list[dict]:
 
 
 def _candidate(store: WorkspaceStore, limit: int) -> list[dict]:
-    with store._connect() as connection:  # noqa: SLF001 - benchmark candidate SQL
-        rows = connection.execute(
-            """
-            select c.*,
-                   exists(
-                     select 1 from runs r
-                     where r.conversation_id=c.id
-                       and r.status in ('running','interrupted','cancel_requested')
-                     limit 1
-                   ) as active
-            from conversations c
-            order by c.updated_at desc
-            limit ?
-            """,
-            (limit,),
-        ).fetchall()
-    return [
-        {
-            **{key: row[key] for key in ("id", "title", "scene", "created_at", "updated_at")},
-            "active": bool(row["active"]),
-        }
-        for row in rows
-    ]
+    return store.list_conversations_with_activity(limit)
 
 
 def run_benchmark(
@@ -138,6 +116,13 @@ def run_benchmark(
     with tempfile.TemporaryDirectory(prefix="xushu-read-api-") as directory:
         store = WorkspaceStore(Path(directory) / "workspace.db")
         _seed(store, conversations, active_runs)
+
+        # WorkspaceStore now creates the production ordering index during schema
+        # initialization. Drop it temporarily to reconstruct the old production
+        # plan, then recreate it below for the optimized measurement.
+        with sqlite3.connect(store.path) as connection:
+            connection.execute("drop index if exists idx_conversations_updated_at")
+            connection.commit()
 
         expected = _legacy(store, limit)
         candidate = _candidate(store, limit)
@@ -193,19 +178,29 @@ def main() -> None:
     parser.add_argument("--active-runs", type=int, default=20_000)
     parser.add_argument("--repeats", type=int, default=30)
     parser.add_argument("--limit", type=int, default=40)
+    parser.add_argument("--max-optimized-p50-ms", type=float, default=0.0)
+    parser.add_argument("--min-speedup", type=float, default=0.0)
     args = parser.parse_args()
 
-    print(
-        json.dumps(
-            run_benchmark(
-                conversations=max(1000, args.conversations),
-                active_runs=max(0, args.active_runs),
-                repeats=max(10, args.repeats),
-                limit=max(1, args.limit),
-            ),
-            sort_keys=True,
-        )
+    result = run_benchmark(
+        conversations=max(1000, args.conversations),
+        active_runs=max(0, args.active_runs),
+        repeats=max(10, args.repeats),
+        limit=max(1, args.limit),
     )
+    print(json.dumps(result, sort_keys=True))
+
+    optimized_p50 = float(result["indexed_candidate_single_query"]["p50_ms"])
+    speedup = float(result["indexed_single_query_speedup"])
+    failures: list[str] = []
+    if args.max_optimized_p50_ms > 0 and optimized_p50 > args.max_optimized_p50_ms:
+        failures.append(
+            f"optimized p50={optimized_p50} > {args.max_optimized_p50_ms}"
+        )
+    if args.min_speedup > 0 and speedup < args.min_speedup:
+        failures.append(f"speedup={speedup} < {args.min_speedup}")
+    if failures:
+        raise SystemExit("read API performance guardrail failed: " + "; ".join(failures))
 
 
 if __name__ == "__main__":
