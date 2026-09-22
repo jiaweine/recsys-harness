@@ -95,17 +95,15 @@ def _fixture(*, items: int, users: int) -> tuple[Catalog, RecommendationEngine]:
 def run_benchmark(*, items: int, users: int, repeats: int) -> dict[str, object]:
     catalog, engine = _fixture(items=items, users=users)
     user_ids = engine.known_users()
-    optimized_helper = validation._temporal_recommendation_engine
+    optimized_materializer = validation._owned_temporal_recommendation_engine
 
-    def legacy_engine(current, training_catalog):
-        return RecommendationEngine(
-            training_catalog,
-            config=current.config,
-            item_vectors=current._vectors,
-        )
+    def legacy_materializer(current, training_catalog, state):
+        temporal = optimized_materializer(current, training_catalog, state)
+        temporal._popularity = training_catalog.popularity_norms()
+        return temporal
 
     def legacy_prepare():
-        validation._temporal_recommendation_engine = legacy_engine
+        validation._owned_temporal_recommendation_engine = legacy_materializer
         try:
             return validation.prepare_recommend_relevance(
                 catalog,
@@ -114,10 +112,10 @@ def run_benchmark(*, items: int, users: int, repeats: int) -> dict[str, object]:
                 k=8,
             )
         finally:
-            validation._temporal_recommendation_engine = optimized_helper
+            validation._owned_temporal_recommendation_engine = optimized_materializer
 
     def optimized_prepare():
-        validation._temporal_recommendation_engine = optimized_helper
+        validation._owned_temporal_recommendation_engine = optimized_materializer
         return validation.prepare_recommend_relevance(
             catalog,
             engine,
