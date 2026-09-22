@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Callable
 
 from lingjing_harness.algorithms.capabilities import CAPABILITIES
+from lingjing_harness.algorithms.text import cosine
 from lingjing_harness.domain import Catalog, Interaction, Item
 from lingjing_harness.runtime.memory import AgentMemory
 from lingjing_harness.runtime.tools import ToolRegistry
@@ -66,6 +67,94 @@ def _catalog(items: int, history: int) -> tuple[Catalog, str]:
     return Catalog(items=rows, interactions=interactions, name="recommend-run-benchmark"), user_id
 
 
+def _legacy_prepare(engine, user_id: str) -> list[dict]:
+    profile, cats, seen, seeds = engine._profile(user_id)
+    dense_profile = engine._dense_profile(profile)
+    cat_total = sum(cats.values()) or 1.0
+    graph_scores = engine._graph_scores(seeds)
+    candidate_ids = CAPABILITIES.call(
+        "recommend.candidate",
+        engine.config.candidate_strategy,
+        engine,
+        user_id,
+        profile,
+        cats,
+        seen,
+        seeds,
+        graph_scores,
+    )
+    cold = len(engine._by_user.get(user_id, [])) == 0
+    rows = []
+    for item_id in dict.fromkeys(str(value) for value in candidate_ids):
+        item = engine.catalog.item_by_id.get(item_id)
+        if item is None or not item.eligible or item.item_id in seen:
+            continue
+        item_vector = engine._vectors[item.item_id]
+        if not profile:
+            profile_fit = 0.0
+        elif dense_profile is not None and len(profile) > len(item_vector):
+            profile_fit = max(
+                0.0,
+                sum(
+                    value * dense_profile[key]
+                    for key, value in item_vector.items()
+                ),
+            )
+        else:
+            profile_fit = max(0.0, cosine(profile, item_vector))
+        cat_fit = sum(cats.get(category, 0.0) for category in item.categories) / cat_total
+        graph = graph_scores.get(item.item_id, 0.0)
+        popularity = engine._popularity[item.item_id]
+        novelty = 1.0 - popularity
+        explore = CAPABILITIES.call(
+            "recommend.exploration",
+            engine.config.exploration_strategy,
+            engine,
+            user_id,
+            item,
+            popularity,
+        )
+        cold_prior = (
+            CAPABILITIES.call(
+                "recommend.cold_start",
+                engine.config.cold_start_strategy,
+                engine,
+                item,
+                popularity,
+                explore,
+            )
+            if cold
+            else 0.0
+        )
+        rows.append(
+            {
+                "item": item,
+                "profile_fit": profile_fit,
+                "cat_fit": cat_fit,
+                "graph": graph,
+                "pop": popularity,
+                "novelty": novelty,
+                "explore": explore,
+                "cold_prior": cold_prior,
+            }
+        )
+    return rows
+
+
+def _legacy_run(registry: ToolRegistry, user_id: str) -> dict:
+    segment = registry.segment_router.recommend_segment(user_id)
+    config = registry.recommend_portfolio.get(segment)
+    engine = registry.recommend.with_config(config) if config is not None else registry.recommend
+    prepared = _legacy_prepare(engine, user_id)
+    return {
+        "user_id": user_id,
+        "history_events": len(registry.recommend._by_user.get(user_id, [])),
+        "segment": segment,
+        "strategy_scope": "segment" if config is not None else "global",
+        "results": engine.rank_prepared(prepared, limit=8),
+    }
+
+
 def _current_run(registry: ToolRegistry, user_id: str) -> dict:
     segment = registry.segment_router.recommend_segment(user_id)
     config = registry.recommend_portfolio.get(segment)
@@ -85,114 +174,61 @@ def run_benchmark(*, items: int, history: int, repeats: int) -> dict[str, object
         memory = AgentMemory(Path(directory) / "agent-memory.db")
         registry = ToolRegistry(catalog, memory=memory)
 
-        expected = _current_run(registry, user_id)
+        legacy_prepared = _legacy_prepare(registry.recommend, user_id)
+        optimized_prepared = registry.recommend.prepare(user_id)
+        if optimized_prepared != legacy_prepared:
+            raise AssertionError("optimized prepare differs from legacy prepare")
+
+        expected = _legacy_run(registry, user_id)
         actual = registry.run_recommend(user_id)
         if actual != expected:
-            raise AssertionError("run_recommend differs from current routing + serving path")
+            raise AssertionError("optimized run_recommend differs from legacy output")
 
-        registry.segment_router.recommend_segment(user_id)
-        registry.recommend.recommend(user_id, limit=8)
+        _legacy_prepare(registry.recommend, user_id)
+        registry.recommend.prepare(user_id)
+        _legacy_run(registry, user_id)
         registry.run_recommend(user_id)
 
-        engine = registry.recommend
-        profile, _cats, _seen, _seeds = engine._profile(user_id)
-        dense_profile = engine._dense_profile(profile)
-        eligible = [item for item in catalog.items if item.eligible]
-        explore_handler = CAPABILITIES.resolve(
-            "recommend.exploration",
-            engine.config.exploration_strategy,
-        ).handler
-
-        registry_explore = _summary(_timed(
-            lambda: [
-                CAPABILITIES.call(
-                    "recommend.exploration",
-                    engine.config.exploration_strategy,
-                    engine,
-                    user_id,
-                    item,
-                    engine._popularity[item.item_id],
-                )
-                for item in eligible
-            ],
-            max(3, repeats // 2),
-        ))
-        direct_explore = _summary(_timed(
-            lambda: [
-                explore_handler(
-                    engine,
-                    user_id,
-                    item,
-                    engine._popularity[item.item_id],
-                )
-                for item in eligible
-            ],
-            max(3, repeats // 2),
-        ))
-        profile_dot = _summary(_timed(
-            lambda: [
-                sum(value * dense_profile[key] for key, value in engine._vectors[item.item_id].items())
-                for item in eligible
-            ] if dense_profile is not None else [],
-            max(3, repeats // 2),
-        ))
-
-        def manual_dot_all():
-            if dense_profile is None:
-                return []
-            out = []
-            profile_values = dense_profile
-            vectors = engine._vectors
-            for item in eligible:
-                total = 0.0
-                for key, value in vectors[item.item_id].items():
-                    total += value * profile_values[key]
-                out.append(total)
-            return out
-
-        def list_dot_all():
-            if dense_profile is None:
-                return []
-            profile_values = dense_profile
-            vectors = engine._vectors
-            return [
-                sum([value * profile_values[key] for key, value in vectors[item.item_id].items()])
-                for item in eligible
-            ]
-
-        manual_profile_dot = _summary(_timed(
-            manual_dot_all,
-            max(3, repeats // 2),
-        ))
-        list_profile_dot = _summary(_timed(
-            list_dot_all,
-            max(3, repeats // 2),
-        ))
-
+        legacy_prepare = _summary(
+            _timed(lambda: _legacy_prepare(registry.recommend, user_id), repeats)
+        )
+        optimized_prepare = _summary(
+            _timed(lambda: registry.recommend.prepare(user_id), repeats)
+        )
+        legacy_full = _summary(
+            _timed(lambda: _legacy_run(registry, user_id), repeats)
+        )
+        optimized_full = _summary(
+            _timed(lambda: registry.run_recommend(user_id), repeats)
+        )
         routing = _summary(
             _timed(lambda: registry.segment_router.recommend_segment(user_id), repeats)
         )
-        serving = _summary(
-            _timed(lambda: registry.recommend.recommend(user_id, limit=8), repeats)
-        )
-        full = _summary(
-            _timed(lambda: registry.run_recommend(user_id), repeats)
-        )
 
-    routing_share = float(routing["p50_ms"]) / max(float(full["p50_ms"]), 1e-9)
+    prepare_speedup = float(legacy_prepare["p50_ms"]) / max(
+        float(optimized_prepare["p50_ms"]),
+        1e-9,
+    )
+    full_speedup = float(legacy_full["p50_ms"]) / max(
+        float(optimized_full["p50_ms"]),
+        1e-9,
+    )
+    routing_share = float(routing["p50_ms"]) / max(
+        float(optimized_full["p50_ms"]),
+        1e-9,
+    )
     return {
         "items": items,
         "history": history,
         "repeats": repeats,
+        "legacy_prepare": legacy_prepare,
+        "optimized_prepare": optimized_prepare,
+        "prepare_speedup_p50": round(prepare_speedup, 2),
+        "legacy_full_run": legacy_full,
+        "optimized_full_run": optimized_full,
+        "full_speedup_p50": round(full_speedup, 2),
         "routing": routing,
-        "serving": serving,
-        "full_run": full,
         "routing_share_p50": round(routing_share, 4),
-        "registry_explore": registry_explore,
-        "direct_explore": direct_explore,
-        "profile_dot": profile_dot,
-        "manual_profile_dot": manual_profile_dot,
-        "list_profile_dot": list_profile_dot,
     }
 
 
