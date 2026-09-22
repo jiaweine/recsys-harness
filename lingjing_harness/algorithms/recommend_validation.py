@@ -263,7 +263,7 @@ def prepare_recommend_relevance(
     by_user: dict[str, list[Interaction]] = defaultdict(list)
     for event in catalog.interactions:
         by_user[event.user_id].append(event)
-    popularity_ordered = _popularity_order(catalog)
+    popularity_ordered: tuple[str, ...] | None = None
 
     slices: list[_PreparedSlice] = []
     for user_id in users:
@@ -294,6 +294,9 @@ def prepare_recommend_relevance(
         seen = {event.item_id for event in user_history}
         if target.item_id in seen:
             continue
+
+        if popularity_ordered is None:
+            popularity_ordered = _popularity_order(catalog)
 
         training_catalog = Catalog(
             items=list(catalog.items),
