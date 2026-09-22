@@ -116,6 +116,42 @@ def _aggregate(rows: list[dict[str, float]]) -> dict[str, float]:
     }
 
 
+def _temporal_training_catalog(
+    catalog: Catalog,
+    training_interactions: list[Interaction],
+    *,
+    user_id: str,
+    engine: Any,
+) -> Catalog:
+    """Build a temporal catalog while reusing already-validated static data.
+
+    Owned relevance evaluation only changes the interaction cutoff. Items and
+    query labels come from an already-normalized Catalog, so rerunning the full
+    Catalog.__post_init__ pipeline for every slice is redundant. Keep separate
+    containers to preserve the legacy mutation-isolation boundary.
+    """
+
+    if type(engine) is not RecommendationEngine:
+        return Catalog(
+            items=list(catalog.items),
+            interactions=training_interactions,
+            query_labels=list(catalog.query_labels),
+            events=[],
+            reward_spec=None,
+            name=f"{catalog.name}:temporal-relevance:{user_id}",
+        )
+
+    training_catalog = object.__new__(Catalog)
+    training_catalog.items = list(catalog.items)
+    training_catalog.interactions = training_interactions
+    training_catalog.query_labels = list(catalog.query_labels)
+    training_catalog.events = []
+    training_catalog.reward_spec = None
+    training_catalog.name = f"{catalog.name}:temporal-relevance:{user_id}"
+    training_catalog.item_by_id = dict(catalog.item_by_id)
+    return training_catalog
+
+
 def _temporal_recommendation_engine(
     engine: RecommendationEngine,
     training_catalog: Catalog,
@@ -299,13 +335,11 @@ def prepare_recommend_relevance(
         if popularity_ordered is None:
             popularity_ordered = _popularity_order(catalog)
 
-        training_catalog = Catalog(
-            items=list(catalog.items),
-            interactions=training_interactions,
-            query_labels=list(catalog.query_labels),
-            events=[],
-            reward_spec=None,
-            name=f"{catalog.name}:temporal-relevance:{user_id}",
+        training_catalog = _temporal_training_catalog(
+            catalog,
+            training_interactions,
+            user_id=user_id,
+            engine=engine,
         )
         base_engine = _temporal_recommendation_engine(
             engine,
