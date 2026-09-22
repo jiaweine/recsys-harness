@@ -237,12 +237,37 @@ def main() -> None:
     parser.add_argument("--items", type=int, default=30_000)
     parser.add_argument("--history", type=int, default=5_000)
     parser.add_argument("--repeats", type=int, default=7)
+    parser.add_argument("--max-optimized-p50-ms", type=float, default=0.0)
+    parser.add_argument("--min-prepare-speedup", type=float, default=0.0)
+    parser.add_argument("--min-full-speedup", type=float, default=0.0)
     args = parser.parse_args()
-    print(json.dumps(run_benchmark(
+    result = run_benchmark(
         items=max(1_000, args.items),
-        history=max(10, args.history),
+        history=max(0, args.history),
         repeats=max(3, args.repeats),
-    ), ensure_ascii=False, sort_keys=True))
+    )
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+
+    failures: list[str] = []
+    optimized = float(result["optimized_full_run"]["p50_ms"])
+    prepare_speedup = float(result["prepare_speedup_p50"])
+    full_speedup = float(result["full_speedup_p50"])
+    if args.max_optimized_p50_ms > 0 and optimized > args.max_optimized_p50_ms:
+        failures.append(
+            f"optimized full-run p50={optimized}ms > {args.max_optimized_p50_ms}ms"
+        )
+    if args.min_prepare_speedup > 0 and prepare_speedup < args.min_prepare_speedup:
+        failures.append(
+            f"prepare speedup={prepare_speedup} < {args.min_prepare_speedup}"
+        )
+    if args.min_full_speedup > 0 and full_speedup < args.min_full_speedup:
+        failures.append(
+            f"full-run speedup={full_speedup} < {args.min_full_speedup}"
+        )
+    if failures:
+        raise SystemExit(
+            "recommend run performance guardrail failed: " + "; ".join(failures)
+        )
 
 
 if __name__ == "__main__":
