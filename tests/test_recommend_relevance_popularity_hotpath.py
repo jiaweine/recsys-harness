@@ -121,3 +121,29 @@ def test_precomputed_popularity_order_preserves_full_relevance_report(monkeypatc
     ).evaluate(engine.config)
 
     assert optimized == legacy
+
+
+def test_fully_cached_relevance_prepare_skips_popularity_order(monkeypatch) -> None:
+    catalog, engine = _fixture(users=5)
+    cache = validation.RecommendRelevanceSliceCache(catalog=catalog, engine=engine)
+    first = validation.prepare_recommend_relevance(
+        catalog,
+        engine,
+        users_override=engine.known_users(),
+        k=8,
+        slice_cache=cache,
+    )
+
+    def fail_if_called(current: Catalog) -> tuple[str, ...]:
+        raise AssertionError("fully cached relevance preparation should not rebuild popularity order")
+
+    monkeypatch.setattr(validation, "_popularity_order", fail_if_called)
+    second = validation.prepare_recommend_relevance(
+        catalog,
+        engine,
+        users_override=engine.known_users(),
+        k=8,
+        slice_cache=cache,
+    )
+
+    assert second.slices == first.slices
