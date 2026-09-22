@@ -79,9 +79,10 @@ def _popularity_rank(catalog: Catalog, seen: set[str], *, k: int) -> list[str]:
         for item in catalog.items
         if item.eligible and item.item_id not in seen
     ]
+    popularity = catalog.popularity_norms()
     candidates.sort(
         key=lambda item: (
-            -catalog.popularity_norm(item),
+            -popularity[item.item_id],
             -item.quality,
             -item.freshness,
             item.item_id,
@@ -97,6 +98,20 @@ def _aggregate(rows: list[dict[str, float]]) -> dict[str, float]:
         key: round(mean(row[key] for row in rows), 4)
         for key in ("hit_rate", "recall", "mrr", "ndcg")
     }
+
+
+def _temporal_recommendation_engine(
+    engine: RecommendationEngine,
+    training_catalog: Catalog,
+) -> RecommendationEngine:
+    runtime_factory = getattr(engine, "for_catalog", None)
+    if callable(runtime_factory):
+        return runtime_factory(training_catalog)
+    return RecommendationEngine(
+        training_catalog,
+        config=engine.config,
+        item_vectors=engine._vectors,
+    )
 
 
 @dataclass(slots=True)
@@ -271,11 +286,9 @@ def prepare_recommend_relevance(
             reward_spec=None,
             name=f"{catalog.name}:temporal-relevance:{user_id}",
         )
-        runtime_factory = getattr(engine, "for_catalog", None)
-        base_engine = (
-            runtime_factory(training_catalog)
-            if callable(runtime_factory)
-            else RecommendationEngine(training_catalog, config=engine.config)
+        base_engine = _temporal_recommendation_engine(
+            engine,
+            training_catalog,
         )
         prepared_slice = _PreparedSlice(
             user_id=user_id,
