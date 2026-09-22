@@ -3,6 +3,7 @@ name: Search Run Performance
 on:
   pull_request:
     paths:
+      - "lingjing_harness/algorithms/search.py"
       - "lingjing_harness/algorithms/segments.py"
       - "lingjing_harness/runtime/tools.py"
       - "tests/test_search_run_hotpath.py"
