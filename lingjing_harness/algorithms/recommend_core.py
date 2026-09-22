@@ -295,8 +295,11 @@ class RecommendationEngine:
                     },
                 }
             )
-        rows.sort(key=lambda row: (-row["base"], row["item"].item_id))
-        pool = rows[: max(40, limit * 6)]
+        pool = nsmallest(
+            max(40, limit * 6),
+            rows,
+            key=lambda row: (-row["base"], row["item"].item_id),
+        )
         selected = []
         while pool and len(selected) < limit:
             best = None
