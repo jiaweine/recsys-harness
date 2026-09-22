@@ -1,9 +1,14 @@
 name: Recommend Evolution Prepare Performance
 
 on:
-  push:
-    branches:
-      - perf/cache-recommend-evolution-prepare
+  pull_request:
+    paths:
+      - "lingjing_harness/algorithms/recommend_core.py"
+      - "lingjing_harness/algorithms/evolution_core.py"
+      - "lingjing_harness/algorithms/production_evolution.py"
+      - "tests/test_recommend_evolution_prepare_hotpath.py"
+      - "scripts/recommend_evolution_prepare_benchmark.py"
+      - ".github/workflows/recommend-evolution-prepare-performance.yml"
   workflow_dispatch:
 
 permissions:
