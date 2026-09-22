@@ -226,8 +226,40 @@ def run_benchmark(*, items: int, history: int, repeats: int) -> dict[str, object
                 for vector in (vectors[item.item_id],)
             ]
 
+        def generator_dot_all():
+            if dense_profile is None:
+                return []
+            profile_values = dense_profile
+            vectors = registry.recommend._vectors
+            return [
+                sum(
+                    value * profile_values[key]
+                    for key, value in vectors[item.item_id].items()
+                )
+                for item in eligible
+            ]
+
+        def manual_dot_all():
+            if dense_profile is None:
+                return []
+            profile_values = dense_profile
+            vectors = registry.recommend._vectors
+            output = []
+            for item in eligible:
+                total = 0.0
+                for key, value in vectors[item.item_id].items():
+                    total += value * profile_values[key]
+                output.append(total)
+            return output
+
         map_profile_dot = _summary(
             _timed(map_dot_all, max(3, repeats // 2))
+        )
+        generator_profile_dot = _summary(
+            _timed(generator_dot_all, max(3, repeats // 2))
+        )
+        manual_profile_dot = _summary(
+            _timed(manual_dot_all, max(3, repeats // 2))
         )
         routing = _summary(
             _timed(lambda: registry.segment_router.recommend_segment(user_id), repeats)
@@ -257,6 +289,8 @@ def run_benchmark(*, items: int, history: int, repeats: int) -> dict[str, object
         "full_speedup_p50": round(full_speedup, 2),
         "routing": routing,
         "map_profile_dot": map_profile_dot,
+        "generator_profile_dot": generator_profile_dot,
+        "manual_profile_dot": manual_profile_dot,
         "routing_share_p50": round(routing_share, 4),
     }
 
