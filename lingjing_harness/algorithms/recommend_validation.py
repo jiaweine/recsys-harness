@@ -127,6 +127,7 @@ def _temporal_recommendation_engine(
         training_catalog,
         config=engine.config,
         item_vectors=engine._vectors,
+        popularity_norms=engine._popularity,
     )
 
 

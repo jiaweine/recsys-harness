@@ -1,0 +1,43 @@
+name: Recommend Relevance Popularity Snapshot Performance
+
+on:
+  push:
+    branches:
+      - perf/recommend-relevance-popularity-snapshot
+  pull_request:
+    paths:
+      - "lingjing_harness/algorithms/recommend_core.py"
+      - "lingjing_harness/algorithms/recommend_validation.py"
+      - "tests/test_recommend_relevance_popularity_snapshot.py"
+      - "scripts/recommend_relevance_popularity_snapshot_benchmark.py"
+      - ".github/workflows/recommend-relevance-popularity-snapshot-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Verify shared relevance popularity snapshot
+        run: pytest -q tests/test_recommend_relevance_popularity_snapshot.py
+      - name: Benchmark shared relevance popularity snapshot
+        run: |
+          for pass in 1 2 3; do
+            echo "recommend-relevance-popularity-snapshot pass $pass/3"
+            python scripts/recommend_relevance_popularity_snapshot_benchmark.py \
+              --items 20000 \
+              --users 10 \
+              --repeats 5 \
+              --max-optimized-p50-ms 250 \
+              --min-speedup 1.30
+          done
