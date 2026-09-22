@@ -18,7 +18,7 @@ permissions:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
@@ -27,9 +27,16 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: pip install -e . --no-deps
-      - name: Benchmark search rank baseline
+      - name: Verify search rank hot path
+        run: pytest -q tests/test_search_rank_hotpath.py
+      - name: Benchmark deferred search rank signals
         run: |
-          python scripts/search_rank_benchmark.py \
-            --items 30000 \
-            --repeats 7 \
-            --limit 8
+          for pass in 1 2 3; do
+            echo "search-rank performance pass $pass/3"
+            python scripts/search_rank_benchmark.py \
+              --items 30000 \
+              --repeats 7 \
+              --limit 8 \
+              --max-current-p50-ms 30 \
+              --min-speedup 3.0
+          done
