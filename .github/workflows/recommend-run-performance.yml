@@ -47,4 +47,6 @@ jobs:
             --items 30000 \
             --history 0 \
             --repeats 7 \
-            --max-optimized-p50-ms 220
+            --max-optimized-p50-ms 140 \
+            --min-prepare-speedup 1.20 \
+            --min-full-speedup 1.20
