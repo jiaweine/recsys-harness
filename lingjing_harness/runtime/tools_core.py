@@ -190,10 +190,17 @@ class ToolRegistry:
         )
         if duplicates:
             issues.append(f"发现 {duplicates} 条重复标题")
-        unavailable = sum(1 for item in catalog.items if not item.eligible)
+        eligible_item_ids = frozenset(
+            item.item_id for item in catalog.items if item.eligible
+        )
+        unavailable = len(catalog.items) - len(eligible_item_ids)
         if unavailable:
             issues.append(f"有 {unavailable} 条内容当前不可展示")
-        return {"summary": dict(summary), "issues": tuple(issues)}
+        return {
+            "summary": dict(summary),
+            "issues": tuple(issues),
+            "eligible_item_ids": eligible_item_ids,
+        }
 
     def fork(self) -> "ToolRegistry":
         clone = object.__new__(ToolRegistry)
@@ -458,11 +465,11 @@ class ToolRegistry:
         user_id = user_id or "new-user"
         events = self.recommend._by_user.get(user_id, [])
         seen = {event.item_id for event in events}
-        eligible = [
-            item
-            for item in self.catalog.items
-            if item.eligible and item.item_id not in seen
-        ]
+        eligible_item_ids = self._catalog_inspection["eligible_item_ids"]
+        eligible_seen = sum(
+            1 for item_id in seen if item_id in eligible_item_ids
+        )
+        eligible_unseen = len(eligible_item_ids) - eligible_seen
         categories = sorted(
             {
                 category
@@ -474,14 +481,14 @@ class ToolRegistry:
             "user_id": user_id,
             "history_events": len(events),
             "seen_items": len(seen),
-            "eligible_unseen": len(eligible),
+            "eligible_unseen": eligible_unseen,
             "known_categories": categories[:12],
             "cold_start": len(events) == 0,
             "diagnosis": (
                 "这是冷启动用户，当前结果主要依赖内容质量、新鲜度和稳定探索"
                 if not events
                 else "可展示未看内容不足，推荐空间受到候选池限制"
-                if len(eligible) < 8
+                if eligible_unseen < 8
                 else "用户行为和可展示候选都足以支持个性化复核"
             ),
         }
