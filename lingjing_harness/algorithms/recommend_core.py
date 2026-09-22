@@ -93,6 +93,28 @@ class RecommendationEngine:
             if group.startswith("recommend.")
         }
 
+    def preparation_signature(self) -> tuple[str, str, str, str] | None:
+        """Return a safe cache key for built-in prepare-stage capabilities.
+
+        Third-party/custom capability handlers may inspect arbitrary config state
+        through the engine object, so they deliberately disable cross-config
+        prepare reuse.
+        """
+
+        choices = (
+            ("recommend.profile", self.config.profile_strategy),
+            ("recommend.candidate", self.config.candidate_strategy),
+            ("recommend.exploration", self.config.exploration_strategy),
+            ("recommend.cold_start", self.config.cold_start_strategy),
+        )
+        specs = tuple(
+            CAPABILITIES.resolve(group, name)
+            for group, name in choices
+        )
+        if any(spec.handler.__module__ != __name__ for spec in specs):
+            return None
+        return tuple(spec.name for spec in specs)
+
     def known_users(self) -> list[str]:
         return sorted(self._by_user)
 
