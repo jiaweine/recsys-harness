@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from lingjing_harness.algorithms.capabilities import CAPABILITIES
 from lingjing_harness.domain import Catalog, Interaction, Item
 from lingjing_harness.runtime.memory import AgentMemory
 from lingjing_harness.runtime.tools import ToolRegistry
@@ -93,6 +94,49 @@ def run_benchmark(*, items: int, history: int, repeats: int) -> dict[str, object
         registry.recommend.recommend(user_id, limit=8)
         registry.run_recommend(user_id)
 
+        engine = registry.recommend
+        profile, _cats, _seen, _seeds = engine._profile(user_id)
+        dense_profile = engine._dense_profile(profile)
+        eligible = [item for item in catalog.items if item.eligible]
+        explore_handler = CAPABILITIES.resolve(
+            "recommend.exploration",
+            engine.config.exploration_strategy,
+        ).handler
+
+        registry_explore = _summary(_timed(
+            lambda: [
+                CAPABILITIES.call(
+                    "recommend.exploration",
+                    engine.config.exploration_strategy,
+                    engine,
+                    user_id,
+                    item,
+                    engine._popularity[item.item_id],
+                )
+                for item in eligible
+            ],
+            max(3, repeats // 2),
+        ))
+        direct_explore = _summary(_timed(
+            lambda: [
+                explore_handler(
+                    engine,
+                    user_id,
+                    item,
+                    engine._popularity[item.item_id],
+                )
+                for item in eligible
+            ],
+            max(3, repeats // 2),
+        ))
+        profile_dot = _summary(_timed(
+            lambda: [
+                sum(value * dense_profile[key] for key, value in engine._vectors[item.item_id].items())
+                for item in eligible
+            ] if dense_profile is not None else [],
+            max(3, repeats // 2),
+        ))
+
         routing = _summary(
             _timed(lambda: registry.segment_router.recommend_segment(user_id), repeats)
         )
@@ -112,6 +156,9 @@ def run_benchmark(*, items: int, history: int, repeats: int) -> dict[str, object
         "serving": serving,
         "full_run": full,
         "routing_share_p50": round(routing_share, 4),
+        "registry_explore": registry_explore,
+        "direct_explore": direct_explore,
+        "profile_dot": profile_dot,
     }
 
 
