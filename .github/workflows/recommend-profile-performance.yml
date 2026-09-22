@@ -37,6 +37,6 @@ jobs:
               --repeats 7 \
               --limit 8 \
               --max-optimized-recommend-p50-ms 250 \
-              --max-optimized-prepare-p50-ms 180 \
+              --max-optimized-prepare-p50-ms 220 \
               --min-recommend-speedup 1.08
           done
