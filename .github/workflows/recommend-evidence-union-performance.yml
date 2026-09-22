@@ -1,0 +1,37 @@
+name: Evidence Union Performance
+
+on:
+  pull_request:
+    paths:
+      - "lingjing_harness/algorithms/recommend_core.py"
+      - "tests/test_recommend_evidence_union_hotpath.py"
+      - "scripts/recommend_evidence_union_benchmark.py"
+      - ".github/workflows/recommend-evidence-union-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Benchmark evidence union candidate selection
+        run: |
+          for pass in 1 2 3; do
+            echo "evidence-union performance pass $pass/3"
+            python scripts/recommend_evidence_union_benchmark.py \
+              --items 30000 \
+              --history 64 \
+              --repeats 7 \
+              --max-optimized-p50-ms 80 \
+              --min-speedup 1.25
+          done
