@@ -219,14 +219,40 @@ class ToolRegistry(_ProductionToolRegistry):
 
     def run_search(self, query: str | None = None, **_: Any) -> dict[str, Any]:
         query = query or ""
-        segment = self.segment_router.search_segment(query)
+
+        # The owned SearchEngine uses the exact same prepare() rows for routing
+        # and serving. Reuse them instead of performing retrieval twice. External
+        # backends such as FlagEmbedding expose routing_prepare() deliberately to
+        # keep routing on the owned reference path, so they stay on the existing
+        # two-stage route + serve flow.
+        prepared: list[dict[str, Any]] | None = None
+        if type(self.search) is SearchEngine:
+            prepared = self.search.prepare(query)
+            segment = self.segment_router.search_segment_from_prepared(prepared)
+        else:
+            segment = self.segment_router.search_segment(query)
+
         config = self.search_portfolio.get(segment)
         engine = self.search.with_config(config) if config is not None else self.search
+        if prepared is not None and (
+            config is None
+            or (
+                config.query_strategy == self.search.config.query_strategy
+                and config.candidate_strategy == self.search.config.candidate_strategy
+            )
+        ):
+            results = self.search.rank_prepared(
+                prepared,
+                config=config,
+                limit=8,
+            )
+        else:
+            results = engine.search(query, limit=8)
         return {
             "query": query,
             "segment": segment,
             "strategy_scope": "segment" if config is not None else "global",
-            "results": engine.search(query, limit=8),
+            "results": results,
         }
 
     def search_diagnose(self, query: str | None = None, **kwargs: Any) -> dict[str, Any]:
