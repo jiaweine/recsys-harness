@@ -27,7 +27,7 @@ def _engine(*, items: int = 240, history: int = 24) -> RecommendationEngine:
     interactions = [
         Interaction(
             user_id="warm-user",
-            item_id=f"item-{(index * 13) % items:04d}",
+            item_id=f"item-{(index * 12) % items:04d}",
             timestamp=float(index),
         )
         for index in range(history)
