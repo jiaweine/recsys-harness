@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import Counter, OrderedDict, defaultdict
 from dataclasses import dataclass, field
 from hashlib import blake2b
 from heapq import nsmallest
@@ -16,6 +16,12 @@ from .text import cosine
 _BLEND = {"evolve_group": "blend", "min": 0.005, "max": 0.75, "relative_step": 0.16}
 _INDEPENDENT = {"evolve_group": "independent", "min": 0.0, "max": 0.32, "relative_step": 0.18}
 _COLD_START = {"evolve_group": "independent", "min": 0.0, "max": 0.28, "relative_step": 0.20}
+_OWNED_PROFILE_HORIZONS = {
+    "recency_balanced": 30.0,
+    "recent_intent": 10.0,
+    "long_horizon": 90.0,
+}
+_OWNED_PROFILE_SAFE_CANDIDATES = frozenset({"full_pool", "evidence_union"})
 
 
 @dataclass(frozen=True)
@@ -49,6 +55,7 @@ class RecommendationEngine:
     """Owned implicit-feedback recommender with evolvable vertical stages."""
 
     MAX_GRAPH_HISTORY = 120
+    MAX_PROFILE_SNAPSHOTS = 128
 
     def __init__(
         self,
@@ -63,6 +70,10 @@ class RecommendationEngine:
         self._dense_vector_dims = getattr(self._vectors, "dense_dims", None)
         self._popularity = catalog.popularity_norms()
         self._candidate_static_cache: dict[str, object] = {}
+        self._profile_snapshot_cache: OrderedDict[
+            tuple[str, float],
+            tuple[dict[int, float], Counter[str], set[str], Counter[str]],
+        ] = OrderedDict()
         self._by_user: dict[str, list] = defaultdict(list)
         for event in catalog.interactions:
             self._by_user[event.user_id].append(event)
@@ -82,6 +93,7 @@ class RecommendationEngine:
         clone._dense_vector_dims = self._dense_vector_dims
         clone._popularity = self._popularity
         clone._candidate_static_cache = self._candidate_static_cache
+        clone._profile_snapshot_cache = self._profile_snapshot_cache
         clone._by_user = self._by_user
         clone._co = self._co
         return clone
@@ -131,6 +143,38 @@ class RecommendationEngine:
                 cats[category] += weight
         norm = sqrt(sum(value * value for value in vec.values())) or 1.0
         return {key: value / norm for key, value in vec.items()}, cats, seen, seeds
+
+    def _owned_profile_snapshot(
+        self,
+        user_id: str,
+    ) -> tuple[dict[int, float], Counter[str], set[str], Counter[str]] | None:
+        """Return a cached profile only for owned read-only prepare stages.
+
+        Public/profile capability calls retain their historical fresh mutable
+        objects. The shared snapshot is consumed only by the two built-in
+        candidate stages, which treat profile inputs as read-only.
+        """
+
+        horizon = _OWNED_PROFILE_HORIZONS.get(self.config.profile_strategy)
+        if (
+            horizon is None
+            or self.config.candidate_strategy not in _OWNED_PROFILE_SAFE_CANDIDATES
+            or not self._by_user.get(user_id)
+        ):
+            return None
+
+        cache_key = (user_id, horizon)
+        cached = self._profile_snapshot_cache.get(cache_key)
+        if cached is not None:
+            self._profile_snapshot_cache.move_to_end(cache_key)
+            return cached
+
+        snapshot = self._profile_with_decay(user_id, horizon=horizon)
+        self._profile_snapshot_cache[cache_key] = snapshot
+        self._profile_snapshot_cache.move_to_end(cache_key)
+        if len(self._profile_snapshot_cache) > self.MAX_PROFILE_SNAPSHOTS:
+            self._profile_snapshot_cache.popitem(last=False)
+        return snapshot
 
     def _dense_profile(
         self,
@@ -205,7 +249,11 @@ class RecommendationEngine:
         return (value % 1000) / 1000.0
 
     def prepare(self, user_id: str) -> list[dict]:
-        profile, cats, seen, seeds = self._profile(user_id)
+        snapshot = self._owned_profile_snapshot(user_id)
+        if snapshot is None:
+            profile, cats, seen, seeds = self._profile(user_id)
+        else:
+            profile, cats, seen, seeds = snapshot
         dense_profile = self._dense_profile(profile)
         cat_total = sum(cats.values()) or 1.0
         graph_scores = self._graph_scores(seeds)
