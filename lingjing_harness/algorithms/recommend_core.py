@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+from functools import lru_cache
 from hashlib import blake2b
 from heapq import nsmallest
 from math import exp, sqrt
@@ -197,11 +198,18 @@ class RecommendationEngine:
         return ordered
 
     @staticmethod
+    @lru_cache(maxsize=256)
+    def _stable_hash_template(user_id: str):
+        digest = blake2b(digest_size=4)
+        digest.update(user_id.encode())
+        digest.update(b":")
+        return digest
+
+    @staticmethod
     def _stable_hash(user_id: str, item_id: str) -> float:
-        value = int.from_bytes(
-            blake2b(f"{user_id}:{item_id}".encode(), digest_size=4).digest(),
-            "little",
-        )
+        digest = RecommendationEngine._stable_hash_template(user_id).copy()
+        digest.update(item_id.encode())
+        value = int.from_bytes(digest.digest(), "little")
         return (value % 1000) / 1000.0
 
     def prepare(self, user_id: str) -> list[dict]:
@@ -209,25 +217,44 @@ class RecommendationEngine:
         dense_profile = self._dense_profile(profile)
         cat_total = sum(cats.values()) or 1.0
         graph_scores = self._graph_scores(seeds)
-        candidate_ids = CAPABILITIES.call(
+        candidate_spec = CAPABILITIES.resolve(
             "recommend.candidate",
             self.config.candidate_strategy,
-            self,
-            user_id,
-            profile,
-            cats,
-            seen,
-            seeds,
-            graph_scores,
         )
+        if candidate_spec.handler is _candidate_full_pool:
+            candidate_items = (
+                item
+                for item in self.catalog.items
+                if item.eligible and item.item_id not in seen
+            )
+        else:
+            candidate_ids = candidate_spec.handler(
+                self,
+                user_id,
+                profile,
+                cats,
+                seen,
+                seeds,
+                graph_scores,
+            )
+
+            def normalized_candidate_items():
+                # A capability is allowed to return any iterable; normalize it
+                # here so duplicate IDs cannot create duplicate candidates in
+                # the final slate.
+                for item_id in dict.fromkeys(
+                    str(value) for value in candidate_ids
+                ):
+                    item = self.catalog.item_by_id.get(item_id)
+                    if item is None or not item.eligible or item.item_id in seen:
+                        continue
+                    yield item
+
+            candidate_items = normalized_candidate_items()
+
         cold = len(self._by_user.get(user_id, [])) == 0
         rows = []
-        # A capability is allowed to return any iterable; normalize it here so
-        # duplicate IDs cannot create duplicate candidates in the final slate.
-        for item_id in dict.fromkeys(str(value) for value in candidate_ids):
-            item = self.catalog.item_by_id.get(item_id)
-            if item is None or not item.eligible or item.item_id in seen:
-                continue
+        for item in candidate_items:
             item_vector = self._vectors[item.item_id]
             if not profile:
                 profile_fit = 0.0
