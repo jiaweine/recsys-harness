@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import Counter, OrderedDict, defaultdict
 from dataclasses import dataclass, field
 from hashlib import blake2b
 from heapq import nsmallest
@@ -49,6 +49,7 @@ class RecommendationEngine:
     """Owned implicit-feedback recommender with evolvable vertical stages."""
 
     MAX_GRAPH_HISTORY = 120
+    MAX_PROFILE_CACHE = 512
 
     def __init__(
         self,
@@ -63,6 +64,10 @@ class RecommendationEngine:
         self._dense_vector_dims = getattr(self._vectors, "dense_dims", None)
         self._popularity = catalog.popularity_norms()
         self._candidate_static_cache: dict[str, object] = {}
+        self._profile_cache: OrderedDict[
+            tuple[str, float | None],
+            tuple[dict[int, float], Counter[str], frozenset[str], Counter[str]],
+        ] = OrderedDict()
         self._by_user: dict[str, list] = defaultdict(list)
         for event in catalog.interactions:
             self._by_user[event.user_id].append(event)
@@ -82,6 +87,7 @@ class RecommendationEngine:
         clone._dense_vector_dims = self._dense_vector_dims
         clone._popularity = self._popularity
         clone._candidate_static_cache = self._candidate_static_cache
+        clone._profile_cache = self._profile_cache
         clone._by_user = self._by_user
         clone._co = self._co
         return clone
@@ -110,6 +116,16 @@ class RecommendationEngine:
         *,
         horizon: float | None,
     ) -> tuple[dict[int, float], Counter[str], set[str], Counter[str]]:
+        cache_key = (user_id, horizon)
+        cached = self._profile_cache.get(cache_key)
+        if cached is not None:
+            self._profile_cache.move_to_end(cache_key)
+            profile, cats, seen, seeds = cached
+            # Keep the historical per-call mutable-object contract. Candidate
+            # capabilities may inspect or even mutate these values; a cache hit
+            # must never leak that mutation into a later request.
+            return dict(profile), Counter(cats), set(seen), Counter(seeds)
+
         events = self._by_user.get(user_id, [])
         seen = {event.item_id for event in events}
         cats: Counter[str] = Counter()
@@ -130,7 +146,18 @@ class RecommendationEngine:
             for category in item.categories:
                 cats[category] += weight
         norm = sqrt(sum(value * value for value in vec.values())) or 1.0
-        return {key: value / norm for key, value in vec.items()}, cats, seen, seeds
+        profile = {key: value / norm for key, value in vec.items()}
+
+        self._profile_cache[cache_key] = (
+            dict(profile),
+            Counter(cats),
+            frozenset(seen),
+            Counter(seeds),
+        )
+        self._profile_cache.move_to_end(cache_key)
+        if len(self._profile_cache) > self.MAX_PROFILE_CACHE:
+            self._profile_cache.popitem(last=False)
+        return profile, cats, seen, seeds
 
     def _dense_profile(
         self,
