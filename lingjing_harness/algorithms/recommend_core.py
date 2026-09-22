@@ -221,6 +221,18 @@ class RecommendationEngine:
             graph_scores,
         )
         cold = len(self._by_user.get(user_id, [])) == 0
+        exploration_handler = CAPABILITIES.resolve(
+            "recommend.exploration",
+            self.config.exploration_strategy,
+        ).handler
+        cold_start_handler = (
+            CAPABILITIES.resolve(
+                "recommend.cold_start",
+                self.config.cold_start_strategy,
+            ).handler
+            if cold
+            else None
+        )
         rows = []
         # A capability is allowed to return any iterable; normalize it here so
         # duplicate IDs cannot create duplicate candidates in the final slate.
@@ -245,24 +257,20 @@ class RecommendationEngine:
             graph = graph_scores.get(item.item_id, 0.0)
             popularity = self._popularity[item.item_id]
             novelty = 1.0 - popularity
-            explore = CAPABILITIES.call(
-                "recommend.exploration",
-                self.config.exploration_strategy,
+            explore = exploration_handler(
                 self,
                 user_id,
                 item,
                 popularity,
             )
             cold_prior = (
-                CAPABILITIES.call(
-                    "recommend.cold_start",
-                    self.config.cold_start_strategy,
+                cold_start_handler(
                     self,
                     item,
                     popularity,
                     explore,
                 )
-                if cold
+                if cold_start_handler is not None
                 else 0.0
             )
             rows.append(
