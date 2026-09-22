@@ -1,0 +1,40 @@
+name: Recommend Full Pool Performance
+
+on:
+  pull_request:
+    paths:
+      - "lingjing_harness/algorithms/recommend_core.py"
+      - "tests/test_recommend_full_pool_hotpath.py"
+      - "scripts/recommend_full_pool_benchmark.py"
+      - ".github/workflows/recommend-full-pool-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Verify streamed recommendation full pool
+        run: pytest -q tests/test_recommend_full_pool_hotpath.py
+      - name: Benchmark streamed cold recommendation full pool
+        run: |
+          for pass in 1 2 3; do
+            echo "recommend-full-pool performance pass $pass/3"
+            python scripts/recommend_full_pool_benchmark.py \
+              --items 30000 \
+              --repeats 7 \
+              --limit 8 \
+              --max-optimized-recommend-p50-ms 95 \
+              --min-prepare-speedup 1.10 \
+              --min-recommend-speedup 1.08
+          done
