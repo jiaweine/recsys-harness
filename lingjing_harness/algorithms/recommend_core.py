@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from hashlib import blake2b
+from heapq import nsmallest
 from math import exp, sqrt
 
 from lingjing_harness.domain import Catalog, Item
@@ -60,6 +61,7 @@ class RecommendationEngine:
         self.config = normalize_strategy_config(config or RecommendConfig())
         self._vectors = item_vectors if item_vectors is not None else build_item_vectors(catalog.items)
         self._popularity = catalog.popularity_norms()
+        self._candidate_static_cache: dict[str, tuple[str, ...]] = {}
         self._by_user: dict[str, list] = defaultdict(list)
         for event in catalog.interactions:
             self._by_user[event.user_id].append(event)
@@ -77,6 +79,7 @@ class RecommendationEngine:
         clone.config = normalize_strategy_config(config)
         clone._vectors = self._vectors
         clone._popularity = self._popularity
+        clone._candidate_static_cache = self._candidate_static_cache
         clone._by_user = self._by_user
         clone._co = self._co
         return clone
@@ -134,6 +137,29 @@ class RecommendationEngine:
             for item_id, count in self._co.get(seed, {}).items():
                 raw[item_id] += weight * count
         return {item_id: min(1.0, value / denom) for item_id, value in raw.items()}
+
+    def _evidence_fallback_ids(self) -> tuple[str, ...]:
+        """Return the static evidence-union fallback order, shared by config clones."""
+
+        cached = self._candidate_static_cache.get("evidence_fallback_ids")
+        if cached is not None:
+            return cached
+        cached = tuple(
+            item.item_id
+            for item in sorted(
+                (item for item in self.catalog.items if item.eligible),
+                key=lambda item: (
+                    -(
+                        0.45 * item.quality
+                        + 0.35 * item.freshness
+                        + 0.20 * self._popularity[item.item_id]
+                    ),
+                    item.item_id,
+                ),
+            )
+        )
+        self._candidate_static_cache["evidence_fallback_ids"] = cached
+        return cached
 
     @staticmethod
     def _stable_hash(user_id: str, item_id: str) -> float:
@@ -342,33 +368,26 @@ def _candidate_evidence_union(
     if cats:
         category_keys = set(cats)
         for item in eligible:
-            if set(item.categories) & category_keys:
+            if any(category in category_keys for category in item.categories):
                 selected.add(item.item_id)
 
-    semantic = []
     if profile:
-        for item in eligible:
-            semantic.append(
+        semantic = nsmallest(
+            24,
+            (
                 (max(0.0, cosine(profile, engine._vectors[item.item_id])), item.item_id)
-            )
-        semantic.sort(key=lambda row: (-row[0], row[1]))
-        selected.update(item_id for _, item_id in semantic[:24])
+                for item in eligible
+            ),
+            key=lambda row: (-row[0], row[1]),
+        )
+        selected.update(item_id for _, item_id in semantic)
 
     target = min(len(eligible), max(24, int(len(eligible) * 0.55)))
     if len(selected) < target:
-        fallback = sorted(
-            eligible,
-            key=lambda item: (
-                -(
-                    0.45 * item.quality
-                    + 0.35 * item.freshness
-                    + 0.20 * engine._popularity[item.item_id]
-                ),
-                item.item_id,
-            ),
-        )
-        for item in fallback:
-            selected.add(item.item_id)
+        for item_id in engine._evidence_fallback_ids():
+            if item_id in seen:
+                continue
+            selected.add(item_id)
             if len(selected) >= target:
                 break
     return sorted(selected)
