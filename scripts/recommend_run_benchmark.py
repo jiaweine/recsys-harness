@@ -62,6 +62,21 @@ def _paired_timed(
     return legacy, optimized
 
 
+def _paired_speedup(legacy: list[float], optimized: list[float]) -> float:
+    """Return the median within-pair A/B speedup.
+
+    Using paired ratios is more robust than dividing two independent medians on
+    shared CI runners, where CPU frequency or allocator state can drift during
+    a benchmark phase and make the two latency distributions bimodal.
+    """
+
+    ratios = [
+        legacy_ms / max(optimized_ms, 1e-9)
+        for legacy_ms, optimized_ms in zip(legacy, optimized, strict=True)
+    ]
+    return statistics.median(ratios)
+
+
 def _catalog(items: int, history: int) -> tuple[Catalog, str]:
     rows = [
         Item(
@@ -216,13 +231,13 @@ def run_benchmark(*, items: int, history: int, repeats: int) -> dict[str, object
             _timed(lambda: registry.segment_router.recommend_segment(user_id), repeats)
         )
 
-    prepare_speedup = float(legacy_prepare["p50_ms"]) / max(
-        float(optimized_prepare["p50_ms"]),
-        1e-9,
+    prepare_speedup = _paired_speedup(
+        legacy_prepare_samples,
+        optimized_prepare_samples,
     )
-    full_speedup = float(legacy_full["p50_ms"]) / max(
-        float(optimized_full["p50_ms"]),
-        1e-9,
+    full_speedup = _paired_speedup(
+        legacy_full_samples,
+        optimized_full_samples,
     )
     routing_share = float(routing["p50_ms"]) / max(
         float(optimized_full["p50_ms"]),
