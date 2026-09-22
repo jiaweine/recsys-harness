@@ -671,8 +671,15 @@ def _audit_recommend_config(
     config: RecommendConfig,
     *,
     slice_key: str,
+    prepared_cache: dict[tuple[str, tuple[str, ...]], list[dict]] | None = None,
 ) -> dict[str, Any]:
     engine = current.with_config(config)
+    signature_reader = getattr(engine, "preparation_signature", None)
+    preparation_signature = (
+        signature_reader()
+        if prepared_cache is not None and callable(signature_reader)
+        else None
+    )
     cold = audit_cold_start(catalog, engine, slice_key=slice_key, samples=3)
     if not users:
         return {
@@ -695,7 +702,15 @@ def _audit_recommend_config(
     novelty_values: list[float] = []
     details = []
     for user in users:
-        result = engine.recommend(user, limit=8)
+        if prepared_cache is not None and preparation_signature is not None:
+            cache_key = (user, preparation_signature)
+            prepared = prepared_cache.get(cache_key)
+            if prepared is None:
+                prepared = engine.prepare(user)
+                prepared_cache[cache_key] = prepared
+            result = engine.rank_prepared(prepared, limit=8)
+        else:
+            result = engine.recommend(user, limit=8)
         exposed.update(row["id"] for row in result)
         categories = [category for row in result for category in row.get("categories", [])]
         diversity = len(set(categories)) / max(1, len(categories))
@@ -1065,13 +1080,33 @@ def evolve_recommend(
     discovery_users, holdout_users = _stable_split(users, lambda user: user)
     base_config = asdict(current.config)
     dimensions, group_totals = _evolution_schema(current.config)
+    prepared_cache: dict[tuple[str, tuple[str, ...]], list[dict]] = {}
 
-    reference = _audit_recommend_config(catalog, current, users, current.config, slice_key="full")
+    reference = _audit_recommend_config(
+        catalog,
+        current,
+        users,
+        current.config,
+        slice_key="full",
+        prepared_cache=prepared_cache,
+    )
     reference_discovery = _audit_recommend_config(
-        catalog, current, discovery_users, current.config, slice_key="discovery"
+        catalog,
+        current,
+        discovery_users,
+        current.config,
+        slice_key="discovery",
+        prepared_cache=prepared_cache,
     )
     reference_holdout = (
-        _audit_recommend_config(catalog, current, holdout_users, current.config, slice_key="holdout")
+        _audit_recommend_config(
+            catalog,
+            current,
+            holdout_users,
+            current.config,
+            slice_key="holdout",
+            prepared_cache=prepared_cache,
+        )
         if holdout_users
         else None
     )
@@ -1080,7 +1115,14 @@ def evolve_recommend(
 
     def evaluate(config: dict[str, Any]):
         cfg = normalize_strategy_config(RecommendConfig(**config))
-        report = _audit_recommend_config(catalog, current, discovery_users, cfg, slice_key="discovery")
+        report = _audit_recommend_config(
+            catalog,
+            current,
+            discovery_users,
+            cfg,
+            slice_key="discovery",
+            prepared_cache=prepared_cache,
+        )
         robust = _recommend_robustness(reference_discovery, report)
         return report, robust, _recommend_objective(report, robust)
 
@@ -1118,10 +1160,24 @@ def evolve_recommend(
     best = rows[0]
     candidate_config = normalize_strategy_config(RecommendConfig(**best["config"]))
     best["config"] = asdict(candidate_config)
-    trial = _audit_recommend_config(catalog, current, users, candidate_config, slice_key="full")
+    trial = _audit_recommend_config(
+        catalog,
+        current,
+        users,
+        candidate_config,
+        slice_key="full",
+        prepared_cache=prepared_cache,
+    )
     robust = _recommend_robustness(reference, trial)
     holdout = (
-        _audit_recommend_config(catalog, current, holdout_users, candidate_config, slice_key="holdout")
+        _audit_recommend_config(
+            catalog,
+            current,
+            holdout_users,
+            candidate_config,
+            slice_key="holdout",
+            prepared_cache=prepared_cache,
+        )
         if holdout_users
         else None
     )
