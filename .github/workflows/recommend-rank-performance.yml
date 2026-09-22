@@ -26,7 +26,7 @@ jobs:
       - run: pip install -e . --no-deps
       - name: Verify recommendation rank hot path
         run: pytest -q tests/test_recommend_rank_hotpath.py
-      - name: Benchmark bounded recommendation ranking
+      - name: Benchmark deferred recommendation rank signals
         run: |
           for pass in 1 2 3; do
             echo "recommend-rank performance pass $pass/3"
@@ -34,6 +34,6 @@ jobs:
               --items 30000 \
               --repeats 7 \
               --limit 8 \
-              --max-optimized-p50-ms 80 \
-              --min-speedup 1.15
+              --max-optimized-p50-ms 45 \
+              --min-speedup 1.50
           done
