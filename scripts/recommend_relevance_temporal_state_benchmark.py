@@ -6,6 +6,7 @@ import json
 import math
 import statistics
 import time
+from collections import Counter, defaultdict
 from typing import Callable
 
 import lingjing_harness.algorithms.recommend_validation as validation
@@ -61,12 +62,18 @@ def _paired_speedup(legacy: list[float], optimized: list[float]) -> float:
     )
 
 
-def _fixture(*, items: int, users: int) -> tuple[Catalog, RecommendationEngine]:
+def _fixture(
+    *,
+    items: int,
+    background_users: int,
+    evaluated_users: int,
+    history: int,
+) -> tuple[Catalog, RecommendationEngine, list[str]]:
     rows = [
         Item(
             item_id=f"item-{index:06d}",
-            title=f"Temporal Item {index}",
-            text="recommend relevance shared popularity snapshot benchmark",
+            title=f"History Item {index}",
+            text="recommend relevance temporal state benchmark",
             categories=[f"cat-{index % 31}", f"cluster-{index % 67}"],
             popularity=float((items - index) % 997),
             quality=((index * 13) % 1000) / 1000.0,
@@ -76,57 +83,95 @@ def _fixture(*, items: int, users: int) -> tuple[Catalog, RecommendationEngine]:
     ]
     interactions: list[Interaction] = []
     timestamp = 1.0
-    for user_index in range(users):
-        for offset in range(6):
+
+    def add_user(user_id: str, seed: int) -> None:
+        nonlocal timestamp
+        for offset in range(history):
             interactions.append(
                 Interaction(
-                    user_id=f"user-{user_index:02d}",
-                    item_id=rows[user_index * 10 + offset].item_id,
+                    user_id=user_id,
+                    item_id=rows[(seed * history + offset) % items].item_id,
                     event="click",
                     weight=1.0,
                     timestamp=timestamp,
                 )
             )
             timestamp += 1.0
+
+    for user_index in range(background_users):
+        add_user(f"bg-{user_index:05d}", user_index)
+
+    evaluated = [f"zz-eval-{index:03d}" for index in range(evaluated_users)]
+    for index, user_id in enumerate(evaluated, start=background_users):
+        add_user(user_id, index)
+
     catalog = Catalog(items=rows, interactions=interactions)
-    return catalog, RecommendationEngine(catalog)
+    return catalog, RecommendationEngine(catalog), evaluated
 
 
-def run_benchmark(*, items: int, users: int, repeats: int) -> dict[str, object]:
-    catalog, engine = _fixture(items=items, users=users)
-    user_ids = engine.known_users()
+def run_benchmark(
+    *,
+    items: int,
+    background_users: int,
+    evaluated_users: int,
+    history: int,
+    repeats: int,
+) -> dict[str, object]:
+    catalog, engine, evaluated = _fixture(
+        items=items,
+        background_users=background_users,
+        evaluated_users=evaluated_users,
+        history=history,
+    )
+    optimized_builder = validation._owned_temporal_states
     optimized_materializer = validation._owned_temporal_recommendation_engine
 
-    def legacy_materializer(current, training_catalog, state):
-        temporal = optimized_materializer(current, training_catalog, state)
-        temporal._popularity = training_catalog.popularity_norms()
-        return temporal
+    def legacy_builder(current: Catalog, target_timestamps: list[float]):
+        del current
+        return [
+            (defaultdict(list), defaultdict(Counter))
+            for _ in target_timestamps
+        ]
+
+    def legacy_materializer(
+        current: RecommendationEngine,
+        training_catalog: Catalog,
+        state,
+    ) -> RecommendationEngine:
+        del state
+        return validation._temporal_recommendation_engine(
+            current,
+            training_catalog,
+        )
 
     def legacy_prepare():
+        validation._owned_temporal_states = legacy_builder
         validation._owned_temporal_recommendation_engine = legacy_materializer
         try:
             return validation.prepare_recommend_relevance(
                 catalog,
                 engine,
-                users_override=user_ids,
+                users_override=evaluated,
                 k=8,
             )
         finally:
+            validation._owned_temporal_states = optimized_builder
             validation._owned_temporal_recommendation_engine = optimized_materializer
 
     def optimized_prepare():
+        validation._owned_temporal_states = optimized_builder
         validation._owned_temporal_recommendation_engine = optimized_materializer
         return validation.prepare_recommend_relevance(
             catalog,
             engine,
-            users_override=user_ids,
+            users_override=evaluated,
             k=8,
         )
 
     legacy = legacy_prepare()
     optimized = optimized_prepare()
     if optimized.evaluate(engine.config) != legacy.evaluate(engine.config):
-        raise AssertionError("shared popularity snapshot changed relevance evaluation")
+        raise AssertionError("incremental temporal state changed relevance evaluation")
 
     legacy_prepare()
     optimized_prepare()
@@ -140,7 +185,10 @@ def run_benchmark(*, items: int, users: int, repeats: int) -> dict[str, object]:
     speedup = _paired_speedup(legacy_samples, optimized_samples)
     return {
         "items": items,
-        "users": users,
+        "interactions": len(catalog.interactions),
+        "background_users": background_users,
+        "evaluated_users": evaluated_users,
+        "history": history,
         "repeats": repeats,
         "prepared_slices": len(optimized.slices),
         "legacy_prepare": legacy_summary,
@@ -151,18 +199,22 @@ def run_benchmark(*, items: int, users: int, repeats: int) -> dict[str, object]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Benchmark shared temporal relevance popularity norms."
+        description="Benchmark incremental temporal recommendation state."
     )
     parser.add_argument("--items", type=int, default=20_000)
-    parser.add_argument("--users", type=int, default=10)
-    parser.add_argument("--repeats", type=int, default=5)
+    parser.add_argument("--background-users", type=int, default=500)
+    parser.add_argument("--evaluated-users", type=int, default=10)
+    parser.add_argument("--history", type=int, default=20)
+    parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--max-optimized-p50-ms", type=float, default=0.0)
     parser.add_argument("--min-speedup", type=float, default=0.0)
     args = parser.parse_args()
 
     result = run_benchmark(
         items=max(1_000, args.items),
-        users=max(3, args.users),
+        background_users=max(10, args.background_users),
+        evaluated_users=max(2, args.evaluated_users),
+        history=max(3, args.history),
         repeats=max(3, args.repeats),
     )
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
@@ -178,7 +230,7 @@ def main() -> None:
         failures.append(f"speedup={speedup} < {args.min_speedup}")
     if failures:
         raise SystemExit(
-            "recommend relevance popularity snapshot performance guardrail failed: "
+            "recommend relevance temporal state performance guardrail failed: "
             + "; ".join(failures)
         )
 

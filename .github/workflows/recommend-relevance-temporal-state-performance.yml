@@ -1,0 +1,44 @@
+name: Recommend Relevance Temporal State Performance
+
+on:
+  push:
+    branches:
+      - perf/recommend-relevance-temporal-state
+  pull_request:
+    paths:
+      - "lingjing_harness/algorithms/recommend_validation.py"
+      - "tests/test_recommend_relevance_temporal_state.py"
+      - "scripts/recommend_relevance_temporal_state_benchmark.py"
+      - ".github/workflows/recommend-relevance-temporal-state-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Verify incremental temporal recommendation state
+        run: pytest -q tests/test_recommend_relevance_temporal_state.py
+      - name: Benchmark incremental temporal recommendation state
+        run: |
+          for pass in 1 2 3; do
+            echo "recommend-relevance-temporal-state pass $pass/3"
+            python scripts/recommend_relevance_temporal_state_benchmark.py \
+              --items 20000 \
+              --background-users 500 \
+              --evaluated-users 10 \
+              --history 20 \
+              --repeats 3 \
+              --max-optimized-p50-ms 400 \
+              --min-speedup 2.00
+          done

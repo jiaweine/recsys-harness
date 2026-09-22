@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, OrderedDict, defaultdict
 from dataclasses import dataclass, field
 from math import log2
 from statistics import mean
@@ -167,6 +167,113 @@ def _temporal_recommendation_engine(
     )
 
 
+def _decrement_graph_pair(
+    co: defaultdict[str, Counter[str]],
+    left: str,
+    right: str,
+) -> None:
+    counts = co.get(left)
+    if counts is None:
+        return
+    remaining = counts[right] - 1
+    if remaining > 0:
+        counts[right] = remaining
+    else:
+        counts.pop(right, None)
+    if not counts:
+        co.pop(left, None)
+
+
+def _owned_temporal_states(
+    catalog: Catalog,
+    target_timestamps: list[float],
+) -> list[tuple[defaultdict[str, list[Interaction]], defaultdict[str, Counter[str]]]]:
+    """Build exact owned recommendation states incrementally across cutoffs."""
+
+    if not target_timestamps:
+        return []
+
+    chronological = sorted(
+        catalog.interactions,
+        key=lambda event: (event.timestamp, event.user_id, event.item_id),
+    )
+    requests = sorted(
+        enumerate(target_timestamps),
+        key=lambda row: (row[1], row[0]),
+    )
+    by_user: defaultdict[str, list[Interaction]] = defaultdict(list)
+    co: defaultdict[str, Counter[str]] = defaultdict(Counter)
+    recent_by_user: dict[str, OrderedDict[str, None]] = {}
+    states: list[
+        tuple[defaultdict[str, list[Interaction]], defaultdict[str, Counter[str]]] | None
+    ] = [None] * len(target_timestamps)
+    cursor = 0
+
+    for request_index, cutoff in requests:
+        while (
+            cursor < len(chronological)
+            and chronological[cursor].timestamp < cutoff
+        ):
+            event = chronological[cursor]
+            cursor += 1
+            by_user[event.user_id].append(event)
+
+            recent = recent_by_user.setdefault(event.user_id, OrderedDict())
+            if event.item_id in recent:
+                recent.move_to_end(event.item_id)
+                continue
+
+            if len(recent) >= RecommendationEngine.MAX_GRAPH_HISTORY:
+                evicted, _ = recent.popitem(last=False)
+                for other in tuple(recent):
+                    _decrement_graph_pair(co, evicted, other)
+                    _decrement_graph_pair(co, other, evicted)
+
+            for other in recent:
+                co[event.item_id][other] += 1
+                co[other][event.item_id] += 1
+            recent[event.item_id] = None
+
+        states[request_index] = (
+            defaultdict(
+                list,
+                {user_id: list(events) for user_id, events in by_user.items()},
+            ),
+            defaultdict(
+                Counter,
+                {
+                    item_id: Counter(counts)
+                    for item_id, counts in co.items()
+                    if counts
+                },
+            ),
+        )
+
+    return [state for state in states if state is not None]
+
+
+def _owned_temporal_recommendation_engine(
+    engine: RecommendationEngine,
+    training_catalog: Catalog,
+    state: tuple[
+        defaultdict[str, list[Interaction]],
+        defaultdict[str, Counter[str]],
+    ],
+) -> RecommendationEngine:
+    """Materialize one owned temporal engine from an exact precomputed state."""
+
+    temporal = object.__new__(RecommendationEngine)
+    temporal.catalog = training_catalog
+    temporal.config = engine.config
+    temporal._vectors = engine._vectors
+    temporal._dense_vector_dims = engine._dense_vector_dims
+    temporal._popularity = engine._popularity
+    temporal._candidate_static_cache = {}
+    temporal._profile_snapshot_cache = OrderedDict()
+    temporal._by_user, temporal._co = state
+    return temporal
+
+
 @dataclass(slots=True)
 class _PreparedSlice:
     user_id: str
@@ -302,11 +409,10 @@ def prepare_recommend_relevance(
         by_user[event.user_id].append(event)
     popularity_ordered: tuple[str, ...] | None = None
 
-    slices: list[_PreparedSlice] = []
+    pending: dict[str, tuple[Interaction, list[Interaction], set[str]]] = {}
     for user_id in users:
         cache_key = (user_id, k, minimum_target_weight)
         if slice_cache is not None and cache_key in slice_cache.slices:
-            slices.append(slice_cache.slices[cache_key])
             continue
 
         target = _latest_novel_target(
@@ -315,22 +421,49 @@ def prepare_recommend_relevance(
         )
         if target is None:
             continue
-
-        training_interactions = [
-            event
-            for event in catalog.interactions
-            if event.timestamp < target.timestamp
-        ]
         user_history = [
             event
-            for event in training_interactions
-            if event.user_id == user_id
+            for event in by_user[user_id]
+            if event.timestamp < target.timestamp
         ]
         if not user_history:
             continue
         seen = {event.item_id for event in user_history}
         if target.item_id in seen:
             continue
+        pending[user_id] = (target, user_history, seen)
+
+    temporal_states: dict[
+        str,
+        tuple[
+            defaultdict[str, list[Interaction]],
+            defaultdict[str, Counter[str]],
+        ],
+    ] = {}
+    if type(engine) is RecommendationEngine and len(pending) >= 2:
+        pending_users = list(pending)
+        states = _owned_temporal_states(
+            catalog,
+            [pending[user_id][0].timestamp for user_id in pending_users],
+        )
+        temporal_states = dict(zip(pending_users, states, strict=True))
+
+    slices: list[_PreparedSlice] = []
+    for user_id in users:
+        cache_key = (user_id, k, minimum_target_weight)
+        if slice_cache is not None and cache_key in slice_cache.slices:
+            slices.append(slice_cache.slices[cache_key])
+            continue
+
+        pending_row = pending.get(user_id)
+        if pending_row is None:
+            continue
+        target, user_history, seen = pending_row
+        training_interactions = [
+            event
+            for event in catalog.interactions
+            if event.timestamp < target.timestamp
+        ]
 
         if popularity_ordered is None:
             popularity_ordered = _popularity_order(catalog)
@@ -341,10 +474,18 @@ def prepare_recommend_relevance(
             user_id=user_id,
             engine=engine,
         )
-        base_engine = _temporal_recommendation_engine(
-            engine,
-            training_catalog,
-        )
+        temporal_state = temporal_states.get(user_id)
+        if temporal_state is None:
+            base_engine = _temporal_recommendation_engine(
+                engine,
+                training_catalog,
+            )
+        else:
+            base_engine = _owned_temporal_recommendation_engine(
+                engine,
+                training_catalog,
+                temporal_state,
+            )
         prepared_slice = _PreparedSlice(
             user_id=user_id,
             target=target.item_id,
