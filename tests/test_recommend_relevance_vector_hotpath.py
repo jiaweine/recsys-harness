@@ -85,3 +85,24 @@ def test_shared_vectors_preserve_temporal_relevance_exactly(monkeypatch) -> None
         for row in legacy.slices
     ]
     assert optimized.evaluate(engine.config) == legacy.evaluate(engine.config)
+
+
+def test_popularity_rank_matches_legacy_exactly() -> None:
+    catalog, _ = _fixture(items=180, users=4)
+    seen = {"item-00000", "item-00003", "item-00009"}
+    candidates = [
+        item
+        for item in catalog.items
+        if item.eligible and item.item_id not in seen
+    ]
+    candidates.sort(
+        key=lambda item: (
+            -catalog.popularity_norm(item),
+            -item.quality,
+            -item.freshness,
+            item.item_id,
+        )
+    )
+    legacy = [item.item_id for item in candidates[:12]]
+
+    assert validation._popularity_rank(catalog, seen, k=12) == legacy
