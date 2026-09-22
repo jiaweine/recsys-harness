@@ -49,7 +49,7 @@ class RecommendationEngine:
     """Owned implicit-feedback recommender with evolvable vertical stages."""
 
     MAX_GRAPH_HISTORY = 120
-    MAX_PROFILE_CACHE = 512
+    MAX_PROFILE_CACHE = 128
 
     def __init__(
         self,
