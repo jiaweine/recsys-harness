@@ -1,0 +1,33 @@
+name: Recommend Evolution Prepare Performance
+
+on:
+  push:
+    branches:
+      - perf/cache-recommend-evolution-prepare
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Verify recommendation evolution prepare cache
+        run: pytest -q tests/test_recommend_evolution_prepare_hotpath.py
+      - name: Benchmark recommendation evolution prepare cache
+        run: |
+          python scripts/recommend_evolution_prepare_benchmark.py \
+            --items 6000 \
+            --users 8 \
+            --configs 12 \
+            --repeats 3 \
+            --min-speedup 1.50
