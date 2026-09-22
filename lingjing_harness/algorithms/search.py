@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
+from heapq import nsmallest
 from math import log
 
 from lingjing_harness.domain import Catalog, Item
@@ -189,10 +190,10 @@ class SearchEngine:
         if limit == 0:
             return []
         cfg = config or self.config
-        rows: list[dict] = []
-        for raw in prepared:
+
+        def score(raw: dict) -> float:
             item = raw["item"]
-            base = (
+            return (
                 cfg.lexical * raw["lex"]
                 + cfg.semantic * raw["sem"]
                 + cfg.title * raw["title"]
@@ -200,10 +201,19 @@ class SearchEngine:
                 + cfg.popularity * raw["pop"]
                 + cfg.freshness * item.freshness
             )
-            rows.append(
+
+        ranked = nsmallest(
+            max(30, limit * 6),
+            prepared,
+            key=lambda raw: (-score(raw), raw["item"].item_id),
+        )
+        pool: list[dict] = []
+        for raw in ranked:
+            item = raw["item"]
+            pool.append(
                 {
                     **raw,
-                    "base": base,
+                    "base": score(raw),
                     "signals": {
                         "match": round(0.65 * raw["lex"] + 0.35 * raw["sem"], 4),
                         "quality": round(item.quality, 4),
@@ -212,8 +222,6 @@ class SearchEngine:
                     },
                 }
             )
-        rows.sort(key=lambda x: (-x["base"], x["item"].item_id))
-        pool = rows[: max(30, limit * 6)]
         selected: list[dict] = []
         while pool and len(selected) < limit:
             best = None
