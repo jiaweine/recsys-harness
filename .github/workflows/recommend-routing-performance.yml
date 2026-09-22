@@ -1,0 +1,38 @@
+name: Recommend Routing Performance
+
+on:
+  pull_request:
+    paths:
+      - "lingjing_harness/algorithms/segments.py"
+      - "tests/test_segment_portfolio.py"
+      - "scripts/recommend_routing_benchmark.py"
+      - ".github/workflows/recommend-routing-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Benchmark recommendation segment routing
+        run: |
+          for pass in 1 2 3; do
+            echo "recommend-routing performance pass $pass/3"
+            python scripts/recommend_routing_benchmark.py \
+              --items 30000 \
+              --history 64 \
+              --repeats 7 \
+              --calls-per-sample 30 \
+              --max-optimized-p50-us 100 \
+              --min-speedup 20
+          done
