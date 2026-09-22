@@ -12,7 +12,7 @@ from lingjing_harness.algorithms import (
     evolve_search,
     strategy_domain,
 )
-from lingjing_harness.domain import Catalog
+from lingjing_harness.domain import Catalog, Interaction, Item
 from lingjing_harness.production import ExposureEvent, RewardSpec, request_groups
 from lingjing_harness.runtime.memory import AgentMemory
 from lingjing_harness.runtime.tools import ToolRegistry
@@ -143,6 +143,37 @@ def test_segment_manifest_and_catalog_partition_reuse_calibrated_assignments(mon
         segment: len(request_groups(rows, surface="recommend"))
         for segment, rows in recommend_partitions.items()
     } == expected_recommend["requests_by_segment"]
+
+
+
+def test_recommend_features_counts_eligible_unseen_without_rescanning_catalog():
+    items = [
+        Item("eligible-a", "A", eligible=True),
+        Item("eligible-b", "B", eligible=True),
+        Item("eligible-c", "C", eligible=True),
+        Item("hidden-d", "D", eligible=False),
+    ]
+    interactions = [
+        Interaction("warm-user", "eligible-a", timestamp=1.0),
+        Interaction("warm-user", "eligible-a", timestamp=2.0),
+        Interaction("warm-user", "hidden-d", timestamp=3.0),
+    ]
+    catalog = Catalog(items=items, interactions=interactions)
+    router = SegmentRouter(catalog, SearchEngine(catalog), RecommendationEngine(catalog))
+
+    class NoIteration(list):
+        def __iter__(self):
+            raise AssertionError("recommend routing must not rescan catalog items")
+
+    catalog.items = NoIteration(catalog.items)
+
+    warm = router.recommend_features("warm-user")
+    cold = router.recommend_features("new-user")
+
+    assert warm.history_events == 3
+    assert warm.eligible_unseen == 2
+    assert cold.history_events == 0
+    assert cold.eligible_unseen == 3
 
 
 def test_unknown_recommend_user_routes_to_cold_start_without_a_numeric_cutoff():
