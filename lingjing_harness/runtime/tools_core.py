@@ -358,10 +358,8 @@ class ToolRegistry:
         result = self.search.search(query, limit=8)
         covered = set()
         for row in result:
-            title = next(
-                (item.title for item in self.catalog.items if item.item_id == row["id"]),
-                row["title"],
-            )
+            item = self.catalog.item_by_id.get(str(row["id"]))
+            title = item.title if item is not None else row["title"]
             covered.update(set(query_tokens) & set(tokenize(title)))
         generic = [token for token in query_tokens if token in SearchEngine.GENERIC_QUERY_TOKENS]
         return {
