@@ -139,17 +139,33 @@ def main() -> None:
     parser.add_argument("--items", type=int, default=50_000)
     parser.add_argument("--anchors", type=int, default=24)
     parser.add_argument("--repeats", type=int, default=7)
+    parser.add_argument("--max-current-p50-ms", type=float, default=0.0)
+    parser.add_argument("--min-speedup", type=float, default=0.0)
     args = parser.parse_args()
-    print(
-        json.dumps(
-            run_benchmark(
-                items=max(1_000, args.items),
-                anchors=max(1, min(24, args.anchors)),
-                repeats=max(3, args.repeats),
-            ),
-            sort_keys=True,
-        )
+    result = run_benchmark(
+        items=max(1_000, args.items),
+        anchors=max(1, min(24, args.anchors)),
+        repeats=max(3, args.repeats),
     )
+    current_p50 = float(result["current"]["p50_ms"])
+    legacy_p50 = float(result["legacy"]["p50_ms"])
+    speedup = legacy_p50 / max(current_p50, 1e-9)
+    result["speedup_p50"] = round(speedup, 2)
+    print(json.dumps(result, sort_keys=True))
+
+    failures: list[str] = []
+    if args.max_current_p50_ms > 0 and current_p50 > args.max_current_p50_ms:
+        failures.append(
+            f"current p50={current_p50} > {args.max_current_p50_ms}"
+        )
+    if args.min_speedup > 0 and speedup < args.min_speedup:
+        failures.append(
+            f"speedup={speedup:.2f} < {args.min_speedup}"
+        )
+    if failures:
+        raise SystemExit(
+            "semantic rescue performance guardrail failed: " + "; ".join(failures)
+        )
 
 
 if __name__ == "__main__":
