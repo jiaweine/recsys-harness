@@ -137,6 +137,38 @@ def run_benchmark(*, items: int, history: int, repeats: int) -> dict[str, object
             max(3, repeats // 2),
         ))
 
+        def manual_dot_all():
+            if dense_profile is None:
+                return []
+            out = []
+            profile_values = dense_profile
+            vectors = engine._vectors
+            for item in eligible:
+                total = 0.0
+                for key, value in vectors[item.item_id].items():
+                    total += value * profile_values[key]
+                out.append(total)
+            return out
+
+        def list_dot_all():
+            if dense_profile is None:
+                return []
+            profile_values = dense_profile
+            vectors = engine._vectors
+            return [
+                sum([value * profile_values[key] for key, value in vectors[item.item_id].items()])
+                for item in eligible
+            ]
+
+        manual_profile_dot = _summary(_timed(
+            manual_dot_all,
+            max(3, repeats // 2),
+        ))
+        list_profile_dot = _summary(_timed(
+            list_dot_all,
+            max(3, repeats // 2),
+        ))
+
         routing = _summary(
             _timed(lambda: registry.segment_router.recommend_segment(user_id), repeats)
         )
@@ -159,6 +191,8 @@ def run_benchmark(*, items: int, history: int, repeats: int) -> dict[str, object
         "registry_explore": registry_explore,
         "direct_explore": direct_explore,
         "profile_dot": profile_dot,
+        "manual_profile_dot": manual_profile_dot,
+        "list_profile_dot": list_profile_dot,
     }
 
 
