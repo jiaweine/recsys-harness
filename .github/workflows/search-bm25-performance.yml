@@ -1,0 +1,39 @@
+name: Search BM25 Performance
+
+on:
+  pull_request:
+    paths:
+      - "lingjing_harness/algorithms/search.py"
+      - "tests/test_search_bm25_hotpath.py"
+      - "scripts/search_bm25_benchmark.py"
+      - ".github/workflows/search-bm25-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Verify cached BM25 hot path
+        run: pytest -q tests/test_search_bm25_hotpath.py
+      - name: Benchmark cached search BM25
+        run: |
+          for pass in 1 2 3; do
+            echo "search-bm25 performance pass $pass/3"
+            python scripts/search_bm25_benchmark.py \
+              --items 6000 \
+              --repeats 7 \
+              --max-optimized-search-p50-ms 85 \
+              --min-prepare-speedup 1.25 \
+              --min-search-speedup 1.15
+          done
