@@ -99,6 +99,20 @@ def _aggregate(rows: list[dict[str, float]]) -> dict[str, float]:
     }
 
 
+def _temporal_recommendation_engine(
+    engine: RecommendationEngine,
+    training_catalog: Catalog,
+) -> RecommendationEngine:
+    runtime_factory = getattr(engine, "for_catalog", None)
+    if callable(runtime_factory):
+        return runtime_factory(training_catalog)
+    return RecommendationEngine(
+        training_catalog,
+        config=engine.config,
+        item_vectors=engine._vectors,
+    )
+
+
 @dataclass(slots=True)
 class _PreparedSlice:
     user_id: str
@@ -271,11 +285,9 @@ def prepare_recommend_relevance(
             reward_spec=None,
             name=f"{catalog.name}:temporal-relevance:{user_id}",
         )
-        runtime_factory = getattr(engine, "for_catalog", None)
-        base_engine = (
-            runtime_factory(training_catalog)
-            if callable(runtime_factory)
-            else RecommendationEngine(training_catalog, config=engine.config)
+        base_engine = _temporal_recommendation_engine(
+            engine,
+            training_catalog,
         )
         prepared_slice = _PreparedSlice(
             user_id=user_id,
