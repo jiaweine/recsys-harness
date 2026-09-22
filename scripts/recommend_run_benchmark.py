@@ -40,6 +40,28 @@ def _timed(fn: Callable[[], object], repeats: int) -> list[float]:
     return rows
 
 
+def _paired_timed(
+    legacy_fn: Callable[[], object],
+    optimized_fn: Callable[[], object],
+    repeats: int,
+) -> tuple[list[float], list[float]]:
+    """Measure A/B in alternating order to cancel shared-runner time drift."""
+
+    legacy: list[float] = []
+    optimized: list[float] = []
+    for index in range(repeats):
+        ordered = (
+            ((legacy_fn, legacy), (optimized_fn, optimized))
+            if index % 2 == 0
+            else ((optimized_fn, optimized), (legacy_fn, legacy))
+        )
+        for fn, bucket in ordered:
+            started = time.perf_counter()
+            fn()
+            bucket.append((time.perf_counter() - started) * 1000.0)
+    return legacy, optimized
+
+
 def _catalog(items: int, history: int) -> tuple[Catalog, str]:
     rows = [
         Item(
@@ -176,18 +198,20 @@ def run_benchmark(*, items: int, history: int, repeats: int) -> dict[str, object
         _legacy_run(registry, user_id)
         registry.run_recommend(user_id)
 
-        legacy_prepare = _summary(
-            _timed(lambda: _legacy_prepare(registry.recommend, user_id), repeats)
+        legacy_prepare_samples, optimized_prepare_samples = _paired_timed(
+            lambda: _legacy_prepare(registry.recommend, user_id),
+            lambda: registry.recommend.prepare(user_id),
+            repeats,
         )
-        optimized_prepare = _summary(
-            _timed(lambda: registry.recommend.prepare(user_id), repeats)
+        legacy_full_samples, optimized_full_samples = _paired_timed(
+            lambda: _legacy_run(registry, user_id),
+            lambda: registry.run_recommend(user_id),
+            repeats,
         )
-        legacy_full = _summary(
-            _timed(lambda: _legacy_run(registry, user_id), repeats)
-        )
-        optimized_full = _summary(
-            _timed(lambda: registry.run_recommend(user_id), repeats)
-        )
+        legacy_prepare = _summary(legacy_prepare_samples)
+        optimized_prepare = _summary(optimized_prepare_samples)
+        legacy_full = _summary(legacy_full_samples)
+        optimized_full = _summary(optimized_full_samples)
         routing = _summary(
             _timed(lambda: registry.segment_router.recommend_segment(user_id), repeats)
         )
