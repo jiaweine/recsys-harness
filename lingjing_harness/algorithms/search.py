@@ -54,6 +54,8 @@ class SearchEngine:
         self.config = config or SearchConfig()
         self._doc_tokens: dict[str, list[str]] = {}
         self._field_tokens: dict[str, tuple[list[str], list[str], list[str]]] = {}
+        self._bm25_tf: dict[str, dict[str, float]] = {}
+        self._bm25_length_norm: dict[str, float] = {}
         self._title_token_sets: dict[str, set[str]] = {}
         self._title_lower: dict[str, str] = {}
         self._postings: dict[str, list[str]] = {}
@@ -65,6 +67,17 @@ class SearchEngine:
             category_tokens = tokenize(" ".join(item.categories))
             toks = [*title_tokens, *text_tokens, *category_tokens]
             self._field_tokens[item.item_id] = (title_tokens, text_tokens, category_tokens)
+            title_tf = Counter(title_tokens)
+            text_tf = Counter(text_tokens)
+            category_tf = Counter(category_tokens)
+            self._bm25_tf[item.item_id] = {
+                token: (
+                    2.1 * title_tf.get(token, 0)
+                    + text_tf.get(token, 0)
+                    + 0.75 * category_tf.get(token, 0)
+                )
+                for token in set(toks)
+            }
             self._title_token_sets[item.item_id] = set(title_tokens)
             self._title_lower[item.item_id] = item.title.lower()
             self._doc_tokens[item.item_id] = toks
@@ -74,6 +87,15 @@ class SearchEngine:
                 for token in unique_tokens:
                     self._postings.setdefault(token, []).append(item.item_id)
         self._avg_len = sum(map(len, self._doc_tokens.values())) / max(1, len(self._doc_tokens))
+        self._bm25_length_norm = {
+            item_id: (
+                1 - 0.72
+                + 0.72
+                * max(1, len(tokens))
+                / max(1.0, self._avg_len)
+            )
+            for item_id, tokens in self._doc_tokens.items()
+        }
         self._popularity = catalog.popularity_norms()
 
     def with_config(self, config: SearchConfig) -> "SearchEngine":
@@ -82,6 +104,8 @@ class SearchEngine:
         clone.config = config
         clone._doc_tokens = self._doc_tokens
         clone._field_tokens = self._field_tokens
+        clone._bm25_tf = self._bm25_tf
+        clone._bm25_length_norm = self._bm25_length_norm
         clone._title_token_sets = self._title_token_sets
         clone._title_lower = self._title_lower
         clone._postings = self._postings
@@ -103,20 +127,29 @@ class SearchEngine:
         df = self._df.get(token, 0)
         return log(1 + (n - df + 0.5) / (df + 0.5))
 
-    def _bm25(self, item: Item, qtokens: list[str]) -> float:
-        toks = self._doc_tokens[item.item_id]
-        title_tokens, text_tokens, category_tokens = self._field_tokens[item.item_id]
-        title_tf, text_tf, category_tf = Counter(title_tokens), Counter(text_tokens), Counter(category_tokens)
-        dl = max(1, len(toks))
+    def _bm25(
+        self,
+        item: Item,
+        qtokens: list[str],
+        query_weights: dict[str, float] | None = None,
+    ) -> float:
+        tf = self._bm25_tf[item.item_id]
+        length_norm = self._bm25_length_norm[item.item_id]
         score = 0.0
-        k1, b = 1.45, 0.72
+        k1 = 1.45
+        weights = query_weights or {
+            token: (
+                (0.45 if token in self.GENERIC_QUERY_TOKENS else 1.0)
+                * self._idf(token)
+            )
+            for token in qtokens
+        }
         for token in qtokens:
-            f = 2.1 * title_tf.get(token, 0) + text_tf.get(token, 0) + 0.75 * category_tf.get(token, 0)
+            f = tf.get(token, 0.0)
             if f <= 0:
                 continue
-            query_weight = 0.45 if token in self.GENERIC_QUERY_TOKENS else 1.0
-            score += query_weight * self._idf(token) * (f * (k1 + 1)) / (
-                f + k1 * (1 - b + b * dl / max(1.0, self._avg_len))
+            score += weights[token] * (f * (k1 + 1)) / (
+                f + k1 * length_norm
             )
         return score
 
@@ -126,6 +159,13 @@ class SearchEngine:
         if not qtokens:
             return []
         qvec = hashed_vector(query)
+        query_weights = {
+            token: (
+                (0.45 if token in self.GENERIC_QUERY_TOKENS else 1.0)
+                * self._idf(token)
+            )
+            for token in qtokens
+        }
         retrieval_tokens = CAPABILITIES.call(
             "search.query",
             self.config.query_strategy,
@@ -153,7 +193,7 @@ class SearchEngine:
             item = self.catalog.item_by_id.get(item_id)
             if item is None or not item.eligible:
                 continue
-            lex = self._bm25(item, qtokens)
+            lex = self._bm25(item, qtokens, query_weights)
             max_lex = max(max_lex, lex)
             title_tokens = self._title_token_sets[item.item_id]
             overlap = len(qset & title_tokens) / max(1, len(qset))
