@@ -73,22 +73,38 @@ def _single_target_metrics(ranked: list[str], target: str, k: int) -> dict[str, 
     }
 
 
-def _popularity_rank(catalog: Catalog, seen: set[str], *, k: int) -> list[str]:
-    candidates = [
-        item
-        for item in catalog.items
-        if item.eligible and item.item_id not in seen
-    ]
+def _popularity_order(catalog: Catalog) -> tuple[str, ...]:
     popularity = catalog.popularity_norms()
-    candidates.sort(
-        key=lambda item: (
-            -popularity[item.item_id],
-            -item.quality,
-            -item.freshness,
-            item.item_id,
+    return tuple(
+        item.item_id
+        for item in sorted(
+            (item for item in catalog.items if item.eligible),
+            key=lambda item: (
+                -popularity[item.item_id],
+                -item.quality,
+                -item.freshness,
+                item.item_id,
+            ),
         )
     )
-    return [item.item_id for item in candidates[:k]]
+
+
+def _popularity_rank(
+    catalog: Catalog,
+    seen: set[str],
+    *,
+    k: int,
+    ordered: tuple[str, ...] | None = None,
+) -> list[str]:
+    popularity_ordered = ordered if ordered is not None else _popularity_order(catalog)
+    ranked: list[str] = []
+    for item_id in popularity_ordered:
+        if item_id in seen:
+            continue
+        ranked.append(item_id)
+        if len(ranked) >= k:
+            break
+    return ranked
 
 
 def _aggregate(rows: list[dict[str, float]]) -> dict[str, float]:
@@ -247,6 +263,7 @@ def prepare_recommend_relevance(
     by_user: dict[str, list[Interaction]] = defaultdict(list)
     for event in catalog.interactions:
         by_user[event.user_id].append(event)
+    popularity_ordered: tuple[str, ...] | None = None
 
     slices: list[_PreparedSlice] = []
     for user_id in users:
@@ -278,6 +295,9 @@ def prepare_recommend_relevance(
         if target.item_id in seen:
             continue
 
+        if popularity_ordered is None:
+            popularity_ordered = _popularity_order(catalog)
+
         training_catalog = Catalog(
             items=list(catalog.items),
             interactions=training_interactions,
@@ -296,7 +316,12 @@ def prepare_recommend_relevance(
             target_timestamp=target.timestamp,
             history=len(user_history),
             engine=base_engine,
-            popularity_ranked=_popularity_rank(training_catalog, seen, k=k),
+            popularity_ranked=_popularity_rank(
+                training_catalog,
+                seen,
+                k=k,
+                ordered=popularity_ordered,
+            ),
         )
         if slice_cache is not None:
             slice_cache.slices[cache_key] = prepared_slice
