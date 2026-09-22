@@ -181,9 +181,8 @@ class SegmentRouter:
         clone._catalog_segment_counts = self._catalog_segment_counts
         return clone
 
-    def search_features(self, query: str) -> SearchRequestFeatures:
-        prepare = getattr(self.search, "routing_prepare", self.search.prepare)
-        prepared = prepare((query or "").strip())
+    @staticmethod
+    def search_features_from_prepared(prepared: list[dict[str, Any]]) -> SearchRequestFeatures:
         if not prepared:
             return SearchRequestFeatures(candidate_count=0, anchor_strength=0.0)
         anchor = max(
@@ -193,6 +192,11 @@ class SegmentRouter:
             for row in prepared
         )
         return SearchRequestFeatures(candidate_count=len(prepared), anchor_strength=anchor)
+
+    def search_features(self, query: str) -> SearchRequestFeatures:
+        prepare = getattr(self.search, "routing_prepare", self.search.prepare)
+        prepared = prepare((query or "").strip())
+        return self.search_features_from_prepared(prepared)
 
     def recommend_features(self, user_id: str) -> RecommendRequestFeatures:
         events = self.recommend._by_user.get(user_id or "", [])
@@ -232,6 +236,11 @@ class SegmentRouter:
         if thresholds["history_spread"] and features.history_events >= float(thresholds["history_high"]):
             return "recommend/established"
         return "recommend/mixed"
+
+    def search_segment_from_prepared(self, prepared: list[dict[str, Any]]) -> str:
+        return self._search_segment_for_features(
+            self.search_features_from_prepared(prepared)
+        )
 
     def search_segment(self, query: str) -> str:
         return self._search_segment_for_features(self.search_features(query))
