@@ -155,19 +155,6 @@ def _legacy_run(registry: ToolRegistry, user_id: str) -> dict:
     }
 
 
-def _current_run(registry: ToolRegistry, user_id: str) -> dict:
-    segment = registry.segment_router.recommend_segment(user_id)
-    config = registry.recommend_portfolio.get(segment)
-    engine = registry.recommend.with_config(config) if config is not None else registry.recommend
-    return {
-        "user_id": user_id,
-        "history_events": len(registry.recommend._by_user.get(user_id, [])),
-        "segment": segment,
-        "strategy_scope": "segment" if config is not None else "global",
-        "results": engine.recommend(user_id, limit=8),
-    }
-
-
 def run_benchmark(*, items: int, history: int, repeats: int) -> dict[str, object]:
     catalog, user_id = _catalog(items, history)
     with tempfile.TemporaryDirectory(prefix="xushu-recommend-run-") as directory:
