@@ -329,12 +329,32 @@ def evolve_recommend(
 
     base_config = asdict(current.config)
     dimensions, group_totals = core._evolution_schema(current.config)
-    reference = core._audit_recommend_config(catalog, current, users, current.config, slice_key="full")
+    prepared_cache: dict[tuple[str, tuple[str, ...]], list[dict]] = {}
+    reference = core._audit_recommend_config(
+        catalog,
+        current,
+        users,
+        current.config,
+        slice_key="full",
+        prepared_cache=prepared_cache,
+    )
     reference_discovery = core._audit_recommend_config(
-        catalog, current, discovery_users, current.config, slice_key="discovery"
+        catalog,
+        current,
+        discovery_users,
+        current.config,
+        slice_key="discovery",
+        prepared_cache=prepared_cache,
     )
     reference_holdout = (
-        core._audit_recommend_config(catalog, current, holdout_users, current.config, slice_key="holdout")
+        core._audit_recommend_config(
+            catalog,
+            current,
+            holdout_users,
+            current.config,
+            slice_key="holdout",
+            prepared_cache=prepared_cache,
+        )
         if holdout_users else None
     )
     reference_business = evaluate_logged_policy(
@@ -349,7 +369,12 @@ def evolve_recommend(
         cfg = normalize_strategy_config(RecommendConfig(**config))
         engine = current.with_config(cfg)
         report = core._audit_recommend_config(
-            catalog, current, discovery_users, cfg, slice_key="discovery"
+            catalog,
+            current,
+            discovery_users,
+            cfg,
+            slice_key="discovery",
+            prepared_cache=prepared_cache,
         )
         replay = evaluate_logged_policy(
             discovery_events,
@@ -396,10 +421,24 @@ def evolve_recommend(
     candidate_config = normalize_strategy_config(RecommendConfig(**best["config"]))
     best["config"] = asdict(candidate_config)
     candidate_engine = current.with_config(candidate_config)
-    trial = core._audit_recommend_config(catalog, current, users, candidate_config, slice_key="full")
+    trial = core._audit_recommend_config(
+        catalog,
+        current,
+        users,
+        candidate_config,
+        slice_key="full",
+        prepared_cache=prepared_cache,
+    )
     robust = core._recommend_robustness(reference, trial)
     holdout = (
-        core._audit_recommend_config(catalog, current, holdout_users, candidate_config, slice_key="holdout")
+        core._audit_recommend_config(
+            catalog,
+            current,
+            holdout_users,
+            candidate_config,
+            slice_key="holdout",
+            prepared_cache=prepared_cache,
+        )
         if holdout_users else None
     )
     holdout_robust = (
