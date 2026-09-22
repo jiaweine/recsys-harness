@@ -9,7 +9,7 @@ import time
 from types import SimpleNamespace
 from typing import Callable
 
-from lingjing_harness.algorithms import SearchConfig, SegmentRouter
+from lingjing_harness.algorithms import RecommendRequestFeatures, SearchConfig, SegmentRouter
 from lingjing_harness.domain import Catalog, Interaction, Item
 
 
@@ -77,7 +77,7 @@ def _router(*, items: int, history: int) -> SegmentRouter:
     return SegmentRouter(catalog, _SearchStub(), recommend)
 
 
-def _legacy_features(router: SegmentRouter, user_id: str) -> tuple[int, int]:
+def _legacy_features(router: SegmentRouter, user_id: str) -> RecommendRequestFeatures:
     events = router.recommend._by_user.get(user_id or "", [])
     seen = {event.item_id for event in events}
     eligible_unseen = sum(
@@ -85,12 +85,14 @@ def _legacy_features(router: SegmentRouter, user_id: str) -> tuple[int, int]:
         for item in router.catalog.items
         if item.eligible and item.item_id not in seen
     )
-    return len(events), eligible_unseen
+    return RecommendRequestFeatures(
+        history_events=len(events),
+        eligible_unseen=eligible_unseen,
+    )
 
 
-def _optimized_features(router: SegmentRouter, user_id: str) -> tuple[int, int]:
-    features = router.recommend_features(user_id)
-    return features.history_events, features.eligible_unseen
+def _legacy_segment(router: SegmentRouter, user_id: str) -> str:
+    return router._recommend_segment_for_features(_legacy_features(router, user_id))
 
 
 def _measure_user(
@@ -100,23 +102,31 @@ def _measure_user(
     repeats: int,
     calls_per_sample: int,
 ) -> dict[str, object]:
-    legacy_value = _legacy_features(router, user_id)
-    optimized_value = _optimized_features(router, user_id)
-    if legacy_value != optimized_value:
+    legacy_features = _legacy_features(router, user_id)
+    optimized_features = router.recommend_features(user_id)
+    if legacy_features != optimized_features:
         raise AssertionError(
-            f"routing features changed for {user_id}: {legacy_value} != {optimized_value}"
+            f"routing features changed for {user_id}: "
+            f"{legacy_features} != {optimized_features}"
+        )
+    legacy_segment = router._recommend_segment_for_features(legacy_features)
+    optimized_segment = router.recommend_segment(user_id)
+    if legacy_segment != optimized_segment:
+        raise AssertionError(
+            f"routing segment changed for {user_id}: "
+            f"{legacy_segment} != {optimized_segment}"
         )
 
     legacy = _summary(
         _timed_per_call(
-            lambda: _legacy_features(router, user_id),
+            lambda: _legacy_segment(router, user_id),
             repeats=repeats,
             calls_per_sample=calls_per_sample,
         )
     )
     optimized = _summary(
         _timed_per_call(
-            lambda: _optimized_features(router, user_id),
+            lambda: router.recommend_segment(user_id),
             repeats=repeats,
             calls_per_sample=calls_per_sample,
         )
@@ -126,7 +136,11 @@ def _measure_user(
         "legacy": legacy,
         "optimized": optimized,
         "speedup_p50": round(speedup, 2),
-        "features": {"history_events": legacy_value[0], "eligible_unseen": legacy_value[1]},
+        "segment": legacy_segment,
+        "features": {
+            "history_events": legacy_features.history_events,
+            "eligible_unseen": legacy_features.eligible_unseen,
+        },
     }
 
 
