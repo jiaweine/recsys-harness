@@ -209,60 +209,88 @@ class RecommendationEngine:
         dense_profile = self._dense_profile(profile)
         cat_total = sum(cats.values()) or 1.0
         graph_scores = self._graph_scores(seeds)
-        candidate_ids = CAPABILITIES.call(
+
+        candidate_spec = CAPABILITIES.resolve(
             "recommend.candidate",
             self.config.candidate_strategy,
-            self,
-            user_id,
-            profile,
-            cats,
-            seen,
-            seeds,
-            graph_scores,
         )
+        if candidate_spec.name == "full_pool":
+            # The owned default already starts from Catalog.items. Keep Item
+            # objects on the hot path instead of materializing item IDs only to
+            # look them up again immediately below.
+            candidate_items = (
+                item
+                for item in self.catalog.items
+                if item.eligible and item.item_id not in seen
+            )
+        else:
+            candidate_ids = candidate_spec.handler(
+                self,
+                user_id,
+                profile,
+                cats,
+                seen,
+                seeds,
+                graph_scores,
+            )
+
+            def resolved_items():
+                # A capability is allowed to return any iterable; normalize it
+                # here so duplicate IDs cannot create duplicate final candidates.
+                for item_id in dict.fromkeys(str(value) for value in candidate_ids):
+                    item = self.catalog.item_by_id.get(item_id)
+                    if item is None or not item.eligible or item.item_id in seen:
+                        continue
+                    yield item
+
+            candidate_items = resolved_items()
+
         cold = len(self._by_user.get(user_id, [])) == 0
+        explore_handler = CAPABILITIES.resolve(
+            "recommend.exploration",
+            self.config.exploration_strategy,
+        ).handler
+        cold_handler = (
+            CAPABILITIES.resolve(
+                "recommend.cold_start",
+                self.config.cold_start_strategy,
+            ).handler
+            if cold
+            else None
+        )
         rows = []
-        # A capability is allowed to return any iterable; normalize it here so
-        # duplicate IDs cannot create duplicate candidates in the final slate.
-        for item_id in dict.fromkeys(str(value) for value in candidate_ids):
-            item = self.catalog.item_by_id.get(item_id)
-            if item is None or not item.eligible or item.item_id in seen:
-                continue
-            item_vector = self._vectors[item.item_id]
+        vectors = self._vectors
+        popularity_by_id = self._popularity
+        dense_values = dense_profile
+        for item in candidate_items:
+            item_vector = vectors[item.item_id]
             if not profile:
                 profile_fit = 0.0
-            elif dense_profile is not None and len(profile) > len(item_vector):
-                profile_fit = max(
-                    0.0,
-                    sum(
-                        value * dense_profile[key]
-                        for key, value in item_vector.items()
-                    ),
-                )
+            elif dense_values is not None and len(profile) > len(item_vector):
+                dot = 0.0
+                for key, value in item_vector.items():
+                    dot += value * dense_values[key]
+                profile_fit = max(0.0, dot)
             else:
                 profile_fit = max(0.0, cosine(profile, item_vector))
             cat_fit = sum(cats.get(category, 0.0) for category in item.categories) / cat_total
             graph = graph_scores.get(item.item_id, 0.0)
-            popularity = self._popularity[item.item_id]
+            popularity = popularity_by_id[item.item_id]
             novelty = 1.0 - popularity
-            explore = CAPABILITIES.call(
-                "recommend.exploration",
-                self.config.exploration_strategy,
+            explore = explore_handler(
                 self,
                 user_id,
                 item,
                 popularity,
             )
             cold_prior = (
-                CAPABILITIES.call(
-                    "recommend.cold_start",
-                    self.config.cold_start_strategy,
+                cold_handler(
                     self,
                     item,
                     popularity,
                     explore,
                 )
-                if cold
+                if cold_handler is not None
                 else 0.0
             )
             rows.append(
