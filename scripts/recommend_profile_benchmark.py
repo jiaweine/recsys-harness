@@ -36,6 +36,27 @@ def _timed(fn: Callable[[], object], *, repeats: int) -> list[float]:
     return out
 
 
+def _paired_timed(
+    legacy_fn: Callable[[], object],
+    optimized_fn: Callable[[], object],
+    *,
+    repeats: int,
+) -> tuple[list[float], list[float]]:
+    legacy: list[float] = []
+    optimized: list[float] = []
+    for index in range(repeats):
+        ordered = (
+            ((legacy_fn, legacy), (optimized_fn, optimized))
+            if index % 2 == 0
+            else ((optimized_fn, optimized), (legacy_fn, legacy))
+        )
+        for fn, bucket in ordered:
+            started = time.perf_counter()
+            fn()
+            bucket.append((time.perf_counter() - started) * 1000.0)
+    return legacy, optimized
+
+
 def _fixture(*, items: int, history: int) -> tuple[RecommendationEngine, str]:
     rows = [
         Item(
@@ -89,12 +110,6 @@ def run_benchmark(
     engine._dense_vector_dims = None
     legacy_prepared = engine.prepare(user_id)
     legacy_results = engine.recommend(user_id, limit=limit)
-    legacy_prepare = _summary(
-        _timed(lambda: engine.prepare(user_id), repeats=repeats)
-    )
-    legacy_recommend = _summary(
-        _timed(lambda: engine.recommend(user_id, limit=limit), repeats=repeats)
-    )
 
     engine._dense_vector_dims = dims
     optimized_prepared = engine.prepare(user_id)
@@ -104,12 +119,37 @@ def run_benchmark(
     if optimized_results != legacy_results:
         raise AssertionError("dense profile lookup changed recommendation output")
 
-    optimized_prepare = _summary(
-        _timed(lambda: engine.prepare(user_id), repeats=repeats)
+    def legacy_prepare_fn():
+        engine._dense_vector_dims = None
+        return engine.prepare(user_id)
+
+    def optimized_prepare_fn():
+        engine._dense_vector_dims = dims
+        return engine.prepare(user_id)
+
+    def legacy_recommend_fn():
+        engine._dense_vector_dims = None
+        return engine.recommend(user_id, limit=limit)
+
+    def optimized_recommend_fn():
+        engine._dense_vector_dims = dims
+        return engine.recommend(user_id, limit=limit)
+
+    legacy_prepare_samples, optimized_prepare_samples = _paired_timed(
+        legacy_prepare_fn,
+        optimized_prepare_fn,
+        repeats=repeats,
     )
-    optimized_recommend = _summary(
-        _timed(lambda: engine.recommend(user_id, limit=limit), repeats=repeats)
+    legacy_recommend_samples, optimized_recommend_samples = _paired_timed(
+        legacy_recommend_fn,
+        optimized_recommend_fn,
+        repeats=repeats,
     )
+    engine._dense_vector_dims = dims
+    legacy_prepare = _summary(legacy_prepare_samples)
+    optimized_prepare = _summary(optimized_prepare_samples)
+    legacy_recommend = _summary(legacy_recommend_samples)
+    optimized_recommend = _summary(optimized_recommend_samples)
 
     prepare_speedup = float(legacy_prepare["p50_ms"]) / max(
         float(optimized_prepare["p50_ms"]),
@@ -142,6 +182,7 @@ def main() -> None:
     parser.add_argument("--repeats", type=int, default=7)
     parser.add_argument("--limit", type=int, default=8)
     parser.add_argument("--max-optimized-recommend-p50-ms", type=float, default=0.0)
+    parser.add_argument("--max-optimized-prepare-p50-ms", type=float, default=0.0)
     parser.add_argument("--min-prepare-speedup", type=float, default=0.0)
     parser.add_argument("--min-recommend-speedup", type=float, default=0.0)
     args = parser.parse_args()
@@ -156,6 +197,7 @@ def main() -> None:
 
     failures: list[str] = []
     optimized = float(result["optimized_recommend"]["p50_ms"])
+    optimized_prepare_p50 = float(result["optimized_prepare"]["p50_ms"])
     prepare_speedup = float(result["prepare_speedup_p50"])
     recommend_speedup = float(result["recommend_speedup_p50"])
     if (
@@ -165,6 +207,14 @@ def main() -> None:
         failures.append(
             f"optimized recommend p50={optimized}ms > "
             f"{args.max_optimized_recommend_p50_ms}ms"
+        )
+    if (
+        args.max_optimized_prepare_p50_ms > 0
+        and optimized_prepare_p50 > args.max_optimized_prepare_p50_ms
+    ):
+        failures.append(
+            f"optimized prepare p50={optimized_prepare_p50}ms > "
+            f"{args.max_optimized_prepare_p50_ms}ms"
         )
     if args.min_prepare_speedup > 0 and prepare_speedup < args.min_prepare_speedup:
         failures.append(
