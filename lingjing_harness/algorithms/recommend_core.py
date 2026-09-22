@@ -63,12 +63,17 @@ class RecommendationEngine:
         config: RecommendConfig | None = None,
         *,
         item_vectors: dict[str, dict[int, float]] | None = None,
+        popularity_norms: dict[str, float] | None = None,
     ) -> None:
         self.catalog = catalog
         self.config = normalize_strategy_config(config or RecommendConfig())
         self._vectors = item_vectors if item_vectors is not None else build_item_vectors(catalog.items)
         self._dense_vector_dims = getattr(self._vectors, "dense_dims", None)
-        self._popularity = catalog.popularity_norms()
+        self._popularity = (
+            popularity_norms
+            if popularity_norms is not None
+            else catalog.popularity_norms()
+        )
         self._candidate_static_cache: dict[str, object] = {}
         self._profile_snapshot_cache: OrderedDict[
             tuple[str, float],
