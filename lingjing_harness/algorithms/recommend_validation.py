@@ -79,9 +79,10 @@ def _popularity_rank(catalog: Catalog, seen: set[str], *, k: int) -> list[str]:
         for item in catalog.items
         if item.eligible and item.item_id not in seen
     ]
+    popularity = catalog.popularity_norms()
     candidates.sort(
         key=lambda item: (
-            -catalog.popularity_norm(item),
+            -popularity[item.item_id],
             -item.quality,
             -item.freshness,
             item.item_id,
