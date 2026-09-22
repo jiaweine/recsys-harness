@@ -83,6 +83,9 @@ class SegmentRouter:
         self.catalog = catalog
         self.search = search
         self.recommend = recommend
+        self._eligible_item_ids = frozenset(
+            item.item_id for item in catalog.items if item.eligible
+        )
 
         search_rows = request_groups(catalog.events, surface="search")
         search_calibration = [
@@ -173,6 +176,7 @@ class SegmentRouter:
         clone.search_thresholds = self.search_thresholds
         clone._recommend_calibration = self._recommend_calibration
         clone.recommend_thresholds = self.recommend_thresholds
+        clone._eligible_item_ids = self._eligible_item_ids
         clone._catalog_request_segments = self._catalog_request_segments
         clone._catalog_segment_counts = self._catalog_segment_counts
         return clone
@@ -193,14 +197,12 @@ class SegmentRouter:
     def recommend_features(self, user_id: str) -> RecommendRequestFeatures:
         events = self.recommend._by_user.get(user_id or "", [])
         seen = {event.item_id for event in events}
-        eligible_unseen = sum(
-            1
-            for item in self.catalog.items
-            if item.eligible and item.item_id not in seen
+        eligible_seen = sum(
+            1 for item_id in seen if item_id in self._eligible_item_ids
         )
         return RecommendRequestFeatures(
             history_events=len(events),
-            eligible_unseen=eligible_unseen,
+            eligible_unseen=len(self._eligible_item_ids) - eligible_seen,
         )
 
     def _search_segment_for_features(self, features: SearchRequestFeatures) -> str:
