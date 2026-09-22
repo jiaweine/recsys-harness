@@ -261,10 +261,10 @@ class RecommendationEngine:
         if limit == 0:
             return []
         cfg = normalize_strategy_config(config or self.config)
-        rows = []
-        for raw in prepared:
+
+        def score(raw: dict) -> float:
             item = raw["item"]
-            base = (
+            return (
                 cfg.profile * raw["profile_fit"]
                 + cfg.graph * raw["graph"]
                 + cfg.category * raw["cat_fit"]
@@ -275,10 +275,19 @@ class RecommendationEngine:
                 + cfg.exploration * raw["explore"]
                 + cfg.cold_start * raw.get("cold_prior", 0.0)
             )
-            rows.append(
+
+        ranked = nsmallest(
+            max(40, limit * 6),
+            prepared,
+            key=lambda raw: (-score(raw), raw["item"].item_id),
+        )
+        pool = []
+        for raw in ranked:
+            item = raw["item"]
+            pool.append(
                 {
                     "item": item,
-                    "base": base,
+                    "base": score(raw),
                     "signals": {
                         "fit": round(
                             min(
@@ -295,11 +304,6 @@ class RecommendationEngine:
                     },
                 }
             )
-        pool = nsmallest(
-            max(40, limit * 6),
-            rows,
-            key=lambda row: (-row["base"], row["item"].item_id),
-        )
         selected = []
         while pool and len(selected) < limit:
             best = None

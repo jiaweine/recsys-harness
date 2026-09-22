@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import argparse
+from heapq import nsmallest
 import json
 import math
 import statistics
 import time
 from typing import Callable
 
-import lingjing_harness.algorithms.recommend_core as recommend_core
 from lingjing_harness.algorithms import RecommendationEngine
+from lingjing_harness.algorithms.capabilities import CAPABILITIES, normalize_strategy_config
 from lingjing_harness.domain import Catalog, Item
+from lingjing_harness.serving import normalize_serving_limit
 
 
 def _percentile(values: list[float], q: float) -> float:
@@ -47,7 +49,14 @@ def _engine_and_prepared(*, items: int) -> tuple[RecommendationEngine, list[dict
         )
         for index in range(items)
     ]
-    vectors = {item.item_id: {} for item in catalog_items}
+    vectors = {
+        item.item_id: {
+            (index * 7) % 256: 0.8,
+            (index * 11 + 3) % 256: 0.6,
+            (index * 17 + 5) % 256: 0.4,
+        }
+        for index, item in enumerate(catalog_items)
+    }
     engine = RecommendationEngine(Catalog(items=catalog_items), item_vectors=vectors)
 
     prepared: list[dict] = []
@@ -68,29 +77,106 @@ def _engine_and_prepared(*, items: int) -> tuple[RecommendationEngine, list[dict
     return engine, prepared
 
 
-def _full_sort_topk(n: int, iterable, *, key=None):
-    return sorted(iterable, key=key)[:n]
+def _legacy_rank_prepared(
+    engine: RecommendationEngine,
+    prepared: list[dict],
+    *,
+    limit: int,
+) -> list[dict]:
+    limit = normalize_serving_limit(limit)
+    if limit == 0:
+        return []
+    cfg = normalize_strategy_config(engine.config)
+    rows = []
+    for raw in prepared:
+        item = raw["item"]
+        base = (
+            cfg.profile * raw["profile_fit"]
+            + cfg.graph * raw["graph"]
+            + cfg.category * raw["cat_fit"]
+            + cfg.quality * item.quality
+            + cfg.freshness * item.freshness
+            + cfg.popularity * raw["pop"]
+            + cfg.novelty * raw["novelty"]
+            + cfg.exploration * raw["explore"]
+            + cfg.cold_start * raw.get("cold_prior", 0.0)
+        )
+        rows.append(
+            {
+                "item": item,
+                "base": base,
+                "signals": {
+                    "fit": round(
+                        min(
+                            1.0,
+                            0.55 * raw["profile_fit"]
+                            + 0.30 * raw["cat_fit"]
+                            + 0.15 * raw["graph"],
+                        ),
+                        4,
+                    ),
+                    "quality": round(item.quality, 4),
+                    "freshness": round(item.freshness, 4),
+                    "novelty": round(raw["novelty"], 4),
+                },
+            }
+        )
+    pool = nsmallest(
+        max(40, limit * 6),
+        rows,
+        key=lambda row: (-row["base"], row["item"].item_id),
+    )
+    selected = []
+    while pool and len(selected) < limit:
+        best = None
+        best_score = float("-inf")
+        for row in pool:
+            redundancy = max(
+                (
+                    CAPABILITIES.call(
+                        "recommend.rerank",
+                        cfg.rerank_strategy,
+                        engine,
+                        row["item"],
+                        chosen["item"],
+                    )
+                    for chosen in selected
+                ),
+                default=0.0,
+            )
+            adjusted = row["base"] - cfg.diversity * redundancy
+            if adjusted > best_score:
+                best_score, best = adjusted, row
+        assert best is not None
+        selected.append({**best, "adjusted": best_score})
+        pool.remove(best)
+    return [
+        {
+            "rank": index + 1,
+            **row["item"].public_dict(),
+            "score": round(row["adjusted"], 5),
+            "signals": row["signals"],
+        }
+        for index, row in enumerate(selected)
+    ]
 
 
 def run_benchmark(*, items: int, repeats: int, limit: int) -> dict[str, object]:
     engine, prepared = _engine_and_prepared(items=items)
-    original = recommend_core.nsmallest
 
-    recommend_core.nsmallest = _full_sort_topk
-    try:
-        legacy_result = engine.rank_prepared(prepared, limit=limit)
-        legacy_stats = _summary(
-            _timed(
-                lambda: engine.rank_prepared(prepared, limit=limit),
-                repeats=repeats,
-            )
-        )
-    finally:
-        recommend_core.nsmallest = original
-
+    legacy_result = _legacy_rank_prepared(engine, prepared, limit=limit)
     optimized_result = engine.rank_prepared(prepared, limit=limit)
     if optimized_result != legacy_result:
-        raise AssertionError("optimized recommendation ranking differs from legacy full sort")
+        raise AssertionError(
+            "optimized recommendation ranking differs from pre-deferred-signals output"
+        )
+
+    legacy_stats = _summary(
+        _timed(
+            lambda: _legacy_rank_prepared(engine, prepared, limit=limit),
+            repeats=repeats,
+        )
+    )
     optimized_stats = _summary(
         _timed(
             lambda: engine.rank_prepared(prepared, limit=limit),
@@ -114,7 +200,7 @@ def run_benchmark(*, items: int, repeats: int, limit: int) -> dict[str, object]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Benchmark bounded recommendation ranking pool selection."
+        description="Benchmark deferred recommendation rank signal construction."
     )
     parser.add_argument("--items", type=int, default=30_000)
     parser.add_argument("--repeats", type=int, default=7)
