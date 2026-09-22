@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import math
 import statistics
@@ -56,9 +57,21 @@ def _paired_timed(
             else ((optimized_fn, optimized), (legacy_fn, legacy))
         )
         for fn, bucket in ordered:
-            started = time.perf_counter()
-            fn()
-            bucket.append((time.perf_counter() - started) * 1000.0)
+            # Both implementations materialize the same large acyclic result
+            # graph.  An unrelated cyclic-GC threshold crossing can otherwise
+            # land on only one side of a pair and dominate the measured latency.
+            # Start each sample from the same GC baseline and exclude that global
+            # pause from the isolated serving-path measurement.
+            gc.collect()
+            was_enabled = gc.isenabled()
+            gc.disable()
+            try:
+                started = time.perf_counter()
+                fn()
+                bucket.append((time.perf_counter() - started) * 1000.0)
+            finally:
+                if was_enabled:
+                    gc.enable()
     return legacy, optimized
 
 
