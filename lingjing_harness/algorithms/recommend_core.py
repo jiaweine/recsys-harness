@@ -267,10 +267,13 @@ class RecommendationEngine:
             if not profile:
                 profile_fit = 0.0
             elif dense_values is not None and len(profile) > len(item_vector):
-                dot = 0.0
-                for key, value in item_vector.items():
-                    dot += value * dense_values[key]
-                profile_fit = max(0.0, dot)
+                profile_fit = max(
+                    0.0,
+                    sum(
+                        value * dense_values[key]
+                        for key, value in item_vector.items()
+                    ),
+                )
             else:
                 profile_fit = max(0.0, cosine(profile, item_vector))
             cat_fit = sum(cats.get(category, 0.0) for category in item.categories) / cat_total
