@@ -38,6 +38,17 @@ class SearchConfig:
     rerank_strategy: str = capability_field("search.rerank", "category_mmr")
 
 
+def _query_cosine(
+    qvec: dict[int, float],
+    qitems: tuple[tuple[int, float], ...],
+    item_vector: dict[int, float],
+) -> float:
+    if len(qvec) <= len(item_vector):
+        item_get = item_vector.get
+        return sum(value * item_get(key, 0.0) for key, value in qitems)
+    return cosine(qvec, item_vector)
+
+
 class SearchEngine:
     """Project-owned search with evolvable query, retrieval and rerank stages."""
 
@@ -159,6 +170,7 @@ class SearchEngine:
         if not qtokens:
             return []
         qvec = hashed_vector(query)
+        qvec_items = tuple(qvec.items())
         query_weights = {
             token: (
                 (0.45 if token in self.GENERIC_QUERY_TOKENS else 1.0)
@@ -198,7 +210,14 @@ class SearchEngine:
             title_tokens = self._title_token_sets[item.item_id]
             overlap = len(qset & title_tokens) / max(1, len(qset))
             exact = 1.0 if query.lower() in self._title_lower[item.item_id] else 0.0
-            sem = max(0.0, cosine(qvec, self._vectors[item.item_id]))
+            sem = max(
+                0.0,
+                _query_cosine(
+                    qvec,
+                    qvec_items,
+                    self._vectors[item.item_id],
+                ),
+            )
             rows.append(
                 {
                     "item": item,
