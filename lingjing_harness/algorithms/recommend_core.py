@@ -60,6 +60,7 @@ class RecommendationEngine:
         self.catalog = catalog
         self.config = normalize_strategy_config(config or RecommendConfig())
         self._vectors = item_vectors if item_vectors is not None else build_item_vectors(catalog.items)
+        self._dense_vector_dims = getattr(self._vectors, "dense_dims", None)
         self._popularity = catalog.popularity_norms()
         self._candidate_static_cache: dict[str, object] = {}
         self._by_user: dict[str, list] = defaultdict(list)
@@ -78,6 +79,7 @@ class RecommendationEngine:
         clone.catalog = self.catalog
         clone.config = normalize_strategy_config(config)
         clone._vectors = self._vectors
+        clone._dense_vector_dims = self._dense_vector_dims
         clone._popularity = self._popularity
         clone._candidate_static_cache = self._candidate_static_cache
         clone._by_user = self._by_user
@@ -129,6 +131,20 @@ class RecommendationEngine:
                 cats[category] += weight
         norm = sqrt(sum(value * value for value in vec.values())) or 1.0
         return {key: value / norm for key, value in vec.items()}, cats, seen, seeds
+
+    def _dense_profile(
+        self,
+        profile: dict[int, float],
+    ) -> tuple[float, ...] | None:
+        dims = self._dense_vector_dims
+        if not profile or not isinstance(dims, int) or dims <= 0:
+            return None
+        if any(key < 0 or key >= dims for key in profile):
+            return None
+        dense = [0.0] * dims
+        for key, value in profile.items():
+            dense[key] = value
+        return tuple(dense)
 
     def _graph_scores(self, seeds: Counter[str]) -> dict[str, float]:
         denom = sum(seeds.values()) or 1.0
@@ -190,6 +206,7 @@ class RecommendationEngine:
 
     def prepare(self, user_id: str) -> list[dict]:
         profile, cats, seen, seeds = self._profile(user_id)
+        dense_profile = self._dense_profile(profile)
         cat_total = sum(cats.values()) or 1.0
         graph_scores = self._graph_scores(seeds)
         candidate_ids = CAPABILITIES.call(
@@ -211,7 +228,19 @@ class RecommendationEngine:
             item = self.catalog.item_by_id.get(item_id)
             if item is None or not item.eligible or item.item_id in seen:
                 continue
-            profile_fit = max(0.0, cosine(profile, self._vectors[item.item_id])) if profile else 0.0
+            item_vector = self._vectors[item.item_id]
+            if not profile:
+                profile_fit = 0.0
+            elif dense_profile is not None and len(profile) > len(item_vector):
+                profile_fit = max(
+                    0.0,
+                    sum(
+                        value * dense_profile[key]
+                        for key, value in item_vector.items()
+                    ),
+                )
+            else:
+                profile_fit = max(0.0, cosine(profile, item_vector))
             cat_fit = sum(cats.get(category, 0.0) for category in item.categories) / cat_total
             graph = graph_scores.get(item.item_id, 0.0)
             popularity = self._popularity[item.item_id]

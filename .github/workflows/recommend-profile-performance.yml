@@ -1,0 +1,42 @@
+name: Recommend Profile Performance
+
+on:
+  pull_request:
+    paths:
+      - "lingjing_harness/algorithms/item_features.py"
+      - "lingjing_harness/algorithms/recommend_core.py"
+      - "tests/test_recommend_profile_hotpath.py"
+      - "scripts/recommend_profile_benchmark.py"
+      - ".github/workflows/recommend-profile-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Verify dense recommendation profile hot path
+        run: pytest -q tests/test_recommend_profile_hotpath.py
+      - name: Benchmark dense warm recommendation profile
+        run: |
+          for pass in 1 2 3; do
+            echo "recommend-profile performance pass $pass/3"
+            python scripts/recommend_profile_benchmark.py \
+              --items 30000 \
+              --history 64 \
+              --repeats 7 \
+              --limit 8 \
+              --max-optimized-recommend-p50-ms 250 \
+              --min-prepare-speedup 1.10 \
+              --min-recommend-speedup 1.08
+          done
