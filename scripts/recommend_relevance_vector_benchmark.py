@@ -10,6 +10,7 @@ from typing import Callable
 import lingjing_harness.algorithms.recommend_validation as validation
 from lingjing_harness.algorithms import RecommendationEngine
 from lingjing_harness.domain import Catalog, Interaction, Item
+from lingjing_harness.algorithms.item_features import build_item_vectors
 
 
 def _percentile(values: list[float], q: float) -> float:
@@ -71,15 +72,15 @@ def _fixture(*, items: int, users: int) -> tuple[Catalog, RecommendationEngine]:
 def run_benchmark(*, items: int, users: int, repeats: int) -> dict[str, object]:
     catalog, engine = _fixture(items=items, users=users)
     user_ids = engine.known_users()
-    optimized_helper = validation._temporal_recommendation_engine
+    optimized_materializer = validation._owned_temporal_recommendation_engine
 
-    def legacy_engine(current, training_catalog):
-        return RecommendationEngine(
-            training_catalog,
-            config=current.config,
-        )
+    def legacy_materializer(current, training_catalog, state):
+        temporal = optimized_materializer(current, training_catalog, state)
+        temporal._vectors = build_item_vectors(training_catalog.items)
+        temporal._dense_vector_dims = getattr(temporal._vectors, "dense_dims", None)
+        return temporal
 
-    validation._temporal_recommendation_engine = legacy_engine
+    validation._owned_temporal_recommendation_engine = legacy_materializer
     try:
         legacy = validation.prepare_recommend_relevance(
             catalog,
@@ -99,7 +100,7 @@ def run_benchmark(*, items: int, users: int, repeats: int) -> dict[str, object]:
             )
         )
     finally:
-        validation._temporal_recommendation_engine = optimized_helper
+        validation._owned_temporal_recommendation_engine = optimized_materializer
 
     optimized = validation.prepare_recommend_relevance(
         catalog,
