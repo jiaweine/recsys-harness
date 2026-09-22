@@ -61,7 +61,7 @@ class RecommendationEngine:
         self.config = normalize_strategy_config(config or RecommendConfig())
         self._vectors = item_vectors if item_vectors is not None else build_item_vectors(catalog.items)
         self._popularity = catalog.popularity_norms()
-        self._candidate_static_cache: dict[str, tuple[str, ...]] = {}
+        self._candidate_static_cache: dict[str, object] = {}
         self._by_user: dict[str, list] = defaultdict(list)
         for event in catalog.interactions:
             self._by_user[event.user_id].append(event)
@@ -138,13 +138,32 @@ class RecommendationEngine:
                 raw[item_id] += weight * count
         return {item_id: min(1.0, value / denom) for item_id, value in raw.items()}
 
+    def _evidence_category_index(self) -> dict[str, frozenset[str]]:
+        """Return eligible item IDs by category, shared by config clones."""
+
+        cached = self._candidate_static_cache.get("evidence_category_index")
+        if isinstance(cached, dict):
+            return cached
+        buckets: dict[str, set[str]] = defaultdict(set)
+        for item in self.catalog.items:
+            if not item.eligible:
+                continue
+            for category in item.categories:
+                buckets[category].add(item.item_id)
+        index = {
+            category: frozenset(item_ids)
+            for category, item_ids in buckets.items()
+        }
+        self._candidate_static_cache["evidence_category_index"] = index
+        return index
+
     def _evidence_fallback_ids(self) -> tuple[str, ...]:
         """Return the static evidence-union fallback order, shared by config clones."""
 
         cached = self._candidate_static_cache.get("evidence_fallback_ids")
-        if cached is not None:
+        if isinstance(cached, tuple):
             return cached
-        cached = tuple(
+        ordered = tuple(
             item.item_id
             for item in sorted(
                 (item for item in self.catalog.items if item.eligible),
@@ -158,8 +177,8 @@ class RecommendationEngine:
                 ),
             )
         )
-        self._candidate_static_cache["evidence_fallback_ids"] = cached
-        return cached
+        self._candidate_static_cache["evidence_fallback_ids"] = ordered
+        return ordered
 
     @staticmethod
     def _stable_hash(user_id: str, item_id: str) -> float:
@@ -366,10 +385,12 @@ def _candidate_evidence_union(
 
     selected: set[str] = set(graph_scores)
     if cats:
-        category_keys = set(cats)
-        for item in eligible:
-            if any(category in category_keys for category in item.categories):
-                selected.add(item.item_id)
+        category_matches: set[str] = set()
+        category_index = engine._evidence_category_index()
+        for category in cats:
+            category_matches.update(category_index.get(category, ()))
+        category_matches.difference_update(seen)
+        selected.update(category_matches)
 
     if profile:
         semantic = nsmallest(
