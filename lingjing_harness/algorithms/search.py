@@ -365,15 +365,20 @@ def _candidate_semantic_rescue(
     out = _candidate_postings_union(engine, query, qtokens, retrieval_tokens, qvec)
     if not out:
         return out
-    semantic = []
-    for item in engine.catalog.items:
-        if not item.eligible or item.item_id in out:
-            continue
-        score = max(0.0, cosine(qvec, engine._vectors[item.item_id]))
-        semantic.append((score, item.item_id))
-    semantic.sort(key=lambda row: (-row[0], row[1]))
     budget = min(24, max(6, len(out)))
-    for score, item_id in semantic[:budget]:
+    semantic = nsmallest(
+        budget,
+        (
+            (
+                max(0.0, cosine(qvec, engine._vectors[item.item_id])),
+                item.item_id,
+            )
+            for item in engine.catalog.items
+            if item.eligible and item.item_id not in out
+        ),
+        key=lambda row: (-row[0], row[1]),
+    )
+    for score, item_id in semantic:
         if score >= 0.16:
             out[item_id] = "semantic"
     return out
