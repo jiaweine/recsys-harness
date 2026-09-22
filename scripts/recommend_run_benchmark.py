@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import operator
 import statistics
 import tempfile
 import time
@@ -201,6 +202,33 @@ def run_benchmark(*, items: int, history: int, repeats: int) -> dict[str, object
         optimized_full = _summary(
             _timed(lambda: registry.run_recommend(user_id), repeats)
         )
+        profile, _cats, _seen, _seeds = registry.recommend._profile(user_id)
+        dense_profile = registry.recommend._dense_profile(profile)
+        eligible = [
+            item for item in catalog.items
+            if item.eligible and item.item_id not in _seen
+        ]
+
+        def map_dot_all():
+            if dense_profile is None:
+                return []
+            profile_values = dense_profile
+            vectors = registry.recommend._vectors
+            return [
+                sum(
+                    map(
+                        operator.mul,
+                        vector.values(),
+                        map(profile_values.__getitem__, vector),
+                    )
+                )
+                for item in eligible
+                for vector in (vectors[item.item_id],)
+            ]
+
+        map_profile_dot = _summary(
+            _timed(map_dot_all, max(3, repeats // 2))
+        )
         routing = _summary(
             _timed(lambda: registry.segment_router.recommend_segment(user_id), repeats)
         )
@@ -228,6 +256,7 @@ def run_benchmark(*, items: int, history: int, repeats: int) -> dict[str, object
         "optimized_full_run": optimized_full,
         "full_speedup_p50": round(full_speedup, 2),
         "routing": routing,
+        "map_profile_dot": map_profile_dot,
         "routing_share_p50": round(routing_share, 4),
     }
 
