@@ -359,10 +359,13 @@ class ToolRegistry:
         query = query or ""
         return {"query": query, "results": self.search.search(query, limit=8)}
 
-    def search_diagnose(self, query: str | None = None, **_: Any) -> dict[str, Any]:
+    def _search_diagnose_from_results(
+        self,
+        query: str,
+        result: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         query = (query or "").strip()
         query_tokens = list(dict.fromkeys(tokenize(query)))
-        result = self.search.search(query, limit=8)
         covered = set()
         for row in result:
             item = self.catalog.item_by_id.get(str(row["id"]))
@@ -386,6 +389,13 @@ class ToolRegistry:
                 else "当前查询的直接词项证据基本完整"
             ),
         }
+
+    def search_diagnose(self, query: str | None = None, **_: Any) -> dict[str, Any]:
+        query = (query or "").strip()
+        return self._search_diagnose_from_results(
+            query,
+            self.search.search(query, limit=8),
+        )
 
     def search_audit(self, **_: Any) -> dict[str, Any]:
         return audit_search(self.catalog, self.search)

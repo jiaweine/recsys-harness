@@ -256,8 +256,17 @@ class ToolRegistry(_ProductionToolRegistry):
         }
 
     def search_diagnose(self, query: str | None = None, **kwargs: Any) -> dict[str, Any]:
-        result = super().search_diagnose(query=query, **kwargs)
-        segment = self.segment_router.search_segment(query or "")
+        query = (query or "").strip()
+        if type(self.search) is SearchEngine:
+            prepared = self.search.prepare(query)
+            result = self._search_diagnose_from_results(
+                query,
+                self.search.rank_prepared(prepared, limit=8),
+            )
+            segment = self.segment_router.search_segment_from_prepared(prepared)
+        else:
+            result = super().search_diagnose(query=query, **kwargs)
+            segment = self.segment_router.search_segment(query)
         return {
             **result,
             "segment": segment,
