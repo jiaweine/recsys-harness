@@ -126,8 +126,13 @@ def run_benchmark(
     optimized_builder = validation._owned_temporal_states
     optimized_materializer = validation._owned_temporal_recommendation_engine
 
-    def legacy_builder(current: Catalog, target_timestamps: list[float]):
-        del current
+    def legacy_builder(
+        current: Catalog,
+        target_timestamps: list[float],
+        *,
+        seed_item_ids=None,
+    ):
+        del current, seed_item_ids
         return [
             (defaultdict(list), defaultdict(Counter))
             for _ in target_timestamps
