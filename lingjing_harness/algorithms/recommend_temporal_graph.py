@@ -7,6 +7,9 @@ from lingjing_harness.domain import Catalog
 from .recommend import RecommendationEngine
 
 
+_MISSING = object()
+
+
 class SeedGraphSnapshot:
     """Independent temporal graph rows required by one relevance user's seeds."""
 
@@ -94,6 +97,15 @@ class TemporalGraphSnapshot(MutableMapping[str, Counter[str]]):
             return counts
         return self._materialize()[key]
 
+    def __contains__(self, key: object) -> bool:
+        if self._full is not None:
+            return key in self._full
+        if key in self._seed_rows:
+            return True
+        if key in self._known_absent:
+            return False
+        return key in self._materialize()
+
     def __setitem__(self, key: str, value: Counter[str]) -> None:
         self._materialize()[key] = value
 
@@ -105,6 +117,18 @@ class TemporalGraphSnapshot(MutableMapping[str, Counter[str]]):
 
     def __len__(self) -> int:
         return len(self._materialize())
+
+    def pop(self, key: str, default=_MISSING):
+        full = self._materialize()
+        if default is _MISSING:
+            return full.pop(key)
+        return full.pop(key, default)
+
+    def setdefault(self, key: str, default=None):
+        return self._materialize().setdefault(key, default)
+
+    def copy(self):
+        return self._materialize().copy()
 
 
 __all__ = ["SeedGraphSnapshot", "TemporalGraphSnapshot"]
