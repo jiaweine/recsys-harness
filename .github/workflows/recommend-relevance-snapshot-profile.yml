@@ -1,0 +1,31 @@
+name: Recommend Relevance Snapshot Profile
+
+on:
+  push:
+    branches:
+      - perf/recommend-relevance-snapshot-profile
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pip install -e . --no-deps
+      - name: Profile temporal relevance snapshot costs
+        run: |
+          python scripts/recommend_relevance_snapshot_profile.py \
+            --items 20000 \
+            --background-users 500 \
+            --evaluated-users 10 \
+            --history 20 \
+            --repeats 3
