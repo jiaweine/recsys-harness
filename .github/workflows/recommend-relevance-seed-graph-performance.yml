@@ -9,6 +9,7 @@ on:
       - "lingjing_harness/algorithms/recommend_validation.py"
       - "lingjing_harness/algorithms/recommend_temporal_graph.py"
       - "tests/test_recommend_relevance_seed_graph.py"
+      - "tests/test_recommend_temporal_graph_mapping.py"
       - "scripts/recommend_relevance_seed_graph_benchmark.py"
       - "scripts/recommend_relevance_temporal_state_benchmark.py"
       - ".github/workflows/recommend-relevance-seed-graph-performance.yml"
@@ -30,7 +31,11 @@ jobs:
       - run: pip install -r requirements.txt
       - run: pip install -e . --no-deps
       - name: Verify seed temporal graph snapshots
-        run: pytest -q tests/test_recommend_relevance_seed_graph.py tests/test_recommend_relevance_temporal_state.py
+        run: >-
+          pytest -q
+          tests/test_recommend_relevance_seed_graph.py
+          tests/test_recommend_temporal_graph_mapping.py
+          tests/test_recommend_relevance_temporal_state.py
       - name: Benchmark seed temporal graph snapshots
         run: |
           for pass in 1 2 3; do
