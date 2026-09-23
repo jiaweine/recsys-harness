@@ -8,11 +8,15 @@ from typing import Any, Iterable
 
 from lingjing_harness.domain import Catalog, Interaction
 from .recommend import RecommendConfig, RecommendationEngine
+from .recommend_temporal_graph import SeedGraphSnapshot, TemporalGraphSnapshot
 
 
 DEFAULT_RELEVANCE_K = 10
 MAX_RELEVANCE_USERS = 32
 DEFAULT_MIN_TARGET_WEIGHT = 1.0
+
+_GraphState = defaultdict[str, Counter[str]] | SeedGraphSnapshot
+_TemporalState = tuple[defaultdict[str, list[Interaction]], _GraphState]
 
 
 def _latest_novel_target(
@@ -187,11 +191,20 @@ def _decrement_graph_pair(
 def _owned_temporal_states(
     catalog: Catalog,
     target_timestamps: list[float],
-) -> list[tuple[defaultdict[str, list[Interaction]], defaultdict[str, Counter[str]]]]:
-    """Build exact owned recommendation states incrementally across cutoffs."""
+    *,
+    seed_item_ids: list[set[str]] | None = None,
+) -> list[_TemporalState]:
+    """Build exact owned recommendation states incrementally across cutoffs.
+
+    When seed sets are supplied, only graph rows reachable by the evaluated
+    user's profile are copied. Broader/private graph access can still recover the
+    exact full temporal graph lazily through ``TemporalGraphSnapshot``.
+    """
 
     if not target_timestamps:
         return []
+    if seed_item_ids is not None and len(seed_item_ids) != len(target_timestamps):
+        raise ValueError("seed item sets must align with temporal target timestamps")
 
     chronological = sorted(
         catalog.interactions,
@@ -204,9 +217,7 @@ def _owned_temporal_states(
     by_user: defaultdict[str, list[Interaction]] = defaultdict(list)
     co: defaultdict[str, Counter[str]] = defaultdict(Counter)
     recent_by_user: dict[str, OrderedDict[str, None]] = {}
-    states: list[
-        tuple[defaultdict[str, list[Interaction]], defaultdict[str, Counter[str]]] | None
-    ] = [None] * len(target_timestamps)
+    states: list[_TemporalState | None] = [None] * len(target_timestamps)
     cursor = 0
 
     for request_index, cutoff in requests:
@@ -234,19 +245,33 @@ def _owned_temporal_states(
                 co[other][event.item_id] += 1
             recent[event.item_id] = None
 
-        states[request_index] = (
-            defaultdict(
-                list,
-                {user_id: list(events) for user_id, events in by_user.items()},
-            ),
-            defaultdict(
+        if seed_item_ids is None:
+            graph_state: _GraphState = defaultdict(
                 Counter,
                 {
                     item_id: Counter(counts)
                     for item_id, counts in co.items()
                     if counts
                 },
+            )
+        else:
+            seeds = seed_item_ids[request_index]
+            rows = {
+                item_id: Counter(co[item_id])
+                for item_id in seeds
+                if item_id in co
+            }
+            graph_state = SeedGraphSnapshot(
+                rows,
+                set(seeds).difference(rows),
+            )
+
+        states[request_index] = (
+            defaultdict(
+                list,
+                {user_id: list(events) for user_id, events in by_user.items()},
             ),
+            graph_state,
         )
 
     return [state for state in states if state is not None]
@@ -255,10 +280,7 @@ def _owned_temporal_states(
 def _owned_temporal_recommendation_engine(
     engine: RecommendationEngine,
     training_catalog: Catalog,
-    state: tuple[
-        defaultdict[str, list[Interaction]],
-        defaultdict[str, Counter[str]],
-    ],
+    state: _TemporalState,
 ) -> RecommendationEngine:
     """Materialize one owned temporal engine from an exact precomputed state."""
 
@@ -270,7 +292,12 @@ def _owned_temporal_recommendation_engine(
     temporal._popularity = engine._popularity
     temporal._candidate_static_cache = {}
     temporal._profile_snapshot_cache = OrderedDict()
-    temporal._by_user, temporal._co = state
+    temporal._by_user = state[0]
+    temporal._co = (
+        TemporalGraphSnapshot(training_catalog, engine, state[1])
+        if isinstance(state[1], SeedGraphSnapshot)
+        else state[1]
+    )
     return temporal
 
 
@@ -433,18 +460,13 @@ def prepare_recommend_relevance(
             continue
         pending[user_id] = (target, user_history, seen)
 
-    temporal_states: dict[
-        str,
-        tuple[
-            defaultdict[str, list[Interaction]],
-            defaultdict[str, Counter[str]],
-        ],
-    ] = {}
+    temporal_states: dict[str, _TemporalState] = {}
     if type(engine) is RecommendationEngine and len(pending) >= 2:
         pending_users = list(pending)
         states = _owned_temporal_states(
             catalog,
             [pending[user_id][0].timestamp for user_id in pending_users],
+            seed_item_ids=[pending[user_id][2] for user_id in pending_users],
         )
         temporal_states = dict(zip(pending_users, states, strict=True))
 

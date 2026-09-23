@@ -6,11 +6,11 @@ import json
 import math
 import statistics
 import time
-from collections import Counter, defaultdict
 from typing import Callable
 
 import lingjing_harness.algorithms.recommend_validation as validation
 from lingjing_harness.algorithms import RecommendationEngine
+from lingjing_harness.algorithms.recommend_temporal_graph import TemporalGraphSnapshot
 from lingjing_harness.domain import Catalog, Interaction, Item
 
 
@@ -72,8 +72,8 @@ def _fixture(
     rows = [
         Item(
             item_id=f"item-{index:06d}",
-            title=f"History Item {index}",
-            text="recommend relevance temporal state benchmark",
+            title=f"Seed Graph Item {index}",
+            text="recommend relevance seed temporal graph benchmark",
             categories=[f"cat-{index % 31}", f"cluster-{index % 67}"],
             popularity=float((items - index) % 997),
             quality=((index * 13) % 1000) / 1000.0,
@@ -124,34 +124,18 @@ def run_benchmark(
         history=history,
     )
     optimized_builder = validation._owned_temporal_states
-    optimized_materializer = validation._owned_temporal_recommendation_engine
 
-    def legacy_builder(
+    def full_graph_builder(
         current: Catalog,
         target_timestamps: list[float],
         *,
         seed_item_ids=None,
     ):
-        del current, seed_item_ids
-        return [
-            (defaultdict(list), defaultdict(Counter))
-            for _ in target_timestamps
-        ]
-
-    def legacy_materializer(
-        current: RecommendationEngine,
-        training_catalog: Catalog,
-        state,
-    ) -> RecommendationEngine:
-        del state
-        return validation._temporal_recommendation_engine(
-            current,
-            training_catalog,
-        )
+        del seed_item_ids
+        return optimized_builder(current, target_timestamps)
 
     def legacy_prepare():
-        validation._owned_temporal_states = legacy_builder
-        validation._owned_temporal_recommendation_engine = legacy_materializer
+        validation._owned_temporal_states = full_graph_builder
         try:
             return validation.prepare_recommend_relevance(
                 catalog,
@@ -161,11 +145,9 @@ def run_benchmark(
             )
         finally:
             validation._owned_temporal_states = optimized_builder
-            validation._owned_temporal_recommendation_engine = optimized_materializer
 
     def optimized_prepare():
         validation._owned_temporal_states = optimized_builder
-        validation._owned_temporal_recommendation_engine = optimized_materializer
         return validation.prepare_recommend_relevance(
             catalog,
             engine,
@@ -175,8 +157,20 @@ def run_benchmark(
 
     legacy = legacy_prepare()
     optimized = optimized_prepare()
-    if optimized.evaluate(engine.config) != legacy.evaluate(engine.config):
-        raise AssertionError("incremental temporal state changed relevance evaluation")
+    optimized_report = optimized.evaluate(engine.config)
+    legacy_report = legacy.evaluate(engine.config)
+    if optimized_report != legacy_report:
+        raise AssertionError("seed graph snapshots changed relevance evaluation")
+
+    lazy_graphs = [
+        row.engine._co
+        for row in optimized.slices
+        if isinstance(row.engine._co, TemporalGraphSnapshot)
+    ]
+    if len(lazy_graphs) != len(optimized.slices):
+        raise AssertionError("owned multi-slice preparation did not use seed graph snapshots")
+    if any(graph.materialized for graph in lazy_graphs):
+        raise AssertionError("built-in relevance evaluation materialized a full temporal graph")
 
     legacy_prepare()
     optimized_prepare()
@@ -204,7 +198,7 @@ def run_benchmark(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Benchmark incremental temporal recommendation state."
+        description="Benchmark seed-only temporal relevance graph snapshots."
     )
     parser.add_argument("--items", type=int, default=20_000)
     parser.add_argument("--background-users", type=int, default=500)
@@ -235,7 +229,7 @@ def main() -> None:
         failures.append(f"speedup={speedup} < {args.min_speedup}")
     if failures:
         raise SystemExit(
-            "recommend relevance temporal state performance guardrail failed: "
+            "recommend relevance seed graph performance guardrail failed: "
             + "; ".join(failures)
         )
 
